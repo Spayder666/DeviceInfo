@@ -4,6 +4,7 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierMatcher
 import com.deviceinfo.trafficmonitor.root.RootShell
@@ -75,6 +76,8 @@ class LogcatMonitor(
     private suspend fun parseLine(line: String) {
         if (line.isBlank()) return
 
+        if (parseLibcPropertyLine(line)) return
+
         IdentifierMatcher.matchLogcat(line)?.let { def ->
             recordIdentifier(def, line)
             return
@@ -86,6 +89,64 @@ class LogcatMonitor(
                 return
             }
         }
+    }
+
+    private suspend fun parseLibcPropertyLine(line: String): Boolean {
+        val denied = Regex("Access denied finding property \"([^\"]+)\"").find(line)
+        if (denied != null) {
+            val property = denied.groupValues[1]
+            val def = IdentifierMatcher.matchLogcat(line)
+                ?: IdentifierCatalog.all.firstOrNull { it.systemProperty == property }
+            recordPropertyAccess(
+                property = property,
+                def = def,
+                response = "ОТКЛОНЕНО (Access denied) — приложение не получило значение",
+                line = line
+            )
+            return true
+        }
+
+        val found = Regex("(?:read|access|found) property \"([^\"]+)\"(?:[=:]\\s*\"?([^\"\\n]+)\"?)?", RegexOption.IGNORE_CASE)
+            .find(line)
+        if (found != null) {
+            val property = found.groupValues[1]
+            val value = found.groupValues.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() }
+            val def = IdentifierCatalog.all.firstOrNull { it.systemProperty == property }
+            recordPropertyAccess(
+                property = property,
+                def = def,
+                response = value ?: "(значение не показано в logcat)",
+                line = line
+            )
+            return true
+        }
+        return false
+    }
+
+    private suspend fun recordPropertyAccess(
+        property: String,
+        def: IdentifierDefinition?,
+        response: String,
+        line: String
+    ) {
+        val action = def?.displayName ?: "System property: $property"
+        if (repository.isDuplicate(packageName, action, line, sinceMs = 1000)) return
+
+        repository.insert(
+            CaptureEvent(
+                targetPackage = packageName,
+                category = AccessCategory.IDENTIFIER,
+                source = EventSource.LOGCAT,
+                action = action,
+                permission = def?.permission,
+                requestDetails = "Property: $property",
+                responseDetails = response,
+                rawData = line.trim(),
+                processId = pid,
+                identifierName = def?.id ?: "getprop.shell",
+                identifierGroup = def?.group?.name ?: "SYSTEM_PROPERTY"
+            )
+        )
     }
 
     private suspend fun recordIdentifier(def: IdentifierDefinition, line: String) {

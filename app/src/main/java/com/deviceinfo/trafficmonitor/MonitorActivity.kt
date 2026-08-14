@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Launch
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,9 +58,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
+import com.deviceinfo.trafficmonitor.probe.ProbeResult
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
 import com.deviceinfo.trafficmonitor.data.AccessCategory
+import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.ui.categoryColor
 import com.deviceinfo.trafficmonitor.ui.categoryLabel
@@ -126,6 +130,8 @@ fun MonitorScreen(
     val selectedIdentifierGroup by viewModel.selectedIdentifierGroup.collectAsState()
     val selectedEvent by viewModel.selectedEvent.collectAsState()
     val eventCount by viewModel.eventCount.collectAsState()
+    val probeResult by viewModel.probeResult.collectAsState()
+    val isProbing by viewModel.isProbing.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Scaffold(
@@ -211,10 +217,18 @@ fun MonitorScreen(
 
     if (selectedEvent != null) {
         ModalBottomSheet(
-            onDismissRequest = { viewModel.selectEvent(null) },
+            onDismissRequest = {
+                viewModel.selectEvent(null)
+                viewModel.clearProbeResult()
+            },
             sheetState = sheetState
         ) {
-            EventDetailSheet(event = selectedEvent!!)
+            EventDetailSheet(
+                event = selectedEvent!!,
+                probeResult = probeResult,
+                isProbing = isProbing,
+                onProbe = { viewModel.probeEvent(selectedEvent!!) }
+            )
         }
     }
 }
@@ -341,7 +355,12 @@ fun EventCard(event: CaptureEvent, onClick: () -> Unit) {
 }
 
 @Composable
-fun EventDetailSheet(event: CaptureEvent) {
+fun EventDetailSheet(
+    event: CaptureEvent,
+    probeResult: ProbeResult?,
+    isProbing: Boolean,
+    onProbe: () -> Unit
+) {
     val timeFormat = SimpleDateFormat("dd.MM.yyyy HH:mm:ss.SSS", Locale.getDefault())
 
     Column(
@@ -378,9 +397,43 @@ fun EventDetailSheet(event: CaptureEvent) {
 
         event.responseDetails?.let {
             Spacer(Modifier.height(8.dp))
-            Text("Ответ / результат", fontWeight = FontWeight.Bold)
+            Text("Ответ / результат (перехваченный)", fontWeight = FontWeight.Bold)
             Text(it, modifier = Modifier.padding(vertical = 4.dp))
         }
+
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onProbe,
+            enabled = !isProbing,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isProbing) {
+                CircularProgressIndicator(modifier = Modifier.height(18.dp).width(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("Проверить ответ сейчас")
+        }
+
+        probeResult?.let { probe ->
+            Spacer(Modifier.height(12.dp))
+            Text("Результат проверки", fontWeight = FontWeight.Bold)
+            DetailRow("Запрос", probe.requestLabel)
+            DetailRow("От root", probe.valueAsRoot)
+            probe.valueInTargetContext?.let { DetailRow("В контексте приложения", it) }
+            Text(
+                text = probe.note,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        Text(
+            text = "Frida перехватывает точный ответ в момент вызова (источник: Frida). Logcat показывает только факт обращения к property.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(top = 8.dp)
+        )
 
         event.rawData?.let {
             Spacer(Modifier.height(12.dp))

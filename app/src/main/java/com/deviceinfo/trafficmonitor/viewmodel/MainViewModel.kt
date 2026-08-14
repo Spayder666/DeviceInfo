@@ -7,6 +7,7 @@ import com.deviceinfo.trafficmonitor.TrafficMonitorApp
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.model.InstalledApp
+import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
 import com.deviceinfo.trafficmonitor.util.AppListLoader
 import kotlinx.coroutines.Dispatchers
@@ -137,5 +138,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch(Dispatchers.IO) {
             RootShell.launchApp(_packageName.value)
         }
+    }
+
+    private val _probeResult = MutableStateFlow<com.deviceinfo.trafficmonitor.probe.ProbeResult?>(null)
+    val probeResult = _probeResult.asStateFlow()
+
+    private val _isProbing = MutableStateFlow(false)
+    val isProbing = _isProbing.asStateFlow()
+
+    fun probeEvent(event: CaptureEvent) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isProbing.value = true
+            _probeResult.value = IdentifierProbe.probe(event)
+            _isProbing.value = false
+        }
+    }
+
+    fun clearProbeResult() {
+        _probeResult.value = null
     }
 }

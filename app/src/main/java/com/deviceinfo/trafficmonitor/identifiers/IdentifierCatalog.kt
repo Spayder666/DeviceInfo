@@ -124,7 +124,8 @@ object IdentifierCatalog {
         id("prop.net.hostname", "Hostname", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "net.hostname"),
         id("prop.boot.qemu", "QEMU/emulator", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.boot.qemu"),
         id("prop.gms.version", "GMS version", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.com.google.gmsversion"),
-        id("getprop.shell", "getprop (shell)", IdentifierGroup.SYSTEM_PROPERTY, api = "Runtime.exec(getprop)", logcat = listOf("getprop", "execve.*getprop", "__system_property_get"))
+        id("prop.bootimage.fingerprint", "Bootimage fingerprint", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.bootimage.build.fingerprint", logcat = listOf("ro\\.bootimage\\.build\\.fingerprint"), strace = listOf("bootimage\\.build\\.fingerprint")),
+        id("getprop.shell", "getprop (shell)", IdentifierGroup.SYSTEM_PROPERTY, api = "Runtime.exec(getprop)", logcat = listOf("getprop", "execve.*getprop", "__system_property_get", "Access denied finding property"))
     )
 
     private fun settingsIdentifiers() = listOf(

@@ -152,6 +152,7 @@ function mapPropertyToId(key) {
     'ro.product.name': 'build.product',
     'ro.hardware': 'build.hardware',
     'ro.build.fingerprint': 'build.fingerprint',
+    'ro.bootimage.build.fingerprint': 'prop.bootimage.fingerprint',
     'ro.serialno': 'build.serial',
     'ro.boot.serialno': 'prop.boot.serialno',
     'ro.build.version.release': 'version.release',
@@ -368,6 +369,48 @@ function hookLocation() {
     });
   } catch (e) {}
 }
+
+function hookNativeProperties() {
+  var symbols = ['__system_property_get', '__system_property_read', 'property_get'];
+  symbols.forEach(function (sym) {
+    try {
+      var addr = Module.findExportByName('libc.so', sym);
+      if (!addr) return;
+      Interceptor.attach(addr, {
+        onEnter: function (args) {
+          try {
+            this.key = Memory.readUtf8String(args[0]);
+            this.valueBuf = args[1];
+          } catch (e) {
+            this.key = '';
+          }
+        },
+        onLeave: function (retval) {
+          if (!this.key) return;
+          var response;
+          if (sym === '__system_property_get') {
+            var len = retval.toInt32();
+            if (len > 0 && this.valueBuf) {
+              response = Memory.readUtf8String(this.valueBuf);
+            } else if (len === 0) {
+              response = '(пусто — не найдено или access denied)';
+            } else {
+              response = '(ошибка, код=' + len + ')';
+            }
+          } else {
+            response = 'native ' + sym + ' → ' + retval;
+          }
+          var id = mapPropertyToId(this.key);
+          writeEvent(id, sym, this.key, response, null);
+        }
+      });
+    } catch (e) {}
+  });
+}
+
+setImmediate(function () {
+  hookNativeProperties();
+});
 
 Java.perform(function () {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
