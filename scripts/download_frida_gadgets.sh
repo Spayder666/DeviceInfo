@@ -22,4 +22,18 @@ download_one() {
 # arm64 покрывает большинство устройств Android 13+; остальные ABI — через downloadGadget()
 download_one arm64 arm64-v8a
 
-echo "Frida gadget (arm64) ready"
+download_inject() {
+  local dest="$ASSETS/arm64-v8a/frida-inject"
+  if [[ -f "$dest" && -s "$dest" ]]; then
+    echo "skip frida-inject (exists)"
+    return 0
+  fi
+  echo "download frida-inject arm64"
+  curl -sL "https://github.com/frida/frida/releases/download/${VERSION}/frida-inject-${VERSION}-android-arm64.xz" \
+    | xz -dc > "$dest"
+  chmod +x "$dest"
+}
+
+download_inject
+
+echo "Frida gadget + inject (arm64) ready"

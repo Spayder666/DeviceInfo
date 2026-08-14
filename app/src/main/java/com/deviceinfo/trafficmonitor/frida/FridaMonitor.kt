@@ -29,12 +29,12 @@ class FridaMonitor(
         }
     }
 
-    /** Ручная инъекция: attach к запущенному процессу или wrap+перезапуск. */
-    fun requestInject(useWrap: Boolean) {
+    /** Ручная инъекция: attach к PID или перезапуск + inject. */
+    fun requestInject(restartApp: Boolean) {
         scope.launch(Dispatchers.IO) {
             if (!FridaInstaller.ensureReady(context)) return@launch
             FridaInstaller.prepareHooksForPackage(packageName, context)
-            FridaInstaller.injectManual(context, packageName, useWrap)
+            FridaInstaller.injectManual(context, packageName, restartApp)
         }
     }
 

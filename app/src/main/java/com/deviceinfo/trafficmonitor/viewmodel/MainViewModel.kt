@@ -201,10 +201,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             _isFridaInjecting.value = true
             FridaInstaller.ensureReady(getApplication())
             FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
-            val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, useWrap = false)
+            val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = false)
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
-                "Frida подключена (attach)"
+                "Frida подключена (без перезапуска)"
             } else {
                 FridaInstaller.lastError ?: "Attach не удался"
             }
@@ -217,10 +217,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             _isFridaInjecting.value = true
             FridaInstaller.ensureReady(getApplication())
             FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
-            val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, useWrap = true)
+            val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = true)
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
-                "Frida активна — приложение перезапущено"
+                "Приложение запущено, Frida подключена"
             } else {
                 FridaInstaller.lastError ?: "Инъекция не удалась"
             }

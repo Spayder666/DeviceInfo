@@ -7,6 +7,7 @@
 **/build/
 /release/
 /app/src/main/assets/frida/*/libfrida-gadget.so
+/app/src/main/assets/frida/*/frida-inject
 /captures/
 .externalNativeBuild/
 .cxx/

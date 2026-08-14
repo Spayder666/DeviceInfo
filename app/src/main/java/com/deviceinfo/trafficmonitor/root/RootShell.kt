@@ -51,12 +51,31 @@ object RootShell {
 
     fun launchApp(packageName: String): Boolean {
         return try {
+            val component = execAndRead(
+                "cmd package resolve-activity --brief $packageName 2>/dev/null | tail -n 1"
+            ).trim()
+            if (component.contains("/")) {
+                execAndRead("am start -n $component", timeoutSec = 8)
+                return true
+            }
             val process = exec("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
             process.waitFor(5, TimeUnit.SECONDS)
             true
         } catch (_: Exception) {
             false
         }
+    }
+
+    /** Запускает команду в фоне (не убивается при выходе su). */
+    fun execDetached(command: String) {
+        execAndRead(
+            "setsid sh -c ${shellQuote(command)} </dev/null >/dev/null 2>&1 &",
+            timeoutSec = 5
+        )
+    }
+
+    fun shellQuote(value: String): String {
+        return "'" + value.replace("'", "'\\''") + "'"
     }
 
     fun resolveStracePath(): String? {

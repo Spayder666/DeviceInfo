@@ -270,7 +270,7 @@ fun MonitorScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Для точных ответов API нажмите «Frida attach» после запуска приложения",
+                            "Для точных ответов API нажмите «Запустить + Frida»",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -565,14 +565,14 @@ fun FridaControlRow(
                 CircularProgressIndicator(modifier = Modifier.height(14.dp).width(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(6.dp))
             }
-            Text("Frida attach", fontSize = 12.sp)
+            Text("Frida к запущенному", fontSize = 12.sp)
         }
         Button(
             onClick = onWrap,
             enabled = !isInjecting,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
         ) {
-            Text("Перезапуск с Frida", fontSize = 12.sp)
+            Text("Запустить + Frida", fontSize = 12.sp)
         }
         Text(
             text = fridaStatusLabel(status),

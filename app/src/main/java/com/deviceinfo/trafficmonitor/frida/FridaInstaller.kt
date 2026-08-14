@@ -19,6 +19,8 @@ object FridaInstaller {
     const val HOOKS_PATH = "$BASE_DIR/identifier_hooks.js"
     const val EVENTS_PATH = "$BASE_DIR/events.jsonl"
     const val SERVER_PATH = "$BASE_DIR/frida-server"
+    const val INJECT_PATH = "$BASE_DIR/frida-inject"
+    const val INJECT_LOG = "$BASE_DIR/inject.log"
 
     @Volatile
     var status: FridaStatus = FridaStatus.NOT_INSTALLED
@@ -174,107 +176,155 @@ object FridaInstaller {
         }
     }
 
-    /** Attach к уже запущенному процессу (без перезапуска). */
-    suspend fun injectViaAttach(context: Context, pid: Int): Boolean = withContext(Dispatchers.IO) {
-        if (injectViaGdbDlopen(pid)) {
+    /**
+     * Инъекция через frida-inject (ptrace), без LD_PRELOAD/wrap.
+     * wrap+gadget на Android 13+ ломает запуск из‑за linker namespace.
+     */
+    suspend fun injectManual(context: Context, packageName: String, restartApp: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!ensureReady(context)) return@withContext false
+            if (!ensureFridaInject(context)) return@withContext false
+
+            prepareHooksForPackage(packageName, context)
+            preparePtrace()
+            stopInjector()
+
+            val pid = if (restartApp) {
+                RootShell.execAndRead("am force-stop $packageName")
+                delay(400)
+                if (!RootShell.launchApp(packageName)) {
+                    lastError = "Не удалось запустить приложение"
+                    return@withContext false
+                }
+                waitForPid(packageName) ?: run {
+                    lastError = "Приложение не запустилось (PID не найден)"
+                    return@withContext false
+                }
+            } else {
+                RootShell.findPid(packageName) ?: run {
+                    lastError = "Приложение не запущено — сначала запустите его"
+                    return@withContext false
+                }
+            }
+
+            if (!startInjector(pid)) {
+                return@withContext false
+            }
+
             status = FridaStatus.INJECTED
             lastError = null
-            return@withContext true
+            true
         }
 
-        if (!ensureFridaServerRunning(context)) {
-            lastError = lastError ?: "frida-server не запустился"
-            return@withContext false
+    private suspend fun waitForPid(packageName: String, attempts: Int = 20): Int? {
+        repeat(attempts) {
+            RootShell.findPid(packageName)?.let { return it }
+            delay(250)
         }
-
-        val result = RootShell.execAndRead(
-            """
-            if command -v frida >/dev/null 2>&1; then
-              frida -H 127.0.0.1 -p $pid -l $HOOKS_PATH --runtime=v8 -q 2>&1 && echo FRIDA_OK
-            else
-              echo FRIDA_CLI_MISSING
-            fi
-            """.trimIndent(),
-            timeoutSec = 25
-        )
-
-        when {
-            result.contains("FRIDA_OK") -> {
-                status = FridaStatus.INJECTED
-                lastError = null
-                true
-            }
-            result.contains("FRIDA_CLI_MISSING") -> {
-                lastError = "Attach не удался. Попробуйте «Перезапуск с Frida» или установите frida-tools в Termux."
-                false
-            }
-            else -> {
-                lastError = "Attach: ${result.take(200)}"
-                false
-            }
-        }
+        return null
     }
 
-    /** Загрузка gadget.so в работающий процесс через gdb+dlopen (root). */
-    private fun injectViaGdbDlopen(pid: Int): Boolean {
-        val gdbCandidates = listOf(
-            "/system/bin/gdbserver",
-            "/system/xbin/gdb",
-            "/system/bin/gdb",
-            "/data/local/tmp/gdb"
-        )
-        for (gdb in gdbCandidates) {
-            if (gdb.contains("gdbserver")) continue
-            val check = RootShell.execAndRead("test -x $gdb && echo ok").trim()
-            if (check != "ok") continue
+    private fun preparePtrace() {
+        RootShell.execAndRead("setenforce 0 2>/dev/null")
+        RootShell.execAndRead("echo 0 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null")
+        RootShell.execAndRead("chmod 777 $BASE_DIR && chmod 666 $EVENTS_PATH $HOOKS_PATH 2>/dev/null")
+    }
 
-            val result = RootShell.execAndRead(
-                """
-                $gdb -batch -p $pid \
-                  -ex 'set pagination off' \
-                  -ex 'call (void*)dlopen("$GADGET_PATH", 2)' \
-                  -ex detach -ex quit 2>&1
-                """.trimIndent(),
-                timeoutSec = 15
-            )
-            if (!result.contains("No such file") && !result.contains("can't attach")) {
+    private fun startInjector(pid: Int): Boolean {
+        RootShell.execAndRead("echo -n > $INJECT_LOG")
+        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH -e --runtime=qjs"
+        RootShell.execDetached("$cmd > $INJECT_LOG 2>&1")
+
+        var lastLog = ""
+        repeat(12) {
+            Thread.sleep(400)
+            lastLog = RootShell.execAndRead("cat $INJECT_LOG 2>/dev/null").trim()
+            val running = RootShell.execAndRead(
+                "pgrep -f '$INJECT_PATH' 2>/dev/null"
+            ).trim().isNotEmpty()
+            if (running && !looksLikeInjectFailure(lastLog)) {
                 return true
             }
+            if (looksLikeInjectFailure(lastLog)) {
+                lastError = "frida-inject: ${lastLog.take(220)}"
+                return false
+            }
+        }
+
+        lastError = if (lastLog.isNotBlank()) {
+            "frida-inject: ${lastLog.take(220)}"
+        } else {
+            "frida-inject не запустился (проверьте root / SELinux)"
         }
         return false
     }
 
-    /** Wrap+LD_PRELOAD — только по запросу пользователя; перезапускает приложение. */
-    suspend fun injectViaWrap(packageName: String): Boolean = withContext(Dispatchers.IO) {
-        clearInjection(packageName)
-        val result = RootShell.execAndRead(
-            "setprop wrap.$packageName LD_PRELOAD=$GADGET_PATH && echo ok"
-        )
-        if (!result.contains("ok")) {
-            lastError = "setprop wrap failed"
-            return@withContext false
-        }
-        status = FridaStatus.INJECTED
-        RootShell.execAndRead("am force-stop $packageName")
-        delay(400)
-        RootShell.exec("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
-        lastError = null
-        true
+    private fun looksLikeInjectFailure(log: String): Boolean {
+        if (log.isBlank()) return false
+        val lower = log.lowercase()
+        return listOf("unable to", "failed", "error:", "permission denied", "not found", "cannot")
+            .any { it in lower }
     }
 
-    /** Ручная инъекция: attach к PID или wrap+перезапуск. */
-    suspend fun injectManual(context: Context, packageName: String, useWrap: Boolean): Boolean =
-        withContext(Dispatchers.IO) {
-            if (!useWrap) {
-                val pid = RootShell.findPid(packageName)
-                if (pid == null) {
-                    lastError = "Приложение не запущено — сначала запустите его"
-                    return@withContext false
-                }
-                return@withContext injectViaAttach(context, pid)
-            }
-            injectViaWrap(packageName)
+    private fun stopInjector() {
+        RootShell.execAndRead("pkill -f '$INJECT_PATH' 2>/dev/null")
+    }
+
+    private suspend fun ensureFridaInject(context: Context): Boolean = withContext(Dispatchers.IO) {
+        if (RootShell.execAndRead("test -x $INJECT_PATH && echo ok").trim() == "ok") {
+            return@withContext true
         }
+        status = FridaStatus.EXTRACTING
+        if (deployInjectFromApp(context)) return@withContext true
+        status = FridaStatus.DOWNLOADING
+        if (downloadFridaInject(context)) return@withContext true
+        status = FridaStatus.ERROR
+        lastError = lastError ?: "frida-inject недоступен"
+        false
+    }
+
+    private fun deployInjectFromApp(context: Context): Boolean {
+        val abiFolder = resolveAssetAbiFolder()
+        val assetPath = "frida/$abiFolder/frida-inject"
+        val cacheFile = File(context.filesDir, "frida-inject-$abiFolder")
+        return try {
+            if (!cacheFile.exists() || cacheFile.length() == 0L) {
+                context.assets.open(assetPath).use { input ->
+                    cacheFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+            RootShell.execAndRead(
+                "cp ${cacheFile.absolutePath} $INJECT_PATH && chmod 755 $INJECT_PATH && echo ok"
+            ).trim() == "ok"
+        } catch (e: Exception) {
+            lastError = "Встроенный frida-inject: ${e.message}"
+            false
+        }
+    }
+
+    private fun downloadFridaInject(context: Context): Boolean {
+        val abi = resolveDownloadAbi()
+        val url = "https://github.com/frida/frida/releases/download/$FRIDA_VERSION/" +
+            "frida-inject-$FRIDA_VERSION-android-$abi.xz"
+        val cacheXz = File(context.cacheDir, "frida-inject-$abi.xz")
+        val cacheBin = File(context.cacheDir, "frida-inject-$abi")
+        return try {
+            downloadFile(url, cacheXz)
+            RootShell.execAndRead(
+                "which xz >/dev/null 2>&1 && xz -d -f ${cacheXz.absolutePath} || unxz -f ${cacheXz.absolutePath}"
+            )
+            if (!cacheBin.exists()) {
+                lastError = "Не удалось распаковать frida-inject"
+                return false
+            }
+            RootShell.execAndRead(
+                "cp ${cacheBin.absolutePath} $INJECT_PATH && chmod 755 $INJECT_PATH && echo ok"
+            ).trim() == "ok"
+        } catch (e: Exception) {
+            lastError = "frida-inject: ${e.message}"
+            false
+        }
+    }
 
     private suspend fun ensureFridaServerRunning(context: Context): Boolean = withContext(Dispatchers.IO) {
         if (!deployFridaServerIfNeeded(context)) return@withContext false
@@ -320,6 +370,7 @@ object FridaInstaller {
 
     fun clearInjection(packageName: String) {
         RootShell.execAndRead("setprop wrap.$packageName ''")
+        stopInjector()
         if (status == FridaStatus.INJECTED) {
             status = FridaStatus.READY
         }

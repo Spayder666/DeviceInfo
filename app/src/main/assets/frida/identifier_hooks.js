@@ -3,28 +3,55 @@
 var EVENT_FILE = '/data/local/tmp/access_monitor/events.jsonl';
 var TARGET_PKG = '__TARGET_PACKAGE__';
 
-function writeEvent(identifierId, action, request, response, permission) {
-  try {
-    var JSONObject = Java.use('org.json.JSONObject');
-    var obj = JSONObject.$new();
-    obj.put('identifierId', identifierId);
-    obj.put('action', action);
-    if (request) obj.put('request', String(request));
-    if (response) obj.put('response', String(response));
-    if (permission) obj.put('permission', permission);
-    obj.put('timestamp', Java.use('java.lang.System').currentTimeMillis());
-    obj.put('source', 'frida');
+var nativeIo = null;
 
-    var File = Java.use('java.io.File');
-    var FileWriter = Java.use('java.io.FileWriter');
-    var dir = File.$new('/data/local/tmp/access_monitor');
-    if (!dir.exists()) dir.mkdirs();
-    var fw = FileWriter.$new(EVENT_FILE, true);
-    fw.write(obj.toString() + '\n');
-    fw.close();
+function initNativeIo() {
+  if (nativeIo) return nativeIo;
+  try {
+    nativeIo = {
+      fopen: new NativeFunction(Module.findExportByName('libc.so', 'fopen'), 'pointer', ['pointer', 'pointer']),
+      fwrite: new NativeFunction(Module.findExportByName('libc.so', 'fwrite'), 'int', ['pointer', 'int', 'int', 'pointer']),
+      fclose: new NativeFunction(Module.findExportByName('libc.so', 'fclose'), 'int', ['pointer'])
+    };
   } catch (e) {
-    send({ error: String(e) });
+    nativeIo = null;
   }
+  return nativeIo;
+}
+
+function jsonEscape(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+}
+
+function writeLine(line) {
+  var io = initNativeIo();
+  if (!io) return;
+  try {
+    var path = Memory.allocUtf8String(EVENT_FILE);
+    var mode = Memory.allocUtf8String('a');
+    var fp = io.fopen(path, mode);
+    if (fp.isNull()) return;
+    var payload = line + '\n';
+    var buf = Memory.allocUtf8String(payload);
+    io.fwrite(buf, 1, payload.length, fp);
+    io.fclose(fp);
+  } catch (e) {}
+}
+
+function writeEvent(identifierId, action, request, response, permission) {
+  var ts = Date.now();
+  var line = '{"identifierId":"' + jsonEscape(identifierId || '') +
+    '","action":"' + jsonEscape(action || '') +
+    '","request":"' + jsonEscape(request || '') +
+    '","response":"' + jsonEscape(response || '') +
+    '","permission":"' + jsonEscape(permission || '') +
+    '","timestamp":' + ts +
+    ',"source":"frida"}';
+  writeLine(line);
 }
 
 function safeStr(v) {
@@ -35,7 +62,6 @@ function safeStr(v) {
 function hookTelephonyManager() {
   var TM = Java.use('android.telephony.TelephonyManager');
   var hooks = [
-    ['getImei', 'tel.imei', 'READ_PRIVILEGED_PHONE_STATE'],
     ['getImei', 'tel.imei', 'READ_PRIVILEGED_PHONE_STATE'],
     ['getMeid', 'tel.meid', 'READ_PRIVILEGED_PHONE_STATE'],
     ['getDeviceId', 'tel.device_id', 'READ_PRIVILEGED_PHONE_STATE'],
@@ -131,9 +157,8 @@ function hookSystemProperties() {
           overload.implementation = function () {
             var key = arguments[0] ? safeStr(arguments[0]) : '';
             var result = overload.apply(this, arguments);
-            if (key.indexOf('ro.') === 0 || key.indexOf('gsm.') === 0 || key.indexOf('persist.') === 0) {
-              var id = mapPropertyToId(key);
-              writeEvent(id, 'SystemProperties.' + m, key, safeStr(result), null);
+            if (isInterestingProperty(key)) {
+              writeEvent(mapPropertyToId(key), 'SystemProperties.' + m, key, safeStr(result), null);
             }
             return result;
           };
@@ -141,6 +166,19 @@ function hookSystemProperties() {
       } catch (e) {}
     });
   } catch (e) {}
+}
+
+function isInterestingProperty(key) {
+  if (!key) return false;
+  return key.indexOf('ro.serial') === 0 ||
+    key.indexOf('ro.boot.serial') === 0 ||
+    key.indexOf('persist.radio') === 0 ||
+    key.indexOf('gsm.') === 0 ||
+    key === 'ro.product.model' ||
+    key === 'ro.product.manufacturer' ||
+    key === 'ro.build.fingerprint' ||
+    key === 'ro.bootimage.build.fingerprint' ||
+    key === 'ro.build.version.security_patch';
 }
 
 function mapPropertyToId(key) {
@@ -173,7 +211,6 @@ function hookBuild() {
       return result;
     };
   } catch (e) {}
-  // Не дампим все Build.* при старте — это блокирует UI целевого приложения.
 }
 
 function hookWifiAndBluetooth() {
@@ -314,7 +351,9 @@ function hookContentResolver() {
         var uri = arguments[0] ? safeStr(arguments[0].toString()) : '';
         var result = overload.apply(this, arguments);
         if (uri.indexOf('settings') >= 0 || uri.indexOf('telephony') >= 0 || uri.indexOf('gsf') >= 0) {
-          writeEvent('cp.settings_secure', 'ContentResolver.query', uri, 'rows=' + (result ? result.getCount() : 0), null);
+          var rows = 0;
+          try { rows = result ? result.getCount() : 0; } catch (e) {}
+          writeEvent('cp.settings_secure', 'ContentResolver.query', uri, 'rows=' + rows, null);
         }
         return result;
       };
@@ -340,62 +379,58 @@ function hookLocation() {
 }
 
 function hookNativeProperties() {
-  var symbols = ['__system_property_get', '__system_property_read', 'property_get'];
-  symbols.forEach(function (sym) {
-    try {
-      var addr = Module.findExportByName('libc.so', sym);
-      if (!addr) return;
-      Interceptor.attach(addr, {
-        onEnter: function (args) {
-          try {
-            this.key = Memory.readUtf8String(args[0]);
-            this.valueBuf = args[1];
-          } catch (e) {
-            this.key = '';
-          }
-        },
-        onLeave: function (retval) {
-          if (!this.key) return;
-          var response;
-          if (sym === '__system_property_get') {
-            var len = retval.toInt32();
-            if (len > 0 && this.valueBuf) {
-              response = Memory.readUtf8String(this.valueBuf);
-            } else if (len === 0) {
-              response = '(пусто — не найдено или access denied)';
-            } else {
-              response = '(ошибка, код=' + len + ')';
-            }
-          } else {
-            response = 'native ' + sym + ' → ' + retval;
-          }
-          var id = mapPropertyToId(this.key);
-          writeEvent(id, sym, this.key, response, null);
+  var addr = Module.findExportByName('libc.so', '__system_property_get');
+  if (!addr) return;
+  try {
+    Interceptor.attach(addr, {
+      onEnter: function (args) {
+        try {
+          this.key = Memory.readUtf8String(args[0]);
+          this.valueBuf = args[1];
+        } catch (e) {
+          this.key = '';
         }
-      });
-    } catch (e) {}
-  });
+      },
+      onLeave: function (retval) {
+        if (!isInterestingProperty(this.key)) return;
+        var response;
+        var len = retval.toInt32();
+        if (len > 0 && this.valueBuf) {
+          response = Memory.readUtf8String(this.valueBuf);
+        } else if (len === 0) {
+          response = '(пусто — не найдено или access denied)';
+        } else {
+          response = '(ошибка, код=' + len + ')';
+        }
+        writeEvent(mapPropertyToId(this.key), '__system_property_get', this.key, response, null);
+      }
+    });
+  } catch (e) {}
 }
 
-setImmediate(function () {
-  hookNativeProperties();
-});
+function installJavaHooks() {
+  writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
+  hookBuild();
+  hookSystemProperties();
+  hookSettings();
+  hookTelephonyManager();
+  hookSubscriptionManager();
+  hookWifiAndBluetooth();
+  hookMediaDrm();
+  hookAdvertisingId();
+  hookAccounts();
+  hookNetworkInterface();
+  hookPackageManager();
+  hookContentResolver();
+  hookLocation();
+}
 
-setImmediate(function () {
-  Java.perform(function () {
-    writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
-    hookBuild();
-    hookSystemProperties();
-    hookSettings();
-    hookTelephonyManager();
-    hookSubscriptionManager();
-    hookWifiAndBluetooth();
-    hookMediaDrm();
-    hookAdvertisingId();
-    hookAccounts();
-    hookNetworkInterface();
-    hookPackageManager();
-    hookContentResolver();
-    hookLocation();
-  });
-});
+// Хуки ставим после старта приложения, чтобы не блокировать запуск.
+setTimeout(function () {
+  if (Java.available) {
+    Java.perform(function () {
+      try { installJavaHooks(); } catch (e) {}
+    });
+  }
+  try { hookNativeProperties(); } catch (e) {}
+}, 1500);
