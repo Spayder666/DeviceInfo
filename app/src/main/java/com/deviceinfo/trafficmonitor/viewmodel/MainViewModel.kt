@@ -216,13 +216,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
         viewModelScope.launch(Dispatchers.IO) {
             var seenRunning = false
+            var downStreak = 0
             while (isActive) {
                 val running = RootShell.isAppRunning(_packageName.value)
-                if (seenRunning && !running && _targetRunning.value) {
-                    _targetDied.value = true
+                if (running) {
+                    seenRunning = true
+                    downStreak = 0
+                    _targetRunning.value = true
+                } else {
+                    downStreak++
+                    if (downStreak >= 2) {
+                        if (seenRunning && _targetRunning.value && !_targetDied.value) {
+                            _targetDied.value = true
+                        }
+                        _targetRunning.value = false
+                        seenRunning = false
+                    }
                 }
-                if (running) seenRunning = true
-                _targetRunning.value = running
                 delay(3000)
             }
         }

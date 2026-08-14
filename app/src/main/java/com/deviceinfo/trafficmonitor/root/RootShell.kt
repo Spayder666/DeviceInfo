@@ -47,13 +47,20 @@ object RootShell {
             .mapNotNull { it.toIntOrNull() }
             .forEach { pids.add(it) }
 
+        // Only PID + process name. A full `ps` line can include our own su/sh
+        // commands that mention the package and must not count as the app.
         val ps = execAndRead("ps -A -o PID,NAME 2>/dev/null")
         for (line in ps.lines()) {
-            val trimmed = line.trim()
-            if (!trimmed.contains(packageName)) continue
-            trimmed.split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()?.let { pids.add(it) }
+            val parts = line.trim().split("\\s+".toRegex())
+            if (parts.size != 2) continue
+            val pid = parts[0].toIntOrNull() ?: continue
+            if (isAppProcessName(parts[1], packageName)) pids.add(pid)
         }
         return pids.toList()
+    }
+
+    fun isAppProcessName(name: String, packageName: String): Boolean {
+        return name == packageName || name.startsWith("$packageName:")
     }
 
     fun getUid(packageName: String): Int? {
