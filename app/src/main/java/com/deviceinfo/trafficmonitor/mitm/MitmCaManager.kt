@@ -1,6 +1,7 @@
 package com.deviceinfo.trafficmonitor.mitm
 
 import android.content.Context
+import android.util.Log
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.root.RootShell
 import org.bouncycastle.asn1.x500.X500Name
@@ -9,10 +10,11 @@ import org.bouncycastle.asn1.x509.Extension
 import org.bouncycastle.asn1.x509.GeneralName
 import org.bouncycastle.asn1.x509.GeneralNames
 import org.bouncycastle.asn1.x509.KeyUsage
+import org.bouncycastle.cert.X509CertificateHolder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.math.BigInteger
 import java.security.KeyPair
@@ -20,7 +22,7 @@ import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.PrivateKey
-import java.security.Security
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
@@ -29,6 +31,7 @@ import javax.net.ssl.SSLContext
 
 object MitmCaManager {
     const val PORT = 18888
+    private const val TAG = "MitmCa"
     private const val KS_NAME = "am_mitm.p12"
     private const val KS_PASS = "accessmonitor"
 
@@ -41,24 +44,38 @@ object MitmCaManager {
     @Volatile
     var caCert: X509Certificate? = null
         private set
+    @Volatile
+    var lastError: String? = null
+        private set
     private var caKey: PrivateKey? = null
     private val hostCache = ConcurrentHashMap<String, HostCreds>()
 
     fun ensureCa(context: Context): Boolean {
-        if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
-            Security.addProvider(BouncyCastleProvider())
-        }
+        lastError = null
         val ksFile = File(context.filesDir, KS_NAME)
         return try {
             if (ksFile.exists()) {
-                load(ksFile)
+                try {
+                    load(ksFile)
+                } catch (loadError: Exception) {
+                    Log.w(TAG, "keystore load failed, regenerating", loadError)
+                    ksFile.delete()
+                    generateCa()
+                    save(ksFile)
+                }
             } else {
                 generateCa()
                 save(ksFile)
             }
-            exportPem()
+            if (caCert == null || caKey == null) {
+                lastError = "CA пустой после генерации"
+                return false
+            }
+            runCatching { exportPem(context) }
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            lastError = e.toUserMessage()
+            Log.e(TAG, "ensureCa failed", e)
             false
         }
     }
@@ -98,31 +115,28 @@ object MitmCaManager {
     }
 
     private fun generateCa() {
-        val kpg = KeyPairGenerator.getInstance("RSA")
-        kpg.initialize(2048)
-        val pair = kpg.generateKeyPair()
+        val pair = rsaKeyPair()
         val now = System.currentTimeMillis()
+        val name = X500Name("CN=AccessMonitor MITM CA")
         val builder = JcaX509v3CertificateBuilder(
-            X500Name("CN=AccessMonitor MITM CA"),
+            name,
             BigInteger(64, java.security.SecureRandom()),
             Date(now - 86_400_000L),
             Date(now + 3650L * 86_400_000L),
-            X500Name("CN=AccessMonitor MITM CA"),
+            name,
             pair.public
         )
         builder.addExtension(Extension.basicConstraints, true, BasicConstraints(true))
         builder.addExtension(Extension.keyUsage, true, KeyUsage(KeyUsage.keyCertSign or KeyUsage.cRLSign))
-        val signer = JcaContentSignerBuilder("SHA256withRSA").setProvider("BC").build(pair.private)
-        caCert = JcaX509CertificateConverter().setProvider("BC").getCertificate(builder.build(signer))
+        val holder = builder.build(contentSigner(pair.private))
+        caCert = holder.toX509()
         caKey = pair.private
     }
 
     private fun issueHost(host: String): HostCreds {
         val ca = caCert ?: error("CA missing")
         val key = caKey ?: error("CA key missing")
-        val kpg = KeyPairGenerator.getInstance("RSA")
-        kpg.initialize(2048)
-        val pair = kpg.generateKeyPair()
+        val pair = rsaKeyPair()
         val now = System.currentTimeMillis()
         val builder = JcaX509v3CertificateBuilder(
             X500Name(ca.subjectX500Principal.name),
@@ -138,8 +152,7 @@ object MitmCaManager {
             false,
             GeneralNames(GeneralName(GeneralName.dNSName, host))
         )
-        val signer = JcaContentSignerBuilder("SHA256withRSA").setProvider("BC").build(key)
-        val cert = JcaX509CertificateConverter().setProvider("BC").getCertificate(builder.build(signer))
+        val cert = builder.build(contentSigner(key)).toX509()
         val ks = KeyStore.getInstance("PKCS12")
         ks.load(null, null)
         ks.setKeyEntry("leaf", pair.private, KS_PASS.toCharArray(), arrayOf(cert, ca))
@@ -150,24 +163,50 @@ object MitmCaManager {
         return HostCreds(cert, pair, ctx)
     }
 
+    private fun rsaKeyPair(): KeyPair {
+        val kpg = KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        return kpg.generateKeyPair()
+    }
+
+    /** Android already ships a stub JCE provider named BC — never pin BouncyCastle as "BC". */
+    private fun contentSigner(key: PrivateKey) =
+        JcaContentSignerBuilder("SHA256withRSA").build(key)
+
+    private fun X509CertificateHolder.toX509(): X509Certificate {
+        return try {
+            JcaX509CertificateConverter().getCertificate(this)
+        } catch (_: Exception) {
+            val cf = CertificateFactory.getInstance("X.509")
+            cf.generateCertificate(ByteArrayInputStream(encoded)) as X509Certificate
+        }
+    }
+
     private fun load(file: File) {
         val ks = KeyStore.getInstance("PKCS12")
         file.inputStream().use { ks.load(it, KS_PASS.toCharArray()) }
-        caKey = ks.getKey("ca", KS_PASS.toCharArray()) as PrivateKey
-        caCert = ks.getCertificate("ca") as X509Certificate
+        caKey = ks.getKey("ca", KS_PASS.toCharArray()) as? PrivateKey
+            ?: error("CA key missing in keystore")
+        caCert = ks.getCertificate("ca") as? X509Certificate
+            ?: error("CA cert missing in keystore")
     }
 
     private fun save(file: File) {
+        val key = caKey ?: return
+        val cert = caCert ?: return
         val ks = KeyStore.getInstance("PKCS12")
         ks.load(null, null)
-        ks.setKeyEntry("ca", caKey, KS_PASS.toCharArray(), arrayOf(caCert))
+        ks.setKeyEntry("ca", key, KS_PASS.toCharArray(), arrayOf(cert))
         file.outputStream().use { ks.store(it, KS_PASS.toCharArray()) }
     }
 
-    private fun exportPem() {
+    private fun exportPem(context: Context) {
         val cert = caCert ?: return
+        val pem = toPem(cert)
+        File(context.filesDir, "mitm-ca.pem").writeText(pem)
+        RootShell.execAndRead("mkdir -p ${FridaInstaller.BASE_DIR}")
         RootShell.execAndRead(
-            "printf %s ${RootShell.shellQuote(toPem(cert))} > ${FridaInstaller.BASE_DIR}/mitm-ca.pem && chmod 644 ${FridaInstaller.BASE_DIR}/mitm-ca.pem"
+            "printf %s ${RootShell.shellQuote(pem)} > ${FridaInstaller.BASE_DIR}/mitm-ca.pem && chmod 644 ${FridaInstaller.BASE_DIR}/mitm-ca.pem"
         )
     }
 
@@ -185,5 +224,10 @@ object MitmCaManager {
             ((digest[2].toInt() and 0xff) shl 16) or
             ((digest[3].toInt() and 0xff) shl 24)
         return String.format("%08x", hash)
+    }
+
+    private fun Exception.toUserMessage(): String {
+        val cause = cause?.let { " (${it.javaClass.simpleName}: ${it.message})" } ?: ""
+        return "${javaClass.simpleName}: ${message ?: "unknown"}$cause"
     }
 }

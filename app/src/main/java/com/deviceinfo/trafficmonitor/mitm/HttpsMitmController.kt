@@ -33,7 +33,7 @@ object HttpsMitmController {
         if (active) return@withContext true
         lastError = null
         if (!MitmCaManager.ensureCa(context)) {
-            lastError = "Не удалось создать CA"
+            lastError = "Не удалось создать CA: ${MitmCaManager.lastError ?: "unknown"}"
             return@withContext false
         }
         MitmCaManager.installAsSystemCa()
