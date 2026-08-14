@@ -6,7 +6,8 @@ import com.deviceinfo.trafficmonitor.data.EventSource
 
 data class DisplayEvent(
     val event: CaptureEvent,
-    val repeats: Int = 1
+    val repeats: Int = 1,
+    val pinned: Boolean = false
 )
 
 data class SessionStats(
@@ -16,8 +17,22 @@ data class SessionStats(
     val sourceCounts: Map<EventSource, Int> = emptyMap(),
     val riskTotal: Int = 0,
     val topHosts: List<String> = emptyList(),
-    val topActions: List<Pair<String, Int>> = emptyList()
+    val topActions: List<Pair<String, Int>> = emptyList(),
+    val startedAt: Long = 0L,
+    val durationMs: Long = 0L,
+    val eventsPerMin: Double = 0.0
 )
+
+fun pinKey(event: CaptureEvent): String =
+    "${event.source}|${event.action}|${event.identifierName.orEmpty()}"
+
+fun formatDuration(ms: Long): String {
+    val totalSec = (ms / 1000).coerceAtLeast(0)
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
 
 fun isHighRisk(category: AccessCategory): Boolean = when (category) {
     AccessCategory.LOCATION,
@@ -81,6 +96,8 @@ fun buildSessionStats(events: List<CaptureEvent>): SessionStats {
             hosts[host] = (hosts[host] ?: 0) + 1
         }
     }
+    val startedAt = events.minOfOrNull { it.timestamp } ?: System.currentTimeMillis()
+    val duration = (System.currentTimeMillis() - startedAt).coerceAtLeast(1)
     return SessionStats(
         total = events.size,
         uniqueIdentifiers = ids.toList(),
@@ -88,7 +105,10 @@ fun buildSessionStats(events: List<CaptureEvent>): SessionStats {
         sourceCounts = events.groupingBy { it.source }.eachCount(),
         riskTotal = risk,
         topHosts = hosts.entries.sortedByDescending { it.value }.take(8).map { "${it.key} · ${it.value}" },
-        topActions = actions.entries.sortedByDescending { it.value }.take(6).map { it.key to it.value }
+        topActions = actions.entries.sortedByDescending { it.value }.take(6).map { it.key to it.value },
+        startedAt = startedAt,
+        durationMs = duration,
+        eventsPerMin = events.size * 60_000.0 / duration
     )
 }
 

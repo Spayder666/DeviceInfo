@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
@@ -25,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -145,6 +148,15 @@ fun StatsSheet(stats: SessionStats) {
             StatCard("Риск", stats.riskTotal.toString(), Modifier.weight(1f), danger = stats.riskTotal > 0)
             StatCard("ID", stats.uniqueIdentifiers.size.toString(), Modifier.weight(1f))
         }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard("Время", formatDuration(stats.durationMs), Modifier.weight(1f))
+            StatCard(
+                "в мин",
+                if (stats.eventsPerMin >= 10) "%.0f".format(stats.eventsPerMin) else "%.1f".format(stats.eventsPerMin),
+                Modifier.weight(1f)
+            )
+        }
         if (stats.categoryCounts.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
             Text("Категории", fontWeight = FontWeight.Medium, fontSize = 12.sp, color = TextMuted)
@@ -211,5 +223,33 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
             Text(label, fontSize = 10.sp, color = TextMuted)
         }
         Text(value, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = if (danger) Danger else Accent)
+    }
+}
+
+@Composable
+fun HintBanner(text: String, action: String, onAction: () -> Unit, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Accent.copy(alpha = 0.12f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Outlined.Link, null, tint = Accent, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        TextButton(onClick = onAction, contentPadding = PaddingValues(horizontal = 8.dp)) {
+            Text(action, fontSize = 11.sp, color = Accent, fontWeight = FontWeight.SemiBold)
+        }
+        Icon(
+            Icons.Outlined.Close,
+            "Скрыть",
+            modifier = Modifier
+                .size(16.dp)
+                .clickable(onClick = onDismiss),
+            tint = TextMuted
+        )
     }
 }

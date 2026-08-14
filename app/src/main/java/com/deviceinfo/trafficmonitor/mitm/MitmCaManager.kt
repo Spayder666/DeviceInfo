@@ -93,6 +93,24 @@ object MitmCaManager {
         RootShell.execAndRead("umount /apex/com.android.conscrypt/cacerts 2>/dev/null")
     }
 
+    fun caPem(): String? = caCert?.let { X509Mint.certToPem(it) }
+
+    fun caSubject(): String? = caCert?.subjectX500Principal?.name
+
+    fun exportCaFile(context: Context): File? {
+        val pem = caPem() ?: run {
+            if (!ensureCa(context)) return null
+            caPem()
+        } ?: return null
+        val exportDir = File(
+            context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS),
+            "exports"
+        ).apply { mkdirs() }
+        val file = File(exportDir, "AccessMonitor-MITM-CA.pem")
+        file.writeText(pem)
+        return file
+    }
+
     private fun tryLoad(certFile: File, keyFile: File): Boolean {
         if (!certFile.exists() || !keyFile.exists()) return false
         return try {

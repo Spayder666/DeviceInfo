@@ -13,11 +13,13 @@ import com.deviceinfo.trafficmonitor.model.InstalledApp
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
+import com.deviceinfo.trafficmonitor.mitm.MitmCaManager
 import com.deviceinfo.trafficmonitor.ui.DisplayEvent
 import com.deviceinfo.trafficmonitor.ui.SessionStats
 import com.deviceinfo.trafficmonitor.ui.buildSessionStats
 import com.deviceinfo.trafficmonitor.ui.collapseRepeats
 import com.deviceinfo.trafficmonitor.ui.eventMatchesQuery
+import com.deviceinfo.trafficmonitor.ui.pinKey
 import com.deviceinfo.trafficmonitor.util.AppListLoader
 import com.deviceinfo.trafficmonitor.util.RecentApp
 import com.deviceinfo.trafficmonitor.util.SessionPrefs
@@ -48,7 +50,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _showSystem = MutableStateFlow(false)
+    private val _showSystem = MutableStateFlow(SessionPrefs.showSystem(application))
     val showSystem: StateFlow<Boolean> = _showSystem.asStateFlow()
 
     private val _recents = MutableStateFlow<List<RecentApp>>(emptyList())
@@ -74,6 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleSystemApps() {
         _showSystem.value = !_showSystem.value
+        SessionPrefs.setShowSystem(getApplication(), _showSystem.value)
     }
 
     fun refreshRecents() {
@@ -118,6 +121,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val _targetRunning = MutableStateFlow(false)
     private val _showStats = MutableStateFlow(false)
     private val _showSearch = MutableStateFlow(false)
+    private val _pinnedKeys = MutableStateFlow<Set<String>>(emptySet())
+    private val _pinnedOnly = MutableStateFlow(false)
+    private val _sessionStartedAt = MutableStateFlow(System.currentTimeMillis())
+    private val _targetDied = MutableStateFlow(false)
 
     val packageName: StateFlow<String> = _packageName.asStateFlow()
     val selectedCategory: StateFlow<AccessCategory?> = _selectedCategory.asStateFlow()
@@ -130,6 +137,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     val targetRunning: StateFlow<Boolean> = _targetRunning.asStateFlow()
     val showStats: StateFlow<Boolean> = _showStats.asStateFlow()
     val showSearch: StateFlow<Boolean> = _showSearch.asStateFlow()
+    val pinnedKeys: StateFlow<Set<String>> = _pinnedKeys.asStateFlow()
+    val pinnedOnly: StateFlow<Boolean> = _pinnedOnly.asStateFlow()
+    val sessionStartedAt: StateFlow<Long> = _sessionStartedAt.asStateFlow()
+    val targetDied: StateFlow<Boolean> = _targetDied.asStateFlow()
 
     private val filteredRaw: StateFlow<List<CaptureEvent>> = combine(
         _allEvents,
@@ -146,9 +157,16 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val liveDisplay: StateFlow<List<DisplayEvent>> = combine(filteredRaw, _dedupEnabled) { list, dedup ->
-        if (dedup) collapseRepeats(list) else list.map { DisplayEvent(it) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val pinnedFiltered: StateFlow<List<CaptureEvent>> =
+        combine(filteredRaw, _pinnedOnly, _pinnedKeys) { list, only, pins ->
+            if (!only) list else list.filter { pinKey(it) in pins }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val liveDisplay: StateFlow<List<DisplayEvent>> =
+        combine(pinnedFiltered, _dedupEnabled, _pinnedKeys) { list, dedup, pins ->
+            val display = if (dedup) collapseRepeats(list) else list.map { DisplayEvent(it) }
+            display.map { it.copy(pinned = pinKey(it.event) in pins) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val events: StateFlow<List<DisplayEvent>> = combine(liveDisplay, _paused, _frozenEvents) { live, paused, frozen ->
         if (paused) frozen else live
@@ -183,6 +201,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun init(packageName: String) {
         if (_packageName.value == packageName) return
         _packageName.value = packageName
+        val app = getApplication<Application>()
+        _pinnedKeys.value = SessionPrefs.pins(app)
+        _dedupEnabled.value = SessionPrefs.dedup(app)
+        _selectedCategory.value = SessionPrefs.lastCategory(app)?.let { runCatching { AccessCategory.valueOf(it) }.getOrNull() }
+        _selectedSource.value = SessionPrefs.lastSource(app)?.let { runCatching { EventSource.valueOf(it) }.getOrNull() }
+        _selectedIdentifierGroup.value = SessionPrefs.lastIdentifierGroup(app)
+        _sessionStartedAt.value = System.currentTimeMillis()
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
             repository.observeEvents(packageName).collect { list ->
@@ -190,11 +215,21 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
+            var seenRunning = false
             while (isActive) {
-                _targetRunning.value = RootShell.isAppRunning(_packageName.value)
+                val running = RootShell.isAppRunning(_packageName.value)
+                if (seenRunning && !running && _targetRunning.value) {
+                    _targetDied.value = true
+                }
+                if (running) seenRunning = true
+                _targetRunning.value = running
                 delay(3000)
             }
         }
+    }
+
+    fun consumeTargetDied() {
+        _targetDied.value = false
     }
 
     fun setCategoryFilter(category: AccessCategory?) {
@@ -202,6 +237,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (category != AccessCategory.IDENTIFIER) {
             _selectedIdentifierGroup.value = null
         }
+        persistFilters()
     }
 
     fun setIdentifierGroupFilter(group: String?) {
@@ -209,10 +245,26 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (group != null) {
             _selectedCategory.value = AccessCategory.IDENTIFIER
         }
+        persistFilters()
     }
 
     fun setSourceFilter(source: EventSource?) {
         _selectedSource.value = if (_selectedSource.value == source) null else source
+        persistFilters()
+    }
+
+    fun filterByAction(action: String) {
+        _showSearch.value = true
+        _searchQuery.value = action
+    }
+
+    private fun persistFilters() {
+        SessionPrefs.saveFilters(
+            getApplication(),
+            _selectedCategory.value?.name,
+            _selectedSource.value?.name,
+            _selectedIdentifierGroup.value
+        )
     }
 
     fun setSearchQuery(query: String) {
@@ -226,7 +278,21 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleDedup() {
         _dedupEnabled.value = !_dedupEnabled.value
+        SessionPrefs.setDedup(getApplication(), _dedupEnabled.value)
     }
+
+    fun togglePinnedOnly() {
+        _pinnedOnly.value = !_pinnedOnly.value
+    }
+
+    fun togglePin(event: CaptureEvent) {
+        val key = pinKey(event)
+        val nowPinned = SessionPrefs.togglePin(getApplication(), key)
+        _pinnedKeys.value = SessionPrefs.pins(getApplication())
+        _fridaMessage.value = if (nowPinned) "Закреплено" else "Откреплено"
+    }
+
+    fun isPinned(event: CaptureEvent): Boolean = pinKey(event) in _pinnedKeys.value
 
     fun togglePause() {
         if (!_paused.value) {
@@ -315,8 +381,49 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun exportVisible(appName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            doExport(appName, filteredRaw.value)
+            doExport(appName, pinnedFiltered.value)
         }
+    }
+
+    fun exportHar(appName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isExporting.value = true
+            val mitm = _allEvents.value.filter { it.source == EventSource.MITM }
+            val source = mitm.ifEmpty { pinnedFiltered.value.ifEmpty { _allEvents.value } }
+            _exportResult.value = com.deviceinfo.trafficmonitor.export.ExportHelper.exportHar(
+                context = getApplication(),
+                packageName = _packageName.value,
+                appName = appName,
+                events = source
+            )
+            _isExporting.value = false
+        }
+    }
+
+    fun copyMitmCa() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            if (MitmCaManager.caCert == null) {
+                MitmCaManager.ensureCa(app)
+            }
+            val pem = MitmCaManager.caPem()
+            if (pem == null) {
+                _fridaMessage.value = "CA ещё нет — включите MITM"
+                return@launch
+            }
+            val cm = app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("AccessMonitor CA", pem))
+            val subject = MitmCaManager.caSubject().orEmpty()
+            _fridaMessage.value = "CA скопирован" + if (subject.isNotBlank()) " · $subject" else ""
+        }
+    }
+
+    fun shareMitmCa(): java.io.File? {
+        val app = getApplication<Application>()
+        if (MitmCaManager.caCert == null) {
+            MitmCaManager.ensureCa(app)
+        }
+        return MitmCaManager.exportCaFile(app)
     }
 
     private fun doExport(appName: String, events: List<CaptureEvent>) {

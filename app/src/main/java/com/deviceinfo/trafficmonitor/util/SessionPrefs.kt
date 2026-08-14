@@ -14,6 +14,12 @@ data class RecentApp(
 object SessionPrefs {
     private const val PREFS = "access_monitor_session"
     private const val KEY_RECENTS = "recents"
+    private const val KEY_PINS = "pins"
+    private const val KEY_SHOW_SYSTEM = "show_system"
+    private const val KEY_DEDUP = "dedup"
+    private const val KEY_LAST_CAT = "last_cat"
+    private const val KEY_LAST_SRC = "last_src"
+    private const val KEY_LAST_IDG = "last_idg"
     private const val MAX = 8
 
     fun recents(context: Context): List<RecentApp> {
@@ -53,6 +59,57 @@ object SessionPrefs {
             )
         }
         prefs(context).edit().putString(KEY_RECENTS, arr.toString()).apply()
+    }
+
+    fun pins(context: Context): Set<String> {
+        val raw = prefs(context).getString(KEY_PINS, "[]") ?: "[]"
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildSet {
+                for (i in 0 until arr.length()) add(arr.getString(i))
+            }
+        }.getOrElse { emptySet() }
+    }
+
+    fun togglePin(context: Context, key: String): Boolean {
+        val next = pins(context).toMutableSet()
+        val nowPinned = if (next.contains(key)) {
+            next.remove(key)
+            false
+        } else {
+            next.add(key)
+            true
+        }
+        val arr = JSONArray()
+        next.forEach { arr.put(it) }
+        prefs(context).edit().putString(KEY_PINS, arr.toString()).apply()
+        return nowPinned
+    }
+
+    fun showSystem(context: Context): Boolean = prefs(context).getBoolean(KEY_SHOW_SYSTEM, false)
+
+    fun setShowSystem(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SHOW_SYSTEM, value).apply()
+    }
+
+    fun dedup(context: Context): Boolean = prefs(context).getBoolean(KEY_DEDUP, true)
+
+    fun setDedup(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DEDUP, value).apply()
+    }
+
+    fun lastCategory(context: Context): String? = prefs(context).getString(KEY_LAST_CAT, null)
+
+    fun lastSource(context: Context): String? = prefs(context).getString(KEY_LAST_SRC, null)
+
+    fun lastIdentifierGroup(context: Context): String? = prefs(context).getString(KEY_LAST_IDG, null)
+
+    fun saveFilters(context: Context, category: String?, source: String?, identifierGroup: String?) {
+        prefs(context).edit()
+            .putString(KEY_LAST_CAT, category)
+            .putString(KEY_LAST_SRC, source)
+            .putString(KEY_LAST_IDG, identifierGroup)
+            .apply()
     }
 
     private fun prefs(context: Context) =

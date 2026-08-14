@@ -31,6 +31,7 @@ class AccessMonitorService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var pidWatchJob: Job? = null
+    private var notifyJob: Job? = null
 
     private var appOpsMonitor: AppOpsMonitor? = null
     private var logcatMonitor: LogcatMonitor? = null
@@ -78,7 +79,7 @@ class AccessMonitorService : Service() {
                 val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: targetPackage
                 currentPackage = targetPackage
                 currentAppName = appName
-                startForeground(NOTIFICATION_ID, buildNotification(targetPackage, appName))
+                startForeground(NOTIFICATION_ID, buildNotification(targetPackage, appName, 0))
                 startMonitoring()
                 return START_STICKY
             }
@@ -88,6 +89,17 @@ class AccessMonitorService : Service() {
 
     private fun startMonitoring() {
         val repository = (application as TrafficMonitorApp).repository
+
+        notifyJob?.cancel()
+        notifyJob = serviceScope.launch {
+            repository.observeCount(targetPackage).collect { count ->
+                val nm = getSystemService(NotificationManager::class.java)
+                nm.notify(
+                    NOTIFICATION_ID,
+                    buildNotification(targetPackage, currentAppName ?: targetPackage, count)
+                )
+            }
+        }
 
         serviceScope.launch {
             targetPid = waitForPid(targetPackage) ?: -1
@@ -163,6 +175,7 @@ class AccessMonitorService : Service() {
 
     private fun stopMonitoring() {
         pidWatchJob?.cancel()
+        notifyJob?.cancel()
         appOpsMonitor?.stop()
         logcatMonitor?.stop()
         straceMonitor?.stop()
@@ -203,7 +216,7 @@ class AccessMonitorService : Service() {
         super.onDestroy()
     }
 
-    private fun buildNotification(packageName: String, appName: String): Notification {
+    private fun buildNotification(packageName: String, appName: String, eventCount: Int): Notification {
         createChannel()
 
         val openIntent = PendingIntent.getActivity(
@@ -220,7 +233,14 @@ class AccessMonitorService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.monitor_notification_title, appName))
-            .setContentText(getString(R.string.monitor_notification_text))
+            .setContentText(
+                if (eventCount > 0) {
+                    getString(R.string.monitor_notification_text_count, eventCount)
+                } else {
+                    getString(R.string.monitor_notification_text)
+                }
+            )
+            .setNumber(eventCount)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentIntent(openIntent)
             .addAction(0, getString(R.string.stop_monitoring), stopIntent)

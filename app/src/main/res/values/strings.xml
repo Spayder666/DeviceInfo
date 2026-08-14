@@ -6,4 +6,5 @@
     <string name="notification_channel_desc">Уведомления о работе мониторинга</string>
     <string name="monitor_notification_title">Мониторинг: %1$s</string>
     <string name="monitor_notification_text">Отслеживание системных запросов активно</string>
+    <string name="monitor_notification_text_count">%1$d событий · нажмите, чтобы открыть</string>
 </resources>

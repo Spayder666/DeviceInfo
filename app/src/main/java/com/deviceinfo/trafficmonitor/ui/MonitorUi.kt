@@ -1,8 +1,10 @@
 package com.deviceinfo.trafficmonitor.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,8 +30,11 @@ import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Sensors
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -330,8 +335,9 @@ private fun ToolPill(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EventRow(item: DisplayEvent, onClick: () -> Unit) {
+fun EventRow(item: DisplayEvent, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     val event = item.event
     val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(event.timestamp))
     val color = categoryColor(event.category)
@@ -340,8 +346,14 @@ fun EventRow(item: DisplayEvent, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .background(if (risk) color.copy(alpha = 0.05f) else Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(
+                when {
+                    item.pinned -> Accent.copy(alpha = 0.08f)
+                    risk -> color.copy(alpha = 0.05f)
+                    else -> Color.Transparent
+                }
+            )
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -365,6 +377,9 @@ fun EventRow(item: DisplayEvent, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                if (item.pinned) {
+                    Icon(Icons.Outlined.PushPin, null, modifier = Modifier.size(11.dp).padding(end = 4.dp), tint = Accent)
+                }
                 if (item.repeats > 1) {
                     Text(
                         "×${item.repeats}",
@@ -436,9 +451,11 @@ fun EventDetailSheet(
     isProbing: Boolean,
     canPrev: Boolean,
     canNext: Boolean,
+    pinned: Boolean = false,
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    onProbe: () -> Unit
+    onProbe: () -> Unit,
+    onPin: () -> Unit = {}
 ) {
     val timeFormat = SimpleDateFormat("dd.MM.yyyy HH:mm:ss.SSS", Locale.getDefault())
     val color = categoryColor(event.category)
@@ -468,6 +485,14 @@ fun EventDetailSheet(
             }
             IconButton(onClick = onNext, enabled = canNext, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Outlined.KeyboardArrowDown, "Старее", modifier = Modifier.size(20.dp), tint = if (canNext) Accent else TextMuted)
+            }
+            IconButton(onClick = onPin, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    if (pinned) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                    if (pinned) "Открепить" else "Закрепить",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (pinned) Accent else TextMuted
+                )
             }
             val clipboard = LocalClipboardManager.current
             IconButton(
