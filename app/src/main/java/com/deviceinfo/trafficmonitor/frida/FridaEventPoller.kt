@@ -65,9 +65,9 @@ class FridaEventPoller(
             if (identifierId == "frida.init") return
 
             val action = json.optString("action", identifierId)
-            val request = json.optString("request", null)
-            val response = json.optString("response", null)
-            val permission = json.optString("permission", null).takeIf { it.isNotEmpty() }
+            val request = json.optString("request").takeIf { it.isNotEmpty() }
+            val response = json.optString("response").takeIf { it.isNotEmpty() }
+            val permission = json.optString("permission").takeIf { it.isNotEmpty() }
             val timestamp = json.optLong("timestamp", System.currentTimeMillis())
             val verdict = IntegrityVerdict.summarize(
                 listOfNotNull(request, response, line).joinToString(" ")
