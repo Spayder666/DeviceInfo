@@ -70,6 +70,8 @@ class AccessMonitorService : Service() {
             fridaMonitor = FridaMonitor(applicationContext, targetPackage, repository, serviceScope)
                 .also { it.start() }
 
+            IdentifierSnapshot.record(targetPackage, targetPid, repository)
+
             if (targetPid > 0) {
                 appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
                 logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }

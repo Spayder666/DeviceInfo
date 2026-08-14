@@ -76,7 +76,19 @@ class ProcMonitor(
             lower.startsWith("/dev/ashmem") ||
             lower.startsWith("/dev/__properties__") ||
             "anon_inode" in lower ||
-            lower.endsWith("/loader")
+            lower.endsWith("/loader") ||
+            lower.startsWith("/system/framework/") ||
+            lower.startsWith("/apex/") ||
+            lower.startsWith("/system/app/") ||
+            lower.startsWith("/system/priv-app/") ||
+            lower.startsWith("/product/app/") ||
+            lower.startsWith("/product/framework/") ||
+            lower.endsWith(".jar") ||
+            lower.endsWith(".apk") ||
+            lower.endsWith(".odex") ||
+            lower.endsWith(".vdex") ||
+            lower.endsWith(".art") ||
+            lower.endsWith(".so")
     }
 
     companion object {

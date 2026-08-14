@@ -18,29 +18,51 @@ object IdentifierProbe {
         val property = resolveProperty(event, def)
 
         if (property != null) {
-            return probeProperty(property, event.processId, event.targetPackage)
+            val propResult = probeProperty(property, event.processId, event.targetPackage)
+            val extras = IdentifierReader.readForEvent(event)
+                .filter { it.id != def?.id }
+            if (extras.isEmpty()) return propResult
+            return propResult.copy(
+                valueAsRoot = buildString {
+                    append(propResult.valueAsRoot)
+                    append("\n\n")
+                    append(IdentifierReader.format(extras))
+                }
+            )
         }
 
         if (def?.filePath != null) {
             return probeFile(def.filePath, event.processId)
         }
 
+        val values = IdentifierReader.readForEvent(event)
+        if (values.isNotEmpty()) {
+            return ProbeResult(
+                requestLabel = def?.displayName ?: event.action,
+                valueAsRoot = IdentifierReader.format(values),
+                valueInTargetContext = event.responseDetails?.takeIf {
+                    it.isNotBlank() && !it.startsWith("/") && !it.startsWith("FD=")
+                },
+                note = "Значения прочитаны от root (то, что вернут системные API). Frida фиксирует точный ответ внутри приложения в момент вызова."
+            )
+        }
+
         probeFdEvent(event)?.let { return it }
 
-        event.responseDetails?.takeIf { it.isNotBlank() && !it.startsWith("FD=") }?.let { response ->
+        event.responseDetails?.takeIf { it.isNotBlank() && !it.startsWith("FD=") && !it.startsWith("/") }?.let { response ->
             return ProbeResult(
                 requestLabel = event.action,
                 valueAsRoot = response,
                 valueInTargetContext = null,
-                note = "Значение из перехвата (${event.source.name.lowercase()}). Для точного ответа API включите Frida-хуки."
+                note = "Значение из перехвата (${event.source.name.lowercase()})."
             )
         }
 
         return ProbeResult(
             requestLabel = event.action,
-            valueAsRoot = "Повтор недоступен для этого типа запроса",
+            valueAsRoot = "Не удалось прочитать значение",
             valueInTargetContext = null,
-            note = "Нажмите «Подключить Frida» на экране мониторинга для перехвата точных ответов API."
+            note = "Для этого типа события нет системного API. Нажмите «Запустить + Frida», чтобы перехватывать ответы внутри приложения."
         )
     }
 

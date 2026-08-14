@@ -1,0 +1,292 @@
+package com.deviceinfo.trafficmonitor.probe
+
+import com.deviceinfo.trafficmonitor.data.AccessCategory
+import com.deviceinfo.trafficmonitor.data.CaptureEvent
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
+import com.deviceinfo.trafficmonitor.root.RootShell
+
+data class IdentifierValue(
+    val id: String,
+    val label: String,
+    val value: String
+)
+
+/** Читает фактические значения идентификаторов от root (getprop, settings, service call, dumpsys). */
+object IdentifierReader {
+
+    fun readForEvent(event: CaptureEvent): List<IdentifierValue> {
+        val def = event.identifierName?.let { IdentifierCatalog.findById(it) }
+        val values = linkedMapOf<String, IdentifierValue>()
+
+        fun addAll(list: List<IdentifierValue>) {
+            list.forEach { values.putIfAbsent(it.id, it) }
+        }
+
+        def?.let { addAll(listOfNotNull(readDefinition(it))) }
+
+        when (def?.group ?: inferGroup(event)) {
+            IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> addAll(readTelephony())
+            IdentifierGroup.SETTINGS -> addAll(readSettings())
+            IdentifierGroup.BUILD, IdentifierGroup.OS_VERSION, IdentifierGroup.SYSTEM_PROPERTY -> addAll(readBuild())
+            IdentifierGroup.WIFI -> addAll(readWifi())
+            IdentifierGroup.BLUETOOTH -> addAll(readBluetooth())
+            else -> {
+                if (event.category == AccessCategory.TELEPHONY || looksLikeTelephony(event)) {
+                    addAll(readTelephony())
+                }
+                if (event.category == AccessCategory.IDENTIFIER) {
+                    addAll(readCommon())
+                }
+            }
+        }
+
+        if (values.isEmpty()) addAll(readCommon())
+        return values.values.filter { it.value.isNotBlank() && it.value != "(пусто)" }
+    }
+
+    fun readCommon(): List<IdentifierValue> = buildList {
+        addAll(readBuild())
+        addAll(readSettings())
+        addAll(readTelephony())
+    }
+
+    fun readDefinition(def: IdentifierDefinition): IdentifierValue? {
+        val raw = when {
+            def.systemProperty != null -> getprop(def.systemProperty)
+            def.id == "settings.android_id" -> settingsGet("secure", "android_id")
+            def.id == "settings.device_name" -> settingsGet("global", "device_name")
+            def.id == "settings.bluetooth_address" -> settingsGet("secure", "bluetooth_address")
+            def.id == "settings.bluetooth_name" -> settingsGet("secure", "bluetooth_name")
+            def.id.startsWith("tel.") || def.id.startsWith("sub.") -> readTelephony().firstOrNull { it.id == def.id }?.value
+            def.filePath != null -> RootShell.execAndRead("cat ${def.filePath} 2>/dev/null | head -c 300").trim()
+            else -> null
+        }?.takeIf { it.isNotBlank() } ?: return null
+        return IdentifierValue(def.id, def.displayName, raw)
+    }
+
+    fun format(values: List<IdentifierValue>): String {
+        if (values.isEmpty()) return "(значения недоступны)"
+        return values.joinToString("\n") { "${it.label}: ${it.value}" }
+    }
+
+    private fun inferGroup(event: CaptureEvent): IdentifierGroup? {
+        event.identifierGroup?.let { name ->
+            return IdentifierGroup.entries.firstOrNull { it.name == name }
+        }
+        return null
+    }
+
+    private fun looksLikeTelephony(event: CaptureEvent): Boolean {
+        val text = listOfNotNull(event.action, event.requestDetails, event.rawData, event.responseDetails)
+            .joinToString(" ").lowercase()
+        return listOf("telephony", "phone", "sim", "imei", "imsi", "icc", "subscriber").any { it in text }
+    }
+
+    private fun readBuild(): List<IdentifierValue> {
+        val keys = listOf(
+            "build.model" to "ro.product.model",
+            "build.manufacturer" to "ro.product.manufacturer",
+            "build.device" to "ro.product.device",
+            "build.fingerprint" to "ro.build.fingerprint",
+            "build.serial" to "ro.serialno",
+            "version.release" to "ro.build.version.release",
+            "version.sdk" to "ro.build.version.sdk",
+            "version.security_patch" to "ro.build.version.security_patch"
+        )
+        return keys.mapNotNull { (id, prop) ->
+            val value = firstNonEmpty(getprop(prop), getprop("ro.boot.serialno").takeIf { id == "build.serial" })
+            value?.let {
+                IdentifierValue(id, IdentifierCatalog.findById(id)?.displayName ?: id, it)
+            }
+        }
+    }
+
+    private fun readSettings(): List<IdentifierValue> {
+        val androidId = firstNonEmpty(
+            settingsGet("secure", "android_id"),
+            querySettings("secure", "android_id")
+        )
+        val deviceName = firstNonEmpty(
+            settingsGet("global", "device_name"),
+            getprop("net.hostname")
+        )
+        return listOfNotNull(
+            androidId?.let { IdentifierValue("settings.android_id", "Android ID (SSAID)", it) },
+            deviceName?.let { IdentifierValue("settings.device_name", "Имя устройства", it) }
+        )
+    }
+
+    private fun readTelephony(): List<IdentifierValue> {
+        val dumpsysPhone = RootShell.execAndRead("dumpsys iphonesubinfo 2>/dev/null", timeoutSec = 8)
+        val dumpsysReg = RootShell.execAndRead(
+            "dumpsys telephony.registry 2>/dev/null | head -c 8000",
+            timeoutSec = 8
+        )
+        val siminfo = RootShell.execAndRead(
+            "content query --uri content://telephony/siminfo 2>/dev/null | head -c 4000",
+            timeoutSec = 8
+        )
+
+        val imei = firstNonEmpty(
+            getprop("persist.radio.imei"),
+            getprop("persist.vendor.radio.imei"),
+            getprop("ro.ril.oem.imei"),
+            getprop("ril.imei"),
+            fieldFrom(dumpsysPhone, "Device ID", "IMEI", "mImei"),
+            fieldFrom(dumpsysReg, "mImei", "imei"),
+            serviceCallString("iphonesubinfo", 1)
+        )
+        val imsi = firstNonEmpty(
+            getprop("gsm.sim.operator.imsi"),
+            fieldFrom(dumpsysPhone, "Subscriber ID", "IMSI", "mSubscriberId"),
+            fieldFrom(dumpsysReg, "mSubscriberId", "imsi"),
+            serviceCallString("iphonesubinfo", 4)
+        )
+        val iccid = firstNonEmpty(
+            fieldFrom(siminfo, "icc_id", "iccid"),
+            fieldFrom(dumpsysPhone, "ICC ID", "ICCID", "mIccId"),
+            serviceCallString("iphonesubinfo", 8)
+        )
+        val number = firstNonEmpty(
+            fieldFrom(siminfo, "number", "phoneNumber"),
+            fieldFrom(dumpsysPhone, "Phone Number", "Line 1 Number"),
+            fieldFrom(dumpsysReg, "mLine1Number", "phoneNumber"),
+            getprop("ril.line1.number"),
+            serviceCallString("iphonesubinfo", 11)
+        )
+        val operator = firstNonEmpty(
+            getprop("gsm.sim.operator.numeric"),
+            getprop("gsm.operator.numeric")
+        )
+        val operatorName = firstNonEmpty(
+            getprop("gsm.sim.operator.alpha"),
+            getprop("gsm.operator.alpha"),
+            fieldFrom(siminfo, "display_name", "carrier_name")
+        )
+        val country = firstNonEmpty(
+            getprop("gsm.sim.operator.iso-country"),
+            getprop("gsm.operator.iso-country")
+        )
+        val simState = getprop("gsm.sim.state")
+
+        return listOfNotEmpty(
+            IdentifierValue("tel.imei", "IMEI", imei ?: ""),
+            IdentifierValue("tel.subscriber_id", "IMSI", imsi ?: ""),
+            IdentifierValue("tel.sim_serial", "SIM serial / ICCID", iccid ?: ""),
+            IdentifierValue("tel.line1_number", "Номер телефона", number ?: ""),
+            IdentifierValue("tel.sim_operator", "MCC+MNC (SIM)", operator ?: ""),
+            IdentifierValue("tel.sim_operator_name", "Оператор", operatorName ?: ""),
+            IdentifierValue("tel.sim_country", "Страна SIM", country ?: ""),
+            IdentifierValue("prop.gsm.sim.state", "SIM state", simState)
+        )
+    }
+
+    private fun readWifi(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys wifi 2>/dev/null | head -c 4000", timeoutSec = 8)
+        val mac = firstNonEmpty(
+            fieldFrom(dump, "mWifiInfo", "MacAddress", "MAC"),
+            getprop("ro.boot.wifimacaddr"),
+            RootShell.execAndRead("cat /sys/class/net/wlan0/address 2>/dev/null").trim()
+        )
+        val ssid = fieldFrom(dump, "SSID", "mWifiSsid")
+        return listOfNotEmpty(
+            IdentifierValue("wifi.mac", "Wi‑Fi MAC", mac ?: ""),
+            IdentifierValue("wifi.ssid", "SSID", ssid ?: "")
+        )
+    }
+
+    private fun readBluetooth(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys bluetooth_manager 2>/dev/null | head -c 3000", timeoutSec = 8)
+        val mac = firstNonEmpty(
+            settingsGet("secure", "bluetooth_address"),
+            fieldFrom(dump, "address", "mAddress"),
+            getprop("ro.boot.btmacaddr")
+        )
+        val name = firstNonEmpty(
+            settingsGet("secure", "bluetooth_name"),
+            fieldFrom(dump, "name", "mName")
+        )
+        return listOfNotEmpty(
+            IdentifierValue("bt.local_mac", "Bluetooth MAC", mac ?: ""),
+            IdentifierValue("bt.local_name", "Bluetooth name", name ?: "")
+        )
+    }
+
+    private fun getprop(key: String): String {
+        return RootShell.execAndRead("getprop $key", timeoutSec = 5).trim()
+    }
+
+    private fun settingsGet(namespace: String, key: String): String {
+        return RootShell.execAndRead("settings get $namespace $key", timeoutSec = 6).trim()
+            .let { if (it == "null" || it.isBlank()) "" else it }
+    }
+
+    private fun querySettings(namespace: String, key: String): String {
+        val out = RootShell.execAndRead(
+            "content query --uri content://settings/$namespace --where \"name='$key'\" 2>/dev/null",
+            timeoutSec = 6
+        )
+        return fieldFrom(out, "value") ?: ""
+    }
+
+    private fun serviceCallString(service: String, code: Int): String? {
+        val raw = RootShell.execAndRead(
+            "service call $service $code s16 com.android.shell 2>/dev/null",
+            timeoutSec = 6
+        )
+        return parseParcelString(raw)
+    }
+
+    internal fun parseParcelString(output: String): String? {
+        if (output.isBlank()) return null
+        if (output.contains("Exception", ignoreCase = true)) return null
+        if (output.contains("Unknown transaction", ignoreCase = true)) return null
+
+        val words = Regex("(?i)0x[0-9a-f]+:\\s+((?:[0-9a-f]{8}\\s*)+)")
+            .findAll(output)
+            .flatMap { match -> match.groupValues[1].trim().split(Regex("\\s+")) }
+            .filter { it.length == 8 }
+            .toList()
+
+        if (words.size >= 2) {
+            val length = words[1].chunked(2).reversed().joinToString("").toIntOrNull(16)
+            if (length != null && length in 1..256) {
+                val bytes = words.drop(2).flatMap { word -> word.chunked(2).reversed() }
+                val chars = buildString {
+                    for (i in 0 until length) {
+                        val lo = bytes.getOrNull(i * 2)?.toIntOrNull(16) ?: break
+                        val hi = bytes.getOrNull(i * 2 + 1)?.toIntOrNull(16) ?: 0
+                        append((lo or (hi shl 8)).toChar())
+                    }
+                }.trim { it <= ' ' || it == '\u0000' }
+                if (chars.isNotBlank()) return chars
+            }
+        }
+
+        val quoted = Regex("'([^']*)'").findAll(output).joinToString("") { it.groupValues[1] }
+        val cleaned = quoted.dropWhile { it == '.' || it == ' ' }.filter { it != '.' && it != ' ' }
+        return cleaned.takeIf { it.length >= 4 }
+    }
+
+    private fun fieldFrom(text: String, vararg names: String): String? {
+        if (text.isBlank()) return null
+        for (name in names) {
+            Regex(
+                """(?i)(?:^|[\s,;])$name\s*[=:]\s*["']?([^,"'\n\r]+)["']?"""
+            ).find(text)?.groupValues?.getOrNull(1)?.trim()
+                ?.takeIf { it.isNotBlank() && it != "null" && it != "unknown" }
+                ?.let { return it }
+        }
+        return null
+    }
+
+    private fun firstNonEmpty(vararg values: String?): String? {
+        return values.firstOrNull { !it.isNullOrBlank() && it != "null" }
+    }
+
+    private fun listOfNotEmpty(vararg values: IdentifierValue): List<IdentifierValue> {
+        return values.filter { it.value.isNotBlank() }
+    }
+}

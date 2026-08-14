@@ -499,10 +499,30 @@ fun EventDetailSheet(
 
         probeResult?.let { probe ->
             Spacer(Modifier.height(12.dp))
-            Text("Результат проверки", fontWeight = FontWeight.Bold)
-            DetailRow("Запрос", probe.requestLabel)
-            DetailRow("От root", probe.valueAsRoot)
-            probe.valueInTargetContext?.let { DetailRow("В контексте приложения", it) }
+            Text("Ответ (значения устройства)", fontWeight = FontWeight.Bold)
+            Text(
+                text = probe.requestLabel,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+            ) {
+                Text(
+                    text = probe.valueAsRoot,
+                    modifier = Modifier.padding(12.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp
+                )
+            }
+            probe.valueInTargetContext?.let {
+                Text("Перехвачено в приложении", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text(it, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp))
+            }
             Text(
                 text = probe.note,
                 fontSize = 11.sp,
@@ -512,7 +532,7 @@ fun EventDetailSheet(
         }
 
         Text(
-            text = "Frida перехватывает точный ответ в момент вызова (источник: Frida). Без Frida видны только факты обращений (logcat, strace, /proc).",
+            text = "Значения выше прочитаны от root. Frida (источник Frida) фиксирует точный ответ внутри приложения в момент вызова.",
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(top = 8.dp)

@@ -5,6 +5,7 @@ import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
+import com.deviceinfo.trafficmonitor.probe.IdentifierReader
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,12 +108,16 @@ class AppOpsMonitor(
                 if (lastState.put(stateKey, accessTime) == null) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
                     val identifierId = opIdentifierMap[currentOp]
+                    val value = identifierId
+                        ?.let { IdentifierCatalog.findById(it) }
+                        ?.let { IdentifierReader.readDefinition(it)?.value }
                     record(
                         category = category,
                         action = currentOp,
                         permission = currentOp,
                         requestDetails = "AppOps: доступ к $currentOp",
-                        responseDetails = "Статус: разрешено, время=$accessTime",
+                        responseDetails = value?.let { "Значение: $it" }
+                            ?: "Статус: разрешено, время=$accessTime",
                         raw = line.trim(),
                         identifierId = identifierId
                     )
