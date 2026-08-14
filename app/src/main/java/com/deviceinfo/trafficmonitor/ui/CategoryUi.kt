@@ -177,6 +177,7 @@ fun identifierGroupIcon(group: IdentifierGroup): ImageVector = when (group) {
     IdentifierGroup.PERSONAL -> Icons.Outlined.Contacts
     IdentifierGroup.HARDWARE -> Icons.Outlined.PhotoCamera
     IdentifierGroup.IDENTITY -> Icons.Outlined.VpnKey
+    IdentifierGroup.FRAUD -> Icons.Outlined.Fingerprint
 }
 
 fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
@@ -203,6 +204,7 @@ fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
     IdentifierGroup.PERSONAL -> "Личное"
     IdentifierGroup.HARDWARE -> "Железо"
     IdentifierGroup.IDENTITY -> "Токен"
+    IdentifierGroup.FRAUD -> "Фрод"
 }
 
 fun allIcon(): ImageVector = Icons.Outlined.Apps

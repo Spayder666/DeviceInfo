@@ -117,41 +117,42 @@ AccessMonitorService  → foreground-сервис
 
 **Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Хуки — **запросы целевого приложения**: Location, Telephony (в т.ч. EID/MSISDN/ISIM/CarrierConfig), Privacy Sandbox AdId/Topics, OAID OEM, InstallSource/Referrer, FID/InstanceID, Health Connect, FIDO2, KeyStore/KeyChain, контакты/SMS, пакеты/UsageStats, камера/NFC/USB, FCM/credentials, Play Integrity, VPN/pin.
+Хуки — **запросы целевого приложения**: Location, Telephony (в т.ч. EID/MSISDN/ISIM/CarrierConfig), Privacy Sandbox AdId/Topics, OAID OEM, InstallSource/Referrer, FID/InstanceID, Health Connect, FIDO2, KeyStore/KeyChain, контакты/SMS, пакеты/UsageStats, камера/NFC/USB, FCM/credentials, Play Integrity, VPN/pin, **антифрод-сигналы** (Matrix/ThreatMetrix, TrustDecision, FingerprintJS, SEON, Settings fingerprint, clone/dual-app, STUN/WebRTC).
 
 События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог запросов (336 типов)
+## Каталог запросов (412 типов)
 
-Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
+Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP плюс сигналы antifraud SDK (Matrix/ThreatMetrix, TrustDecision, FingerprintJS, SEON, Sift, Forter, iovation, Tongdun, Group-IB, KFP).
 
 | Группа | Кол-во | Что входит |
 |--------|--------|------------|
 | **BUILD** | 27 | MODEL, MANUFACTURER, DEVICE, BRAND, HARDWARE, BOARD, FINGERPRINT, SERIAL, SOC, SKU, ABI, эмулятор… |
 | **OS_VERSION** | 9 | SDK, RELEASE, security patch, incremental, codename, **версия ядра** (`/proc/version`) |
 | **SYSTEM_PROPERTY** | 17 | `getprop`: ro.serialno, ro.product.*, ro.build.*, gsm.*, persist.radio.imei… |
-| **SETTINGS** | 13 | Android ID, BT name, accessibility, notification listeners, overlay, mock location |
+| **SETTINGS** | 31 | Android ID, ADB, developer, animation scale, brightness, boot_count, airplane, private DNS, IME, a11y… |
 | **TELEPHONY** | 19 | IMEI, MEID, IMSI, ICCID, номер телефона, MCC/MNC, carrier ID, TAC, IMEISV… |
 | **SUBSCRIPTION** | 9 | Subscription ID, ICCID, phone number, SIM slot, MCC/MNC, eSIM port |
-| **WIFI** | 9 | MAC, BSSID, SSID, scan results, IP, sysfs MAC |
+| **WIFI** | 10 | MAC, BSSID, SSID, scan results, IP, DHCP/gateway, sysfs MAC |
 | **BLUETOOTH** | 6 | Local/remote MAC и name, sysfs, audio device MAC |
 | **ADVERTISING** | 7 | GAID, GSF ID, Firebase FID, App Set ID, OAID, limit ad tracking |
 | **DRM** | 6 | Widevine deviceUniqueId, PlayReady, security level L1/L3 |
 | **INSTALL** | 13 | installer, подписи, getPackageInfo, список пакетов, UsageStats, checkPermission |
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
 | **CONTENT_PROVIDER** | 8 | telephony, GSF, MediaStore, downloads, SQLite, prefs |
-| **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
-| **NETWORK** | 15 | IP, MAC, HTTP/HTTPS/HTTP2, WebView, DNS, SNI, VPN, proxy, user CA, pin fail |
+| **PROC_SYS** | 12 | /proc/cpuinfo, meminfo, uptime, stat, boot_id, CPU freq, __properties__… |
+| **NETWORK** | 17 | IP, HTTP/2, VPN, proxy, user CA, pin, NetworkCapabilities, STUN/WebRTC |
 | **LOCATION** | 14 | GPS, fused, NLP, GNSS, geofence, cell, Wi‑Fi scan, RTT, UWB, HAL, SUPL |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 6 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
-| **ATTESTATION** | 6 | Key attestation, StrongBox, Play Integrity, SafetyNet, **verdict**, verified boot |
+| **ATTESTATION** | 9 | Key attestation, StrongBox, Play Integrity, vbmeta digest, bootloader lock |
 | **ROOT** | 28 | если приложение само ищет su/Magisk/LSPosed/Frida (не наш чекер) |
 | **PERSONAL** | 17 | контакты, SMS/MMS, call log, календарь, voicemail, browser history |
-| **HARDWARE** | 14 | камера, микрофон, сенсоры, экран, NFC, USB, батарея, locale, GPU |
+| **HARDWARE** | 29 | камера, сенсоры, батарея, GLES, кодеки, PIN/lock, uptime, ядра, ringtone, WebView pkg |
 | **IDENTITY** | 7 | FCM token, Credential Manager, phone hint, SMS Retriever, LVL, reCAPTCHA, UA |
+| **FRAUD** | 35 | Matrix/TMX, TrustDecision, FingerprintJS, SEON, Sift, Forter, clone/dual-app, canvas/WebGL, behavioral touch |
 
 Каждый идентификатор содержит: API, system property, file path, regex для logcat/strace, требуемое разрешение.
 

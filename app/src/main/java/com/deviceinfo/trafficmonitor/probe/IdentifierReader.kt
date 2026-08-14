@@ -39,6 +39,9 @@ object IdentifierReader {
                 id == "install.referrer" -> readFromCaptured(event)
             id?.startsWith("pkg.") == true || id?.startsWith("perm.") == true ->
                 readSystemApi(event.targetPackage) + readFromCaptured(event)
+            id?.startsWith("fraud.") == true || id?.startsWith("settings.") == true &&
+                id != "settings.android_id" && id != "settings.device_name" ->
+                readFraudFingerprint(event) + readFromCaptured(event)
             id?.startsWith("tel.") == true || id?.startsWith("sub.") == true ->
                 readTelephonyReplay(event)
             event.category == AccessCategory.LOCATION -> readLocation()
@@ -78,6 +81,7 @@ object IdentifierReader {
             IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION -> readSecurity(event)
             IdentifierGroup.PERSONAL -> readContacts() + readSms() + readCalendar()
             IdentifierGroup.HARDWARE -> readCamera() + readMicrophone() + readSensors() + readClipboard()
+            IdentifierGroup.FRAUD -> readFraudFingerprint(event)
             else -> emptyList()
         }
         return buildList {
@@ -99,6 +103,41 @@ object IdentifierReader {
             def.id == "settings.device_name" -> settingsGet("global", "device_name")
             def.id == "settings.bluetooth_address" -> settingsGet("secure", "bluetooth_address")
             def.id == "settings.bluetooth_name" -> settingsGet("secure", "bluetooth_name")
+            def.id == "settings.adb" -> settingsGet("global", "adb_enabled")
+            def.id == "settings.development" -> settingsGet("global", "development_settings_enabled")
+            def.id == "settings.animation" -> listOf(
+                "transition=${settingsGet("global", "transition_animation_scale")}",
+                "window=${settingsGet("global", "window_animation_scale")}",
+                "animator=${settingsGet("global", "animator_duration_scale")}"
+            ).joinToString(" ")
+            def.id == "settings.data_roaming" -> settingsGet("global", "data_roaming")
+            def.id == "settings.touch_exploration" -> settingsGet("secure", "touch_exploration_enabled")
+            def.id == "settings.alarm" -> settingsGet("system", "alarm_alert")
+            def.id == "settings.date_format" -> settingsGet("system", "date_format")
+            def.id == "settings.font_scale" -> settingsGet("system", "font_scale")
+            def.id == "settings.screen_off" -> settingsGet("system", "screen_off_timeout")
+            def.id == "settings.time_12_24" -> settingsGet("system", "time_12_24")
+            def.id == "settings.brightness" -> settingsGet("system", "screen_brightness")
+            def.id == "settings.boot_count" -> settingsGet("global", "boot_count")
+            def.id == "settings.airplane" -> settingsGet("global", "airplane_mode_on")
+            def.id == "settings.auto_time" ->
+                "auto_time=${settingsGet("global", "auto_time")} zone=${settingsGet("global", "auto_time_zone")}"
+            def.id == "settings.private_dns" ->
+                "${settingsGet("global", "private_dns_mode")} ${settingsGet("global", "private_dns_specifier")}"
+            def.id == "settings.unknown_sources" -> settingsGet("secure", "install_non_market_apps")
+            def.id == "settings.stay_on" -> settingsGet("global", "stay_on_while_plugged_in")
+            def.id == "settings.end_button" -> settingsGet("system", "end_button_behavior")
+            def.id == "settings.accessibility" -> settingsGet("secure", "enabled_accessibility_services")
+            def.id == "settings.input_method" -> settingsGet("secure", "default_input_method")
+            def.id == "settings.mock_location" -> settingsGet("secure", "mock_location")
+            def.id == "attest.vbmeta" -> getprop("ro.boot.vbmeta.digest")
+            def.id == "attest.flash_locked" -> getprop("ro.boot.flash.locked")
+            def.id == "attest.warranty" -> getprop("ro.boot.warranty_bit")
+            def.id == "fraud.harmony" -> firstNonEmpty(
+                getprop("ro.build.version.emui"),
+                getprop("hw_sc.build.os.apiversion"),
+                getprop("ro.build.version.harmony")
+            )
             def.id.startsWith("location.") -> readLocation().let { list ->
                 list.firstOrNull { it.id == def.id || it.id.endsWith(def.id.substringAfter("location.")) }?.value
                     ?: IdentifierReader.format(list)
@@ -172,9 +211,19 @@ object IdentifierReader {
             settingsGet("global", "device_name"),
             getprop("net.hostname")
         )
+        val adb = settingsGet("global", "adb_enabled")
+        val dev = settingsGet("global", "development_settings_enabled")
+        val boot = settingsGet("global", "boot_count")
+        val brightness = settingsGet("system", "screen_brightness")
+        val ime = settingsGet("secure", "default_input_method")
         return listOfNotNull(
             androidId?.let { IdentifierValue("settings.android_id", "Android ID (SSAID)", it) },
-            deviceName?.let { IdentifierValue("settings.device_name", "Имя устройства", it) }
+            deviceName?.let { IdentifierValue("settings.device_name", "Имя устройства", it) },
+            adb.takeIf { it.isNotBlank() }?.let { IdentifierValue("settings.adb", "ADB", it) },
+            dev.takeIf { it.isNotBlank() }?.let { IdentifierValue("settings.development", "Developer options", it) },
+            boot.takeIf { it.isNotBlank() }?.let { IdentifierValue("settings.boot_count", "Boot count", it) },
+            brightness.takeIf { it.isNotBlank() }?.let { IdentifierValue("settings.brightness", "Яркость", it) },
+            ime.takeIf { it.isNotBlank() }?.let { IdentifierValue("settings.input_method", "IME", it) }
         )
     }
 
@@ -647,6 +696,47 @@ object IdentifierReader {
     private fun readDrm(): List<IdentifierValue> {
         val dump = RootShell.execAndRead("dumpsys media.drm 2>/dev/null | head -c 2000", timeoutSec = 6)
         return listOfNotEmpty(IdentifierValue("drm.widevine_id", "MediaDrm", dump.take(300)))
+    }
+
+    private fun readFraudFingerprint(event: CaptureEvent): List<IdentifierValue> {
+        val id = event.identifierName.orEmpty()
+        val pkg = event.targetPackage
+        val fromDef = IdentifierCatalog.findById(id)?.let { readDefinition(it) }
+        val clone = RootShell.execAndRead(
+            "ls -ld /data/user/0/$pkg /data/user/999/$pkg /data/user/10/$pkg 2>/dev/null | head -n 6",
+            timeoutSec = 6
+        ).trim()
+        val users = RootShell.execAndRead(
+            "dumpsys user 2>/dev/null | grep -E 'UserInfo|managedProfile|flags=' | head -n 8",
+            timeoutSec = 6
+        ).trim()
+        val dual = RootShell.execAndRead(
+            "pm list packages 2>/dev/null | grep -E 'parallel|dualspace|dualaid|multiapp|da.daagent|island|shelter' | head -n 8",
+            timeoutSec = 8
+        ).trim()
+        val vbmeta = getprop("ro.boot.vbmeta.digest")
+        val harmony = firstNonEmpty(
+            getprop("ro.build.version.emui"),
+            getprop("hw_sc.build.os.apiversion"),
+            getprop("ro.build.version.harmony")
+        )
+        val a11y = settingsGet("secure", "enabled_accessibility_services")
+        return buildList {
+            fromDef?.let { add(it) }
+            if (id.startsWith("fraud.") || id.startsWith("settings.")) {
+                addAll(
+                    listOfNotEmpty(
+                        IdentifierValue("fraud.clone", "data dirs", clone.take(300)),
+                        IdentifierValue("fraud.work_profile", "users", users.take(300)),
+                        IdentifierValue("fraud.dual_app", "dual/clone pkgs", dual.take(300)),
+                        IdentifierValue("attest.vbmeta", "vbmeta", vbmeta),
+                        IdentifierValue("fraud.harmony", "Harmony/EMUI", harmony.orEmpty()),
+                        IdentifierValue("settings.accessibility", "a11y", a11y)
+                    )
+                )
+            }
+            addAll(readFromCaptured(event))
+        }.distinctBy { it.id + it.value }
     }
 
     private fun readAccounts(): List<IdentifierValue> {

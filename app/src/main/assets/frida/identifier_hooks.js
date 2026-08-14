@@ -112,12 +112,29 @@ function classifySettingsKey(key) {
   if (k === 'bluetooth_address') return 'settings.bluetooth_address';
   if (k === 'bluetooth_name') return 'settings.bluetooth_name';
   if (k === 'device_name') return 'settings.device_name';
-  if (k === 'adb_enabled' || k === 'development_settings_enabled') return 'root.adb';
+  if (k === 'adb_enabled') return 'settings.adb';
+  if (k === 'development_settings_enabled') return 'settings.development';
+  if (k.indexOf('animation_scale') >= 0 || k.indexOf('animator_duration') >= 0) return 'settings.animation';
+  if (k === 'data_roaming') return 'settings.data_roaming';
+  if (k.indexOf('touch_exploration') >= 0) return 'settings.touch_exploration';
+  if (k === 'alarm_alert') return 'settings.alarm';
+  if (k === 'date_format') return 'settings.date_format';
+  if (k === 'font_scale') return 'settings.font_scale';
+  if (k === 'screen_off_timeout') return 'settings.screen_off';
+  if (k === 'time_12_24') return 'settings.time_12_24';
+  if (k === 'screen_brightness' || k === 'screen_brightness_mode') return 'settings.brightness';
+  if (k === 'boot_count') return 'settings.boot_count';
+  if (k.indexOf('airplane_mode') >= 0) return 'settings.airplane';
+  if (k.indexOf('auto_time') >= 0) return 'settings.auto_time';
+  if (k.indexOf('private_dns') >= 0) return 'settings.private_dns';
+  if (k === 'install_non_market_apps') return 'settings.unknown_sources';
+  if (k === 'stay_on_while_plugged_in') return 'settings.stay_on';
+  if (k.indexOf('end_button') >= 0) return 'settings.end_button';
   if (k.indexOf('accessibility') >= 0) return 'settings.accessibility';
   if (k.indexOf('notification_listener') >= 0) return 'settings.notification_listeners';
   if (k.indexOf('input_method') >= 0) return 'settings.input_method';
-  if (k.indexOf('location') >= 0) return 'settings.location_mode';
   if (k.indexOf('mock_location') >= 0) return 'settings.mock_location';
+  if (k.indexOf('location') >= 0) return 'settings.location_mode';
   if (k.indexOf('http_proxy') >= 0) return 'net.proxy';
   return 'settings.secure';
 }
@@ -533,7 +550,11 @@ function hookPackageManager() {
               var flags = safeStr(arguments[1]);
               var result = overload.apply(this, arguments);
               if (isRootPkg(pkg)) writeRoot(classifyClass(pkg), name + '.' + m, pkg, 'found');
-              else writeReq(m === 'getPackageInfo' ? 'install.package_info' : 'install.application_info', name + '.' + m, pkg + ' flags=' + flags, 'ok', null);
+              else {
+                var fraudId = classifyFraudPkg(pkg);
+                if (fraudId) writeReq(fraudId, name + '.' + m, pkg, 'present', null);
+                else writeReq(m === 'getPackageInfo' ? 'install.package_info' : 'install.application_info', name + '.' + m, pkg + ' flags=' + flags, 'ok', null);
+              }
               return result;
             };
           });
@@ -827,6 +848,24 @@ function hookSensors() {
         return overload.apply(this, arguments);
       };
     });
+    try {
+      SM.getSensorList.overloads.forEach(function (overload) {
+        overload.implementation = function () {
+          var r = overload.apply(this, arguments);
+          writeOnce('hw.sensor_list', 'SensorManager.getSensorList', safeStr(arguments[0]), 'count=' + (r ? r.size() : 0), null);
+          return r;
+        };
+      });
+    } catch (e) {}
+    try {
+      SM.getDefaultSensor.overloads.forEach(function (overload) {
+        overload.implementation = function () {
+          var r = overload.apply(this, arguments);
+          writeOnce('hw.sensor_list', 'SensorManager.getDefaultSensor', safeStr(arguments[0]), safeStr(r), null);
+          return r;
+        };
+      });
+    } catch (e) {}
   } catch (e) {}
 }
 
@@ -1319,6 +1358,15 @@ function classifyClass(name) {
 function isRootCmd(cmd) {
   if (!cmd) return false;
   return /(^|[\/\s])su(\s|$)|which\s+su|magisk|getenforce|busybox|resetprop|zygisk|ksud|apatch|id\s+-u|\bps\b|frida-server|cat\s+\/proc/.test(String(cmd).toLowerCase());
+}
+
+function classifyFraudPkg(pkg) {
+  var n = String(pkg || '');
+  if (/parallel|dualspace|dualaid|multiapp|da\.daagent|island|shelter|virtual\.app/i.test(n)) return 'fraud.dual_app';
+  if (/fakegps|fake.?gps|gpsjoystick|lexa.fakegps|mocklocations/i.test(n)) return 'fraud.mock_apps';
+  if (/torproject|wireguard|org\.outline|openvpn/i.test(n)) return 'fraud.vpn_apps';
+  if (/autoclick|auto.?click|clicker/i.test(n)) return 'fraud.auto_click';
+  return '';
 }
 
 function isRootPkg(pkg) {
@@ -2254,7 +2302,7 @@ function hookRequestSurface() {
     var GLES = Java.use('android.opengl.GLES20');
     GLES.glGetString.implementation = function (name) {
       var r = this.glGetString(name);
-      writeOnce('gpu.gl', 'GLES20.glGetString', '' + name, safeStr(r), null);
+      writeOnce(name === 0x1F02 ? 'hw.gles_version' : 'gpu.gl', 'GLES20.glGetString', '' + name, safeStr(r), null);
       return r;
     };
   } catch (e) {}
@@ -2417,6 +2465,145 @@ function hookMissedRequestApis() {
   } catch (e) {}
 }
 
+function hookFraudFingerprint() {
+  hookAny('android.app.KeyguardManager', 'hw.pin_lock', ['isDeviceSecure', 'isKeyguardSecure', 'isKeyguardLocked'], null);
+  hookAny('android.hardware.biometrics.BiometricManager', 'hw.fp_enrolled', ['canAuthenticate'], null);
+  hookAny('android.hardware.fingerprint.FingerprintManager', 'hw.fp_enrolled', ['hasEnrolledFingerprints', 'isHardwareDetected'], null);
+  hookAny('android.media.MediaCodecList', 'hw.codec_list', ['getCodecInfos', 'getCodecCount'], null);
+  hookAny('android.media.RingtoneManager', 'hw.ringtone', ['getActualDefaultRingtoneUri', 'getDefaultUri'], null);
+  hookAny('android.app.UiModeManager', 'hw.dark_mode', ['getNightMode', 'getCurrentModeType'], null);
+  hookAny('android.webkit.WebView', 'hw.webview_pkg', ['getCurrentWebViewPackage'], null);
+  hookAny('android.net.wifi.WifiManager', 'fraud.wifi_on', ['isWifiEnabled'], null);
+  hookAny('android.net.wifi.WifiManager', 'wifi.dhcp', ['getDhcpInfo'], null);
+  hookAny('android.bluetooth.BluetoothAdapter', 'fraud.bt_on', ['isEnabled'], null);
+  hookAny('android.location.LocationManager', 'fraud.location_on', ['isLocationEnabled', 'isProviderEnabled'], null);
+  hookAny('android.hardware.display.DisplayManager', 'fraud.cast', ['getDisplays'], null);
+  hookAny('android.media.MediaRouter', 'fraud.cast', ['getSelectedRoute', 'getRouteCount'], null);
+  hookAny('android.view.accessibility.AccessibilityManager', 'fraud.talkback', ['isTouchExplorationEnabled', 'getEnabledAccessibilityServiceList', 'isEnabled'], null);
+  hookAny('android.os.UserManager', 'fraud.work_profile', ['isManagedProfile', 'getUserProfiles', 'isSystemUser', 'getUserCount'], null);
+  hookAny('android.app.admin.DevicePolicyManager', 'hw.encryption', ['getStorageEncryptionStatus'], null);
+  hookAny('android.net.ConnectivityManager', 'net.capabilities', ['getNetworkCapabilities', 'getActiveNetwork'], null);
+  hookAny('org.webrtc.PeerConnectionFactory', 'net.stun', ['initialize', 'createPeerConnection'], null);
+  hookAny('org.webrtc.PeerConnection', 'net.stun', ['createOffer', 'addIceCandidate'], null);
+  try {
+    var Clock = Java.use('android.os.SystemClock');
+    ['elapsedRealtime', 'uptimeMillis', 'elapsedRealtimeNanos'].forEach(function (m) {
+      try {
+        Clock[m].implementation = function () {
+          var r = this[m]();
+          writeOnce(m.indexOf('Nano') >= 0 ? 'fraud.elapsed' : 'hw.uptime', 'SystemClock.' + m, '', safeStr(r), null);
+          return r;
+        };
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var RT = Java.use('java.lang.Runtime');
+    RT.availableProcessors.implementation = function () {
+      var r = this.availableProcessors();
+      writeOnce('hw.cores', 'Runtime.availableProcessors', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var Sec = Java.use('java.security.Security');
+    var orig = Sec.getProviders.overload();
+    orig.implementation = function () {
+      var r = orig.call(this);
+      writeOnce('hw.security_providers', 'Security.getProviders', '', 'count=' + (r ? r.length : 0), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var Loc = Java.use('java.util.Locale');
+    Loc.getAvailableLocales.implementation = function () {
+      var r = this.getAvailableLocales();
+      writeOnce('hw.locales', 'Locale.getAvailableLocales', '', 'count=' + (r ? r.length : 0), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var AM = Java.use('android.media.AudioManager');
+    AM.getRingerMode.implementation = function () {
+      var r = this.getRingerMode();
+      writeOnce('hw.ringer', 'AudioManager.getRingerMode', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var Ctx = Java.use('android.app.ContextImpl');
+    ['getFilesDir', 'getDataDir', 'getExternalFilesDir'].forEach(function (m) {
+      try {
+        Ctx[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            var path = safeStr(r);
+            if (/\/data\/user\/(999|10|11)\//.test(path) || path.indexOf('parallel') >= 0) {
+              writeReq('fraud.clone', 'Context.' + m, path, 'clone-user', null);
+            } else {
+              writeOnce('fraud.clone', 'Context.' + m, path, '', null);
+            }
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var View = Java.use('android.view.View');
+    View.dispatchTouchEvent.implementation = function (ev) {
+      writeOnce('fraud.touch', 'View.dispatchTouchEvent', '', 'touch', null);
+      return this.dispatchTouchEvent(ev);
+    };
+  } catch (e) {}
+  try {
+    var WV = Java.use('android.webkit.WebView');
+    WV.evaluateJavascript.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var script = safeStr(arguments[0]);
+        var id = 'net.webview';
+        if (/toDataURL|getImageData|canvas/i.test(script)) id = 'fraud.canvas';
+        else if (/UNMASKED|webgl|getParameter/i.test(script)) id = 'fraud.webgl';
+        else if (/AudioContext|createOscillator/i.test(script)) id = 'fraud.audio_fp';
+        writeReq(id, 'WebView.evaluateJavascript', script.substring(0, 180), '', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var AM2 = Java.use('android.app.ActivityManager');
+    AM2.getDeviceConfigurationInfo.implementation = function () {
+      var r = this.getDeviceConfigurationInfo();
+      try { writeOnce('hw.gles_version', 'getDeviceConfigurationInfo', '', 'gles=0x' + r.reqGlEsVersion.toString(16), null); } catch (e) {}
+      return r;
+    };
+  } catch (e) {}
+}
+
+function hookFraudSdks() {
+  hookAny('com.threatmetrix.TrustDefender.TMXProfiling', 'fraud.tmx', ['profile', 'init', 'getInstance'], null);
+  hookAny('com.lexisnexis.tmsdk.TMXProfiling', 'fraud.tmx', ['profile', 'init', 'getInstance'], null);
+  hookAny('com.threatmetrix.TrustDefender.TrustDefender', 'fraud.tmx', ['doProfileRequest', 'profile', 'init'], null);
+  hookAny('com.trustdecision.android.sdk.TDRisk', 'fraud.trustdecision', ['initWithOptions', 'getBlackBox', 'getDeviceId'], null);
+  hookAny('com.trustdecision.mobrisk.TDRisk', 'fraud.trustdecision', ['initWithOptions', 'getBlackBox'], null);
+  hookAny('cn.tongdun.android.shell.FMAgent', 'fraud.trustdecision', ['init', 'onEvent', 'getDeviceInfo'], null);
+  hookAny('com.fingerprintjs.android.fingerprint.Fingerprinter', 'fraud.fingerprintjs', ['getFingerprint', 'getDeviceId'], null);
+  hookAny('com.fingerprint.android.Fingerprint', 'fraud.fingerprintjs', ['getVisitorId', 'request'], null);
+  hookAny('io.seon.androidsdk.service.SeonBuilder', 'fraud.seon', ['build', 'withSessionId'], null);
+  hookAny('io.seon.androidsdk.Seon', 'fraud.seon', ['getFingerprintBase64', 'start'], null);
+  hookAny('siftscience.android.Sift', 'fraud.sift', ['open', 'collect', 'setUserId'], null);
+  hookAny('com.forter.mobile.ForterMobile', 'fraud.forter', ['init', 'trackAction', 'getDeviceUID'], null);
+  hookAny('com.iovation.mobile.android.FraudForceManager', 'fraud.iovation', ['refresh', 'getBlackbox'], null);
+  hookAny('com.kount.api.KountSDK', 'fraud.kount', ['collectDeviceData', 'getSessionID'], null);
+  hookAny('com.group_ib.sdk.MobileSdk', 'fraud.groupib', ['init', 'getDeviceId', 'run'], null);
+  hookAny('com.ishumei.smantifraud.SmAntiFraud', 'fraud.shumeng', ['create', 'getDeviceId'], null);
+  hookAny('com.appsflyer.AppsFlyerLib', 'fraud.appsflyer', ['init', 'start', 'getAppsFlyerUID'], null);
+  hookAny('com.adjust.sdk.Adjust', 'fraud.adjust', ['getAdid', 'getGoogleAdId', 'onCreate'], null);
+  hookAny('com.incognia.Incognia', 'fraud.incognia', ['init', 'setAccountId'], null);
+  hookAny('com.biocatch.client.android.sdk.BioCatch', 'fraud.biocatch', ['start', 'changeContext'], null);
+  hookAny('com.sumsub.sns.core.SNSMobileSDK', 'fraud.sumsub', ['init', 'launch'], null);
+}
+
 function installJavaHooks() {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
   hookBuild();
@@ -2452,6 +2639,8 @@ function installJavaHooks() {
   hookSniAndIntent();
   hookRequestSurface();
   hookMissedRequestApis();
+  hookFraudFingerprint();
+  hookFraudSdks();
   hookRootDetection();
 }
 

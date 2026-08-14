@@ -29,7 +29,8 @@ enum class IdentifierGroup(val label: String) {
     ROOT("Root / детект среды"),
     PERSONAL("Контакты / SMS / календарь"),
     HARDWARE("Камера / датчики / экран / NFC"),
-    IDENTITY("Токены / credentials / FCM")
+    IDENTITY("Токены / credentials / FCM"),
+    FRAUD("Антифрод / fingerprint")
 }
 
 data class IdentifierDefinition(
@@ -73,6 +74,7 @@ object IdentifierCatalog {
         addAll(identityIdentifiers())
         addAll(packageQueryIdentifiers())
         addAll(extraRequestIdentifiers())
+        addAll(fraudFingerprintIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -155,7 +157,25 @@ object IdentifierCatalog {
         id("settings.input_method", "Клавиатура / IME", IdentifierGroup.SETTINGS, "default_input_method", logcat = listOf("default_input_method")),
         id("settings.location_mode", "Location mode", IdentifierGroup.SETTINGS, "location_mode / location_providers_allowed", logcat = listOf("location_mode", "location_providers_allowed")),
         id("settings.mock_location", "Mock location", IdentifierGroup.SETTINGS, "allow_mock_location", logcat = listOf("allow_mock_location", "mock_location")),
-        id("settings.overlay", "SYSTEM_ALERT_WINDOW", IdentifierGroup.SETTINGS, "Settings.canDrawOverlays", logcat = listOf("canDrawOverlays", "SYSTEM_ALERT_WINDOW"))
+        id("settings.overlay", "SYSTEM_ALERT_WINDOW", IdentifierGroup.SETTINGS, "Settings.canDrawOverlays", logcat = listOf("canDrawOverlays", "SYSTEM_ALERT_WINDOW")),
+        id("settings.adb", "ADB enabled", IdentifierGroup.SETTINGS, "Settings.Global.adb_enabled", logcat = listOf("adb_enabled")),
+        id("settings.development", "Developer options", IdentifierGroup.SETTINGS, "Settings.Global.development_settings_enabled", logcat = listOf("development_settings_enabled")),
+        id("settings.animation", "Animation scale", IdentifierGroup.SETTINGS, "transition_animation_scale / window_animation_scale / animator_duration_scale", logcat = listOf("transition_animation_scale", "window_animation_scale", "animator_duration_scale")),
+        id("settings.data_roaming", "Data roaming", IdentifierGroup.SETTINGS, "Settings.Global.data_roaming", logcat = listOf("data_roaming")),
+        id("settings.touch_exploration", "TalkBack / touch exploration", IdentifierGroup.SETTINGS, "Settings.Secure.touch_exploration_enabled", logcat = listOf("touch_exploration_enabled")),
+        id("settings.alarm", "Alarm ringtone path", IdentifierGroup.SETTINGS, "Settings.System.alarm_alert", logcat = listOf("alarm_alert")),
+        id("settings.date_format", "Date format", IdentifierGroup.SETTINGS, "Settings.System.date_format", logcat = listOf("date_format")),
+        id("settings.font_scale", "Font scale", IdentifierGroup.SETTINGS, "Settings.System.font_scale", logcat = listOf("font_scale")),
+        id("settings.screen_off", "Screen off timeout", IdentifierGroup.SETTINGS, "Settings.System.screen_off_timeout", logcat = listOf("screen_off_timeout")),
+        id("settings.time_12_24", "12/24 hour", IdentifierGroup.SETTINGS, "Settings.System.time_12_24", logcat = listOf("time_12_24")),
+        id("settings.brightness", "Яркость экрана", IdentifierGroup.SETTINGS, "Settings.System.screen_brightness", logcat = listOf("screen_brightness")),
+        id("settings.boot_count", "Boot count", IdentifierGroup.SETTINGS, "Settings.Global.boot_count", logcat = listOf("boot_count")),
+        id("settings.airplane", "Airplane mode", IdentifierGroup.SETTINGS, "Settings.Global.airplane_mode_on", logcat = listOf("airplane_mode_on")),
+        id("settings.auto_time", "Auto time / timezone", IdentifierGroup.SETTINGS, "Settings.Global.auto_time", logcat = listOf("auto_time", "auto_time_zone")),
+        id("settings.private_dns", "Private DNS", IdentifierGroup.SETTINGS, "Settings.Global.private_dns_mode", logcat = listOf("private_dns_mode", "private_dns_specifier")),
+        id("settings.unknown_sources", "Unknown sources", IdentifierGroup.SETTINGS, "Settings.Secure.install_non_market_apps", logcat = listOf("install_non_market_apps")),
+        id("settings.stay_on", "Stay on while plugged", IdentifierGroup.SETTINGS, "Settings.Global.stay_on_while_plugged_in", logcat = listOf("stay_on_while_plugged_in")),
+        id("settings.end_button", "End button behaviour", IdentifierGroup.SETTINGS, "Settings.System.end_button_behavior", logcat = listOf("end_button_behavior"))
     )
 
     private fun telephonyIdentifiers() = listOf(
@@ -487,7 +507,73 @@ object IdentifierCatalog {
         id("photo.picker", "Photo Picker / READ_MEDIA", IdentifierGroup.CONTENT_PROVIDER, "PickVisualMedia / MediaStore.createWriteRequest", logcat = listOf("PickVisualMedia", "createWriteRequest", "READ_MEDIA")),
         id("user.serial", "UserManager serial", IdentifierGroup.SETTINGS, "UserManager.getSerialNumberForUser", logcat = listOf("getSerialNumberForUser", "UserManager")),
         id("dpm.owner", "Device owner / admin", IdentifierGroup.ENTERPRISE, "DevicePolicyManager.isDeviceOwnerApp / isAdminActive", logcat = listOf("isDeviceOwnerApp", "isProfileOwnerApp", "isAdminActive")),
-        id("cell.identity", "CellIdentity MCC/CID/TAC", IdentifierGroup.LOCATION, "CellIdentity.getMccString / getCi / getTac", logcat = listOf("CellIdentity", "getCi", "getTac"))
+        id("cell.identity", "CellIdentity MCC/CID/TAC", IdentifierGroup.LOCATION, "CellIdentity.getMccString / getCi / getTac", logcat = listOf("CellIdentity", "getCi", "getTac")),
+        id("hw.sensor_list", "Список сенсоров", IdentifierGroup.HARDWARE, "SensorManager.getSensorList / getDefaultSensor", logcat = listOf("getSensorList", "getDefaultSensor")),
+        id("hw.battery_capacity", "Ёмкость батареи", IdentifierGroup.HARDWARE, "BatteryManager /sys/class/power_supply", file = "/sys/class/power_supply/battery/charge_full", logcat = listOf("charge_full", "BATTERY_PROPERTY_CHARGE_COUNTER"), strace = listOf("/sys/class/power_supply")),
+        id("hw.gles_version", "GLES version", IdentifierGroup.HARDWARE, "ConfigurationInfo.reqGlEsVersion / glGetString(GL_VERSION)", logcat = listOf("reqGlEsVersion", "GL_VERSION")),
+        id("hw.codec_list", "MediaCodec list", IdentifierGroup.HARDWARE, "MediaCodecList.getCodecInfos", logcat = listOf("MediaCodecList", "getCodecInfos")),
+        id("hw.encryption", "Шифрование хранилища", IdentifierGroup.HARDWARE, "DevicePolicyManager.getStorageEncryptionStatus", logcat = listOf("getStorageEncryptionStatus", "ENCRYPTION_STATUS")),
+        id("hw.security_providers", "Security providers", IdentifierGroup.HARDWARE, "Security.getProviders()", logcat = listOf("Security.getProviders", "Provider.getName")),
+        id("hw.pin_lock", "PIN / lock screen", IdentifierGroup.HARDWARE, "KeyguardManager.isDeviceSecure / isKeyguardSecure", logcat = listOf("isDeviceSecure", "isKeyguardSecure")),
+        id("hw.fp_enrolled", "Биометрия enrolled", IdentifierGroup.HARDWARE, "BiometricManager.canAuthenticate / hasEnrolledTemplates", logcat = listOf("canAuthenticate", "hasEnrolledTemplates", "hasEnrolledFingerprints")),
+        id("hw.uptime", "Uptime / elapsedRealtime", IdentifierGroup.HARDWARE, "SystemClock.elapsedRealtime / uptimeMillis", logcat = listOf("elapsedRealtime", "uptimeMillis")),
+        id("hw.cores", "Число ядер CPU", IdentifierGroup.HARDWARE, "Runtime.availableProcessors", logcat = listOf("availableProcessors")),
+        id("hw.ringtone", "Ringtone URI", IdentifierGroup.HARDWARE, "RingtoneManager.getActualDefaultRingtoneUri", logcat = listOf("getActualDefaultRingtoneUri")),
+        id("hw.locales", "Available locales", IdentifierGroup.HARDWARE, "Locale.getAvailableLocales / AssetManager.getLocales", logcat = listOf("getAvailableLocales")),
+        id("hw.dark_mode", "Dark / night mode", IdentifierGroup.HARDWARE, "Configuration.uiMode / UiModeManager", logcat = listOf("uiMode", "UiModeManager", "NIGHT_YES")),
+        id("hw.ringer", "Ringer mode", IdentifierGroup.HARDWARE, "AudioManager.getRingerMode", logcat = listOf("getRingerMode")),
+        id("hw.webview_pkg", "WebView package / version", IdentifierGroup.HARDWARE, "WebView.getCurrentWebViewPackage", logcat = listOf("getCurrentWebViewPackage", "WebViewProvider")),
+        id("proc.uptime", "/proc/uptime", IdentifierGroup.PROC_SYS, file = "/proc/uptime", strace = listOf("/proc/uptime")),
+        id("proc.stat", "/proc/stat", IdentifierGroup.PROC_SYS, file = "/proc/stat", strace = listOf("/proc/stat")),
+        id("sys.cpu_freq", "CPU frequency", IdentifierGroup.PROC_SYS, file = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", strace = listOf("cpufreq")),
+        id("attest.vbmeta", "vbmeta digest", IdentifierGroup.ATTESTATION, systemProp = "ro.boot.vbmeta.digest", logcat = listOf("vbmeta.digest", "vbmeta_digest")),
+        id("attest.flash_locked", "Bootloader lock", IdentifierGroup.ATTESTATION, systemProp = "ro.boot.flash.locked", logcat = listOf("flash.locked", "ro.boot.flash.locked")),
+        id("attest.warranty", "Warranty bit", IdentifierGroup.ATTESTATION, systemProp = "ro.boot.warranty_bit", logcat = listOf("warranty_bit")),
+        id("wifi.dhcp", "DHCP / gateway", IdentifierGroup.WIFI, "WifiManager.getDhcpInfo", logcat = listOf("getDhcpInfo", "DhcpInfo")),
+        id("net.capabilities", "NetworkCapabilities", IdentifierGroup.NETWORK, "ConnectivityManager.getNetworkCapabilities", logcat = listOf("getNetworkCapabilities", "NET_CAPABILITY"))
+    )
+
+    /**
+     * Сигналы, которые собирают Matrix/ThreatMetrix, TrustDecision, FingerprintJS,
+     * SEON, Sift, Forter, iovation, Tongdun, Group-IB, KFP и похожие antifraud SDK.
+     * Событие — только если целевое приложение само запросило API / вызвало SDK.
+     */
+    private fun fraudFingerprintIdentifiers() = listOf(
+        id("fraud.tmx", "ThreatMetrix / Matrix", IdentifierGroup.FRAUD, "TMXProfiling.profile / TrustDefender", logcat = listOf("TMXProfiling", "TrustDefender", "ThreatMetrix", "lexisnexis.tmsdk", "doProfileRequest")),
+        id("fraud.trustdecision", "TrustDecision / Tongdun", IdentifierGroup.FRAUD, "TDRisk / FMAgent", logcat = listOf("TrustDecision", "TDRisk", "tongdun", "FMAgent", "cn.tongdun")),
+        id("fraud.fingerprintjs", "FingerprintJS / Fingerprint Pro", IdentifierGroup.FRAUD, "Fingerprinter.getFingerprint / getDeviceId", logcat = listOf("fingerprintjs", "Fingerprinter", "com.fingerprint.android")),
+        id("fraud.seon", "SEON Device Fingerprinting", IdentifierGroup.FRAUD, "io.seon.androidsdk", logcat = listOf("io.seon", "SeonBuilder", "getFingerprintBase64")),
+        id("fraud.sift", "Sift Science", IdentifierGroup.FRAUD, "siftscience.android.Sift", logcat = listOf("siftscience", "Sift.collect")),
+        id("fraud.forter", "Forter", IdentifierGroup.FRAUD, "com.forter.mobile", logcat = listOf("forter.mobile", "ForterMobile")),
+        id("fraud.iovation", "iovation / TransUnion", IdentifierGroup.FRAUD, "com.iovation.mobile", logcat = listOf("iovation", "FraudForceManager")),
+        id("fraud.kount", "Kount", IdentifierGroup.FRAUD, "com.kount.api", logcat = listOf("kount.api", "KountSDK")),
+        id("fraud.groupib", "Group-IB / F.A.C.C.T.", IdentifierGroup.FRAUD, "com.group_ib / ru.group_ib", logcat = listOf("group_ib", "groupib", "F.A.C.C.T", "facct")),
+        id("fraud.kfp", "Kaspersky Fraud Prevention", IdentifierGroup.FRAUD, "com.kaspersky.kfp", logcat = listOf("kaspersky.kfp", "KFPSdk", "KasperskyFraud")),
+        id("fraud.shumeng", "Shumeng / iShumei", IdentifierGroup.FRAUD, "com.ishumei.smantifraud", logcat = listOf("ishumei", "SmAntiFraud", "shumei")),
+        id("fraud.appsflyer", "AppsFlyer Protect360", IdentifierGroup.FRAUD, "com.appsflyer.AppsFlyerLib", logcat = listOf("AppsFlyerLib", "appsflyer")),
+        id("fraud.adjust", "Adjust Fraud Prevention", IdentifierGroup.FRAUD, "com.adjust.sdk.Adjust", logcat = listOf("com.adjust.sdk", "Adjust.getAdid")),
+        id("fraud.incognia", "Incognia", IdentifierGroup.FRAUD, "com.incognia.Incognia", logcat = listOf("incognia", "Incognia")),
+        id("fraud.biocatch", "BioCatch / BehavioSec", IdentifierGroup.FRAUD, "com.biocatch / com.behaviosec", logcat = listOf("biocatch", "BehavioSec", "TMXBehavioral")),
+        id("fraud.sumsub", "Sumsub Device Intel", IdentifierGroup.FRAUD, "com.sumsub.sns", logcat = listOf("sumsub", "SNSMobileSDK")),
+        id("fraud.clone", "Clone / filesDir path", IdentifierGroup.FRAUD, "Context.getFilesDir / /data/user/999", logcat = listOf("getFilesDir", "getDataDir"), strace = listOf("/data/user/999", "/data/user/10")),
+        id("fraud.work_profile", "Work / managed profile", IdentifierGroup.FRAUD, "UserManager.isManagedProfile / getUserProfiles", logcat = listOf("isManagedProfile", "getUserProfiles", "isProfile")),
+        id("fraud.dual_app", "Dual app / Parallel Space", IdentifierGroup.FRAUD, "PackageManager.getPackageInfo(parallel/dual)", logcat = listOf("com.lbe.parallel", "com.excelliance", "com.dual.dualspace", "com.oplus.multiapp", "com.samsung.android.da.daagent")),
+        id("fraud.factory_reset", "Factory reset / first boot", IdentifierGroup.FRAUD, "Settings.Global.boot_count + firstInstallTime", logcat = listOf("factory.?reset", "first_boot")),
+        id("fraud.harmony", "HarmonyOS / EMUI", IdentifierGroup.FRAUD, "SystemProperties hw_sc.build / ro.build.version.emui", systemProp = "ro.build.version.emui", logcat = listOf("HarmonyOS", "hw_sc.build", "ro.build.version.emui")),
+        id("fraud.canvas", "Canvas fingerprint (WebView)", IdentifierGroup.FRAUD, "WebView.evaluateJavascript(toDataURL/canvas)", logcat = listOf("toDataURL", "getImageData", "canvas fingerprint")),
+        id("fraud.webgl", "WebGL vendor/renderer", IdentifierGroup.FRAUD, "WebGLRenderingContext.getParameter / UNMASKED", logcat = listOf("UNMASKED_VENDOR", "UNMASKED_RENDERER", "webgl")),
+        id("fraud.audio_fp", "Audio fingerprint", IdentifierGroup.FRAUD, "AudioTrack / AudioContext oscillator", logcat = listOf("AudioContext", "createOscillator", "audio fingerprint")),
+        id("fraud.touch", "Behavioral touch / swipe", IdentifierGroup.FRAUD, "View.dispatchTouchEvent / MotionEvent", logcat = listOf("dispatchTouchEvent", "OnTouchListener")),
+        id("fraud.wifi_on", "Wi‑Fi enabled", IdentifierGroup.FRAUD, "WifiManager.isWifiEnabled", logcat = listOf("isWifiEnabled")),
+        id("fraud.bt_on", "Bluetooth enabled", IdentifierGroup.FRAUD, "BluetoothAdapter.isEnabled", logcat = listOf("BluetoothAdapter.isEnabled")),
+        id("fraud.location_on", "Location enabled", IdentifierGroup.FRAUD, "LocationManager.isLocationEnabled / isProviderEnabled", logcat = listOf("isLocationEnabled", "isProviderEnabled")),
+        id("fraud.cast", "Cast / virtual display", IdentifierGroup.FRAUD, "DisplayManager.getDisplays / MediaRouter", logcat = listOf("DisplayManager.getDisplays", "virtual display", "MediaRouter")),
+        id("fraud.talkback", "TalkBack / AccessibilityManager", IdentifierGroup.FRAUD, "AccessibilityManager.isTouchExplorationEnabled / getEnabledAccessibilityServiceList", logcat = listOf("isTouchExplorationEnabled", "getEnabledAccessibilityServiceList")),
+        id("fraud.mock_apps", "Fake GPS / mock location apps", IdentifierGroup.FRAUD, "PackageManager.getPackageInfo(fakegps/joystick)", logcat = listOf("fakegps", "fake.?gps", "gpsjoystick", "com.lexa.fakegps")),
+        id("fraud.vpn_apps", "VPN client packages", IdentifierGroup.FRAUD, "PackageManager.getPackageInfo(vpn/outline/wireguard)", logcat = listOf("org.torproject", "com.wireguard", "org.outline")),
+        id("fraud.auto_click", "Auto-clicker / accessibility fraud", IdentifierGroup.FRAUD, "enabled_accessibility_services clicker", logcat = listOf("autoclick", "auto.?click", "clicker")),
+        id("fraud.elapsed", "SystemClock elapsed (session age)", IdentifierGroup.FRAUD, "SystemClock.elapsedRealtimeNanos", logcat = listOf("elapsedRealtimeNanos")),
+        id("net.stun", "STUN / WebRTC real IP", IdentifierGroup.NETWORK, "PeerConnection / STUN binding", logcat = listOf("PeerConnection", "stun:", "iceCandidate", "RTCPeerConnection"))
     )
 
     // --- helpers ---
@@ -523,6 +609,12 @@ fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {
     IdentifierGroup.WIFI, IdentifierGroup.NETWORK -> AccessCategory.NETWORK
     IdentifierGroup.BLUETOOTH -> AccessCategory.BLUETOOTH
     IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION -> AccessCategory.SECURITY
+    IdentifierGroup.FRAUD -> when {
+        id.contains("clone") || id.contains("dual") || id.contains("mock") ||
+            id.contains("vpn_apps") || id.contains("auto_click") || id.contains("work_profile") ->
+            AccessCategory.SECURITY
+        else -> AccessCategory.IDENTIFIER
+    }
     IdentifierGroup.CONTENT_PROVIDER -> when {
         id.contains("telephony") || id.contains("icc") -> AccessCategory.TELEPHONY
         id.startsWith("storage.") -> AccessCategory.STORAGE
@@ -570,6 +662,12 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id.startsWith("hw.") || id.startsWith("oem.") || id.startsWith("dpm.") ||
                 id.startsWith("user.") || id.startsWith("role.") || id.startsWith("notify.") ->
                 AccessCategory.SYSTEM_API
+            id.startsWith("fraud.") -> when {
+                id.contains("clone") || id.contains("dual") || id.contains("mock") ||
+                    id.contains("vpn_apps") || id.contains("auto_click") || id.contains("work_profile") ->
+                    AccessCategory.SECURITY
+                else -> AccessCategory.IDENTIFIER
+            }
             else -> null
         }
 }
