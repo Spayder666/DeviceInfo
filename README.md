@@ -136,7 +136,8 @@ AccessMonitorService  → foreground-сервис
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
 | **CONTENT_PROVIDER** | 6 | telephony/siminfo, GSF, settings, ICC, SQLite, SharedPreferences |
 | **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
-| **NETWORK** | 8 | IP, MAC, hostname, IPv6, HTTP URL, WebView, DNS, pcap |
+| **NETWORK** | 9 | IP, MAC, hostname, IPv6, HTTP URL, WebView, DNS, pcap, TLS SNI |
+| **LOCATION** | 14 | GPS, fused, NLP, GNSS, geofence, cell, Wi‑Fi scan, RTT, UWB, HAL, SUPL |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 5 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
 | **ATTESTATION** | 5 | Key attestation, StrongBox, Play Integrity, SafetyNet, verified boot |
