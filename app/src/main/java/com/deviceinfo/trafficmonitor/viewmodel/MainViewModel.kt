@@ -197,6 +197,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private var observeJob: Job? = null
+    private var runningWatchJob: Job? = null
+    @Volatile
+    private var ignoreDeathUntilMs = 0L
 
     fun init(packageName: String) {
         if (_packageName.value == packageName) return
@@ -208,13 +211,16 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         _selectedSource.value = SessionPrefs.lastSource(app)?.let { runCatching { EventSource.valueOf(it) }.getOrNull() }
         _selectedIdentifierGroup.value = SessionPrefs.lastIdentifierGroup(app)
         _sessionStartedAt.value = System.currentTimeMillis()
+        _targetDied.value = false
+        _targetRunning.value = false
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
             repository.observeEvents(packageName).collect { list ->
                 _allEvents.value = list
             }
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        runningWatchJob?.cancel()
+        runningWatchJob = viewModelScope.launch(Dispatchers.IO) {
             var seenRunning = false
             var downStreak = 0
             while (isActive) {
@@ -226,7 +232,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     downStreak++
                     if (downStreak >= 2) {
-                        if (seenRunning && _targetRunning.value && !_targetDied.value) {
+                        val ignoreDeath = System.currentTimeMillis() < ignoreDeathUntilMs
+                        if (seenRunning && _targetRunning.value && !_targetDied.value && !ignoreDeath) {
                             _targetDied.value = true
                         }
                         _targetRunning.value = false
@@ -236,6 +243,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 delay(3000)
             }
         }
+    }
+
+    private fun suppressDeathBanner(ms: Long = 15_000L) {
+        ignoreDeathUntilMs = System.currentTimeMillis() + ms
+        _targetDied.value = false
     }
 
     fun consumeTargetDied() {
@@ -338,13 +350,15 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun launchTargetApp() {
+        suppressDeathBanner()
         viewModelScope.launch(Dispatchers.IO) {
             RootShell.launchApp(_packageName.value)
-            _targetRunning.value = true
+            _targetRunning.value = RootShell.isAppRunning(_packageName.value)
         }
     }
 
     fun forceStopTarget() {
+        suppressDeathBanner()
         viewModelScope.launch(Dispatchers.IO) {
             RootShell.forceStop(_packageName.value)
             _targetRunning.value = false
@@ -480,6 +494,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun injectFridaWrap() {
         viewModelScope.launch(Dispatchers.IO) {
             _isFridaInjecting.value = true
+            suppressDeathBanner(20_000L)
             FridaInstaller.ensureReady(getApplication())
             FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
             val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = true)
@@ -506,6 +521,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun startMitm() {
         viewModelScope.launch(Dispatchers.IO) {
             _isMitmStarting.value = true
+            suppressDeathBanner(20_000L)
             try {
                 val uid = RootShell.getUid(_packageName.value) ?: -1
                 val ok = HttpsMitmController.start(

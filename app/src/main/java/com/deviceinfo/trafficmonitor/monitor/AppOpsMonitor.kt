@@ -24,6 +24,7 @@ class AppOpsMonitor(
 ) {
     private var job: Job? = null
     private val lastState = ConcurrentHashMap<String, String>()
+    private var seeded = false
 
     private val opCategoryMap = mapOf(
         "COARSE_LOCATION" to AccessCategory.LOCATION,
@@ -32,7 +33,6 @@ class AppOpsMonitor(
         "MONITOR_LOCATION" to AccessCategory.LOCATION,
         "MONITOR_HIGH_POWER_LOCATION" to AccessCategory.LOCATION,
         "NEARBY_WIFI_DEVICES" to AccessCategory.LOCATION,
-        "ACTIVITY_RECOGNITION" to AccessCategory.LOCATION,
         "CAMERA" to AccessCategory.CAMERA,
         "RECORD_AUDIO" to AccessCategory.MICROPHONE,
         "READ_PHONE_STATE" to AccessCategory.TELEPHONY,
@@ -117,6 +117,7 @@ class AppOpsMonitor(
     private suspend fun parseAppOps(output: String) {
         val lines = output.lines()
         var currentOp: String? = null
+        val emit = seeded
 
         for (line in lines) {
             val opMatch = Regex("^\\s*([A-Z_]+):").find(line)
@@ -130,7 +131,7 @@ class AppOpsMonitor(
             if (accessMatch != null) {
                 val accessTime = accessMatch.groupValues[2].trim().ifBlank { accessMatch.groupValues[1] }
                 val stateKey = "$currentOp:$accessTime"
-                if (lastState.put(stateKey, accessTime) == null) {
+                if (lastState.put(stateKey, accessTime) == null && emit) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
                     val identifierId = opIdentifierMap[currentOp]
                     val value = identifierId
@@ -153,7 +154,7 @@ class AppOpsMonitor(
             if (rejectMatch != null) {
                 val rejectTime = rejectMatch.groupValues[1]
                 val stateKey = "reject:$currentOp:$rejectTime"
-                if (lastState.put(stateKey, rejectTime) == null) {
+                if (lastState.put(stateKey, rejectTime) == null && emit) {
                     record(
                         category = AccessCategory.PERMISSION,
                         action = "$currentOp (отклонено)",
@@ -165,6 +166,7 @@ class AppOpsMonitor(
                 }
             }
         }
+        seeded = true
     }
 
     private suspend fun record(

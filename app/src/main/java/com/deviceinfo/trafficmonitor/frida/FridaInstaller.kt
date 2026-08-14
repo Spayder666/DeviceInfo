@@ -75,8 +75,17 @@ object FridaInstaller {
     }
 
     private fun prepareDirectory() {
-        RootShell.execAndRead("mkdir -p $BASE_DIR && chmod 777 $BASE_DIR")
-        RootShell.execAndRead("touch $EVENTS_PATH && chmod 666 $EVENTS_PATH")
+        RootShell.execAndRead("mkdir -p $BASE_DIR && chmod 711 $BASE_DIR")
+        RootShell.execAndRead("touch $EVENTS_PATH && chmod 600 $EVENTS_PATH")
+    }
+
+    private fun tightenEventFilePerms(packageName: String) {
+        val uid = RootShell.getUid(packageName) ?: return
+        RootShell.execAndRead(
+            "touch $EVENTS_PATH $HTTPS_LOG && " +
+                "chown $uid:$uid $EVENTS_PATH $HTTPS_LOG && " +
+                "chmod 711 $BASE_DIR && chmod 660 $EVENTS_PATH $HTTPS_LOG"
+        )
     }
 
     private fun copyAssetToDevice(context: Context, assetPath: String, devicePath: String) {
@@ -95,7 +104,8 @@ object FridaInstaller {
         val local = File(context.filesDir, "identifier_hooks_active.js")
         local.writeText(template)
         RootShell.execAndRead("cp ${local.absolutePath} $HOOKS_PATH && chmod 644 $HOOKS_PATH")
-        RootShell.execAndRead("touch $HTTPS_LOG && chmod 666 $HTTPS_LOG")
+        RootShell.execAndRead("touch $HTTPS_LOG")
+        tightenEventFilePerms(packageName)
     }
 
     private fun isGadgetPresent(): Boolean {
@@ -233,7 +243,7 @@ object FridaInstaller {
     private fun preparePtrace() {
         RootShell.execAndRead("setenforce 0 2>/dev/null")
         RootShell.execAndRead("echo 0 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null")
-        RootShell.execAndRead("chmod 777 $BASE_DIR && chmod 666 $EVENTS_PATH $HOOKS_PATH 2>/dev/null")
+        RootShell.execAndRead("chmod 711 $BASE_DIR && chmod 644 $HOOKS_PATH 2>/dev/null")
     }
 
     private fun startInjector(pid: Int): Boolean {
@@ -248,7 +258,7 @@ object FridaInstaller {
             val running = RootShell.execAndRead(
                 "pgrep -f '$INJECT_PATH' 2>/dev/null"
             ).trim().isNotEmpty()
-            if (running && !looksLikeInjectFailure(lastLog)) {
+            if (!looksLikeInjectFailure(lastLog) && (running || looksLikeInjectSuccess(lastLog))) {
                 return true
             }
             if (looksLikeInjectFailure(lastLog)) {
@@ -270,6 +280,12 @@ object FridaInstaller {
         val lower = log.lowercase()
         return listOf("unable to", "failed", "error:", "permission denied", "not found", "cannot")
             .any { it in lower }
+    }
+
+    private fun looksLikeInjectSuccess(log: String): Boolean {
+        if (log.isBlank()) return false
+        val lower = log.lowercase()
+        return listOf("script", "loaded", "injected", "connected", "resumed").any { it in lower }
     }
 
     private fun stopInjector() {
@@ -375,7 +391,6 @@ object FridaInstaller {
     }
 
     fun clearInjection(packageName: String) {
-        RootShell.execAndRead("setprop wrap.$packageName ''")
         stopInjector()
         if (status == FridaStatus.INJECTED) {
             status = FridaStatus.READY

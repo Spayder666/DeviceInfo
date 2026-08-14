@@ -3,6 +3,9 @@ package com.deviceinfo.trafficmonitor.root
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 object RootShell {
 
@@ -28,13 +31,24 @@ object RootShell {
         return output
     }
 
-    fun execStreaming(command: String, onLine: (String) -> Unit) {
+    suspend fun execStreaming(command: String, onLine: (String) -> Unit) = coroutineScope {
         val process = exec(command)
-        BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                onLine(line!!)
+        val readerJob = launch(Dispatchers.IO) {
+            try {
+                BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        onLine(line!!)
+                    }
+                }
+            } catch (_: Exception) {
             }
+        }
+        try {
+            readerJob.join()
+        } finally {
+            runCatching { process.destroyForcibly() }
+            readerJob.cancel()
         }
     }
 
@@ -56,11 +70,22 @@ object RootShell {
             val pid = parts[0].toIntOrNull() ?: continue
             if (isAppProcessName(parts[1], packageName)) pids.add(pid)
         }
-        return pids.toList()
+        return pids.filter { pidBelongsToPackage(it, packageName) }
     }
 
     fun isAppProcessName(name: String, packageName: String): Boolean {
-        return name == packageName || name.startsWith("$packageName:")
+        if (name.isBlank()) return false
+        if (name == packageName || name.startsWith("$packageName:")) return true
+        // Linux comm is 15 bytes; long package names truncate.
+        return name.length == 15 && packageName.startsWith(name) && !name.contains(':')
+    }
+
+    fun pidBelongsToPackage(pid: Int, packageName: String): Boolean {
+        if (pid <= 0) return false
+        val comm = execAndRead("cat /proc/$pid/comm 2>/dev/null").trim()
+        if (isAppProcessName(comm, packageName)) return true
+        val cmd0 = execAndRead("tr '\\0' '\\n' < /proc/$pid/cmdline 2>/dev/null | head -n1").trim()
+        return isAppProcessName(cmd0, packageName)
     }
 
     fun getUid(packageName: String): Int? {

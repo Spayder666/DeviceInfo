@@ -42,9 +42,12 @@ object IdentifierReader {
                 readSystemApi(event.targetPackage) + readFromCaptured(event)
             id?.startsWith("browser.") == true || id == "webview.ua" || id == "hw.webview_pkg" ->
                 readBrowser(event) + readFromCaptured(event)
-            id?.startsWith("fraud.") == true || id?.startsWith("settings.") == true &&
-                id != "settings.android_id" && id != "settings.device_name" ->
+            id?.startsWith("fraud.") == true ->
                 readFraudFingerprint(event) + readFromCaptured(event)
+            id?.startsWith("settings.") == true -> {
+                val def = IdentifierCatalog.findById(id)
+                listOfNotNull(def?.let { readDefinition(it) }) + readFromCaptured(event)
+            }
             id?.startsWith("tel.") == true || id?.startsWith("sub.") == true ->
                 readTelephonyReplay(event)
             event.category == AccessCategory.LOCATION -> readLocation()
@@ -634,11 +637,28 @@ object IdentifierReader {
                 IdentifierValue("root.lsposed", "lspd dir", RootShell.execAndRead("ls -ld /data/adb/lspd /data/adb/modules/zygisk_lsposed /data/adb/modules/riru_lsposed 2>&1 | head -n 8", timeoutSec = 6).take(300)),
                 IdentifierValue("root.xposedjar", "XposedBridge.jar", RootShell.execAndRead("ls -l /system/framework/XposedBridge.jar 2>&1", timeoutSec = 5).trim())
             )
-            id == "root.inject" || id == "root.threads" || id == "root.ports" || id == "root.dlsym" || id == "root.stack" ->
-                listOfNotEmpty(
-                    IdentifierValue("root.maps", "maps hook/inject", RootShell.execAndRead("grep -E -i 'frida|lsposed|lspd|xposed|memfd|rwxp' /proc/self/maps 2>/dev/null | head -n 8", timeoutSec = 6).take(400)),
-                    IdentifierValue("root.tracer", "TracerPid", RootShell.execAndRead("grep TracerPid /proc/self/status", timeoutSec = 5).trim())
-                )
+            id == "root.inject" || id == "root.threads" || id == "root.ports" || id == "root.dlsym" || id == "root.stack" -> {
+                val pid = event.processId?.takeIf { it > 0 } ?: RootShell.findPid(event.targetPackage)
+                if (pid == null) {
+                    listOfNotEmpty(IdentifierValue("root.maps", "maps hook/inject", "нет PID цели"))
+                } else {
+                    listOfNotEmpty(
+                        IdentifierValue(
+                            "root.maps",
+                            "maps hook/inject",
+                            RootShell.execAndRead(
+                                "grep -E -i 'frida|lsposed|lspd|xposed|memfd|rwxp' /proc/$pid/maps 2>/dev/null | head -n 8",
+                                timeoutSec = 6
+                            ).take(400)
+                        ),
+                        IdentifierValue(
+                            "root.tracer",
+                            "TracerPid",
+                            RootShell.execAndRead("grep TracerPid /proc/$pid/status", timeoutSec = 5).trim()
+                        )
+                    )
+                }
+            }
             id == "root.emulator" -> listOfNotEmpty(
                 IdentifierValue("root.qemu", "ro.kernel.qemu", getprop("ro.kernel.qemu")),
                 IdentifierValue("root.hardware", "ro.hardware", getprop("ro.hardware")),
@@ -651,12 +671,25 @@ object IdentifierReader {
                     timeoutSec = 8
                 ).take(400))
             )
-            id == "root.isolated" -> listOfNotEmpty(
-                IdentifierValue("root.isolated", "isolated", RootShell.execAndRead(
-                    "ps -A 2>/dev/null | grep -E 'isolated|${event.targetPackage}' | head -n 12",
-                    timeoutSec = 6
-                ).take(400))
-            )
+            id == "root.isolated" -> {
+                val pids = RootShell.findAllPids(event.targetPackage)
+                val text = if (pids.isEmpty()) {
+                    "процесс цели не найден"
+                } else {
+                    pids.take(12).joinToString("\n") { pid ->
+                        val cmd = RootShell.execAndRead(
+                            "tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null",
+                            timeoutSec = 3
+                        ).trim()
+                        val st = RootShell.execAndRead(
+                            "grep -E 'NSpid|NoNewPrivs|Seccomp' /proc/$pid/status 2>/dev/null | tr '\\n' ' '",
+                            timeoutSec = 3
+                        ).trim()
+                        "$pid $cmd $st"
+                    }
+                }
+                listOfNotEmpty(IdentifierValue("root.isolated", "isolated", text.take(400)))
+            }
             id == "root.text" || id == "root.svc" || id == "root.decision" || id == "root.talsec" ->
                 readFromCaptured(event)
             id == "ent.integrity" || id == "ent.safetynet" || id == "ent.verdict" || id.startsWith("attest.") -> listOfNotEmpty(

@@ -21,10 +21,11 @@ class HttpsMitmProxy(
 ) {
     private val running = AtomicBoolean(false)
     private var server: ServerSocket? = null
-    private val pool = Executors.newCachedThreadPool()
+    private var pool = Executors.newCachedThreadPool()
 
     fun start(port: Int = MitmCaManager.PORT) {
         if (!running.compareAndSet(false, true)) return
+        if (pool.isShutdown) pool = Executors.newCachedThreadPool()
         server = ServerSocket().apply {
             reuseAddress = true
             bind(InetSocketAddress("0.0.0.0", port))
@@ -45,6 +46,7 @@ class HttpsMitmProxy(
         running.set(false)
         try { server?.close() } catch (_: Exception) {}
         server = null
+        pool.shutdownNow()
     }
 
     private fun handle(client: Socket) {

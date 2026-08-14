@@ -24,6 +24,7 @@ class FridaEventPoller(
 ) {
     private var job: Job? = null
     private var lastSize = 0L
+    private var pending = ""
 
     fun start() {
         job = scope.launch(Dispatchers.IO) {
@@ -44,6 +45,10 @@ class FridaEventPoller(
             "wc -c < ${FridaInstaller.EVENTS_PATH} 2>/dev/null"
         ).trim().toLongOrNull() ?: return
 
+        if (sizeStr < lastSize) {
+            lastSize = 0L
+            pending = ""
+        }
         if (sizeStr <= lastSize) return
 
         val newContent = RootShell.execAndRead(
@@ -51,8 +56,14 @@ class FridaEventPoller(
             timeoutSec = 5
         )
         lastSize = sizeStr
-
-        for (line in newContent.lines()) {
+        val combined = pending + newContent
+        val lastNl = combined.lastIndexOf('\n')
+        if (lastNl < 0) {
+            pending = combined
+            return
+        }
+        pending = combined.substring(lastNl + 1)
+        for (line in combined.substring(0, lastNl).split('\n')) {
             if (line.isBlank()) continue
             parseLine(line.trim())
         }
@@ -61,6 +72,8 @@ class FridaEventPoller(
     private suspend fun parseLine(line: String) {
         try {
             val json = JSONObject(line)
+            val pkg = json.optString("package", "")
+            if (pkg.isNotEmpty() && pkg != packageName) return
             val identifierId = json.optString("identifierId", "")
             if (identifierId == "frida.init") return
 
@@ -115,6 +128,7 @@ class FridaEventPoller(
 
     fun resetOffset() {
         lastSize = 0L
+        pending = ""
     }
 
     private fun categoryFor(action: String, permission: String?, group: String?): AccessCategory {

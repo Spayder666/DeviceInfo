@@ -95,14 +95,11 @@ class TcpdumpMonitor(
 
     private fun refreshAppRemotes() {
         val pids = RootShell.findAllPids(packageName)
+        if (pids.isEmpty()) return
         val cmd = buildString {
-            if (pids.isNotEmpty()) {
-                append("cat ")
-                pids.take(6).forEach { append("/proc/$it/net/tcp /proc/$it/net/tcp6 ") }
-                append("2>/dev/null")
-            } else {
-                append("cat /proc/net/tcp /proc/net/tcp6 2>/dev/null")
-            }
+            append("cat ")
+            pids.take(6).forEach { append("/proc/$it/net/tcp /proc/$it/net/tcp6 ") }
+            append("2>/dev/null")
         }
         val dump = RootShell.execAndRead(cmd, timeoutSec = 6)
         for (line in dump.lines()) {
@@ -110,7 +107,7 @@ class TcpdumpMonitor(
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.size < 8) continue
             val lineUid = parts.getOrNull(7)?.toIntOrNull()
-            if (uid > 0 && lineUid != null && lineUid != uid && pids.isEmpty()) continue
+            if (uid > 0 && lineUid != null && lineUid != uid) continue
             decodeRemote(parts[2])?.let { appRemotes.add(it) }
         }
         while (appRemotes.size > 80) {

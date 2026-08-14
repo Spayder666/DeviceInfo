@@ -53,6 +53,7 @@ class LocationDumpMonitor(
     }
 
     private suspend fun parseLastLocations(dump: String) {
+        if (!dump.contains(packageName)) return
         val regex = Regex(
             """(?i)last (?:coarse )?location=Location\[(\w+)\s+(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)([^\]]*)]"""
         )
@@ -88,18 +89,7 @@ class LocationDumpMonitor(
 
     private suspend fun parseRegistrations(dump: String) {
         val pkgIdx = dump.indexOf(packageName)
-        if (pkgIdx < 0) {
-            val key = "not-registered"
-            if (seen.put(key, "1") == null) {
-                record(
-                    action = "Подписка на локацию",
-                    request = packageName,
-                    response = "Пакет пока не найден в dumpsys location (нет активной регистрации). Координаты провайдеров всё равно пишутся выше.",
-                    raw = "no-registration"
-                )
-            }
-            return
-        }
+        if (pkgIdx < 0) return
 
         val window = dump.substring((pkgIdx - 400).coerceAtLeast(0), (pkgIdx + 800).coerceAtMost(dump.length))
         val request = Regex("LocationRequest\\[[^]]+]").find(window)?.value

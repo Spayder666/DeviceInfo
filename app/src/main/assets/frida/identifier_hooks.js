@@ -25,10 +25,14 @@ function jsonEscape(s) {
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
     .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r');
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t')
+    .replace(/[\x00-\x1f]/g, function (c) {
+      return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+    });
 }
 
-function writeLine(line) {
+function flushLine(line) {
   var io = initNativeIo();
   if (!io) return;
   try {
@@ -43,6 +47,14 @@ function writeLine(line) {
   } catch (e) {}
 }
 
+function writeLine(line) {
+  try {
+    setTimeout(function () { flushLine(line); }, 0);
+  } catch (e) {
+    flushLine(line);
+  }
+}
+
 function writeEvent(identifierId, action, request, response, permission) {
   var ts = Date.now();
   var line = '{"identifierId":"' + jsonEscape(identifierId || '') +
@@ -50,6 +62,7 @@ function writeEvent(identifierId, action, request, response, permission) {
     '","request":"' + jsonEscape(request || '') +
     '","response":"' + jsonEscape(response || '') +
     '","permission":"' + jsonEscape(permission || '') +
+    '","package":"' + jsonEscape(TARGET_PKG) +
     '","timestamp":' + ts +
     ',"source":"frida"}';
   writeLine(line);

@@ -19,10 +19,16 @@ class DecisionTracker(
     private var job: Job? = null
     private var lastId = 0L
     private var lastProbe: CaptureEvent? = null
+    private var primed = false
 
     fun start() {
         job = scope.launch {
             repository.observeEvents(packageName).collect { list ->
+                if (!primed) {
+                    lastId = list.maxOfOrNull { it.id } ?: 0L
+                    primed = true
+                    return@collect
+                }
                 val fresh = list.filter { it.id > lastId }.sortedBy { it.id }
                 if (fresh.isNotEmpty()) lastId = fresh.maxOf { it.id }
                 for (event in fresh) handle(event)

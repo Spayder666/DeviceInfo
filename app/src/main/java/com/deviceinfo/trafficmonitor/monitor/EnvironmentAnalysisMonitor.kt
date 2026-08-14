@@ -109,14 +109,19 @@ class EnvironmentAnalysisMonitor(
     }
 
     private suspend fun checkIsolated() {
-        val procs = RootShell.execAndRead(
-            "for d in /proc/[0-9]*; do " +
-                "c=\$(tr '\\0' ' ' < \$d/cmdline 2>/dev/null); " +
-                "case \"\$c\" in *$packageName*) " +
-                "echo \"\${d#/proc/} \$c \$(grep -E 'NSpid|NoNewPrivs|Seccomp' \$d/status 2>/dev/null | tr '\\n' ' ')\"; " +
-                "esac; done | head -n 12",
-            timeoutSec = 8
-        )
+        val pids = RootShell.findAllPids(packageName)
+        if (pids.isEmpty()) return
+        val procs = pids.take(12).joinToString("\n") { appPid ->
+            val cmd = RootShell.execAndRead(
+                "tr '\\0' ' ' < /proc/$appPid/cmdline 2>/dev/null",
+                timeoutSec = 3
+            ).trim()
+            val st = RootShell.execAndRead(
+                "grep -E 'NSpid|NoNewPrivs|Seccomp' /proc/$appPid/status 2>/dev/null | tr '\\n' ' '",
+                timeoutSec = 3
+            ).trim()
+            "$appPid $cmd $st"
+        }
         if (procs.isBlank()) return
         val isolated = procs.lineSequence().filter {
             it.contains(":isolated") || it.contains("isolated_app") || Regex("""\s$packageName:""").containsMatchIn(it)

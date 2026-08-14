@@ -112,8 +112,6 @@ class AccessMonitorService : Service() {
             fridaMonitor = FridaMonitor(applicationContext, targetPackage, repository, serviceScope)
                 .also { it.start() }
 
-            IdentifierSnapshot.record(targetPackage, targetPid, repository)
-
             locationDumpMonitor = LocationDumpMonitor(targetPackage, repository, serviceScope).also { it.start() }
             systemLogcatMonitor = SystemLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
             comprehensiveDumpMonitor = ComprehensiveDumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
