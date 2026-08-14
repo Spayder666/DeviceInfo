@@ -1120,6 +1120,8 @@ function classifyClass(name) {
   if (/lspatch|virtualxposed|taichi/.test(s)) return 'root.lspatch';
   if (/xposed/.test(s)) return 'root.xposed';
   if (/frida|gadget/.test(s)) return 'root.frida_detect';
+  if (/talsec|freerasp|threatlistener/.test(s)) return 'root.talsec';
+  if (/jailmonkey|flutter_jailbreak|iroot|roottools/.test(s)) return 'root.rootbeer';
   return 'root.rootbeer';
 }
 
@@ -1136,7 +1138,7 @@ function isRootPkg(pkg) {
 
 function isHookClass(name) {
   if (!name) return false;
-  return /rootbeer|xposed|lsposed|lspd|lsplant|lspatch|edxposed|magisk|frida|gadget|substrate|de\.robv\.android\.xposed|org\.lsposed|com\.scottyab\.rootbeer|com\.saurik\.substrate|me\.weishu/.test(String(name).toLowerCase());
+  return /rootbeer|xposed|lsposed|lspd|lsplant|lspatch|edxposed|magisk|frida|gadget|substrate|de\.robv\.android\.xposed|org\.lsposed|com\.scottyab\.rootbeer|com\.saurik\.substrate|me\.weishu|talsec|freerasp|jailmonkey|safetydetect|iroot|roottools|flutter_jailbreak|appcheck|play\.core\.integrity|kimchangyoun\.rootbeer/.test(String(name).toLowerCase());
 }
 
 function isFridaPort(port) {
@@ -1254,24 +1256,67 @@ function hookRootDebug() {
   } catch (e) {}
 }
 
-function hookRootBeer() {
+function hookDetectorMethods(className, id, methods) {
   try {
-    var RB = Java.use('com.scottyab.rootbeer.RootBeer');
-    ['isRooted', 'isRootedWithoutBusyBoxCheck', 'detectRootManagementApps', 'detectPotentiallyDangerousApps',
-      'detectTestKeys', 'checkForBusyBoxBinary', 'checkForSuBinary', 'checkSuExists',
-      'checkForRWPaths', 'checkForDangerousProps', 'checkForRootNative', 'detectRootCloakingApps',
-      'checkForMagiskBinary'].forEach(function (m) {
+    var Cls = Java.use(className);
+    methods.forEach(function (m) {
       try {
-        RB[m].overloads.forEach(function (overload) {
+        Cls[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeRoot('root.rootbeer', 'RootBeer.' + m, safeStr(arguments[0]), safeStr(result));
+            writeRoot(id, className.split('.').pop() + '.' + m, safeStr(arguments[0]), safeStr(result));
             return result;
           };
         });
       } catch (e) {}
     });
   } catch (e) {}
+}
+
+function hookRootBeer() {
+  var methods = [
+    'isRooted', 'isRootedWithoutBusyBoxCheck', 'detectRootManagementApps', 'detectPotentiallyDangerousApps',
+    'detectTestKeys', 'checkForBusyBoxBinary', 'checkForSuBinary', 'checkSuExists',
+    'checkForRWPaths', 'checkForDangerousProps', 'checkForRootNative', 'detectRootCloakingApps',
+    'checkForMagiskBinary'
+  ];
+  hookDetectorMethods('com.scottyab.rootbeer.RootBeer', 'root.rootbeer', methods);
+  hookDetectorMethods('com.kimchangyoun.rootbeerFresh.RootBeer', 'root.rootbeer', methods);
+  try {
+    var RN = Java.use('com.scottyab.rootbeer.RootBeerNative');
+    RN.checkForRoot.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var result = overload.apply(this, arguments);
+        writeRoot('root.rootbeer', 'RootBeerNative.checkForRoot', '', safeStr(result));
+        return result;
+      };
+    });
+  } catch (e) {}
+  hookDetectorMethods('com.stericson.RootTools.RootTools', 'root.rootbeer', [
+    'isRootAvailable', 'isAccessGiven', 'isBusyboxAvailable'
+  ]);
+  ['com.aheaditec.talsec.security.Talsec',
+    'com.aheaditec.talsec_security.security.api.Talsec',
+    'com.aheaditec.talsec.security.api.Talsec'].forEach(function (name) {
+    hookDetectorMethods(name, 'root.talsec', ['start', 'stop', 'getThreats']);
+  });
+  try {
+    var TL = Java.use('com.aheaditec.talsec_security.security.api.ThreatListener');
+    ['onThreatDetected', 'threatDetected'].forEach(function (m) {
+      try {
+        TL[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            writeRoot('root.talsec', 'ThreatListener.' + m, safeStr(arguments[0]), '');
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  hookDetectorMethods('com.gantix.JailMonkey.Rooted.RootedCheck', 'root.rootbeer', ['isJailBroken', 'detectRoot']);
+  hookDetectorMethods('io.github.edufolly.flutter_jailbreak_detection.FlutterJailbreakDetectionPlugin', 'root.rootbeer', [
+    'isJailBroken', 'isRooted'
+  ]);
 }
 
 function hookIntegrityApis() {
@@ -1285,10 +1330,74 @@ function hookIntegrityApis() {
     });
   } catch (e) {}
   try {
+    var ITR = Java.use('com.google.android.play.core.integrity.IntegrityTokenResponse');
+    ITR.token.implementation = function () {
+      var t = this.token();
+      writeRoot('ent.verdict', 'IntegrityTokenResponse.token', 'len=' + (t ? t.length : 0), safeStr(t).substring(0, 240));
+      return t;
+    };
+  } catch (e) {}
+  try {
+    var SIM = Java.use('com.google.android.play.core.integrity.StandardIntegrityManager');
+    SIM.prepareIntegrityToken.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeRoot('ent.integrity', 'StandardIntegrityManager.prepareIntegrityToken', safeStr(arguments[0]), 'requested');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var SITP = Java.use('com.google.android.play.core.integrity.StandardIntegrityManager$StandardIntegrityTokenProvider');
+    SITP.request.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeRoot('ent.integrity', 'StandardIntegrityTokenProvider.request', safeStr(arguments[0]), 'requested');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var SIT = Java.use('com.google.android.play.core.integrity.StandardIntegrityManager$StandardIntegrityToken');
+    SIT.token.implementation = function () {
+      var t = this.token();
+      writeRoot('ent.verdict', 'StandardIntegrityToken.token', 'len=' + (t ? t.length : 0), safeStr(t).substring(0, 240));
+      return t;
+    };
+  } catch (e) {}
+  try {
     var SN = Java.use('com.google.android.gms.safetynet.SafetyNetClient');
     SN.attest.overloads.forEach(function (overload) {
       overload.implementation = function () {
         writeRoot('ent.safetynet', 'SafetyNetClient.attest', '', 'requested');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Att = Java.use('com.google.android.gms.safetynet.SafetyNetApi$AttestationResponse');
+    Att.getJwsResult.implementation = function () {
+      var jws = this.getJwsResult();
+      writeRoot('ent.verdict', 'SafetyNet.getJwsResult', 'jws', safeStr(jws).substring(0, 400));
+      return jws;
+    };
+  } catch (e) {}
+  try {
+    var SD = Java.use('com.huawei.hms.support.api.safetydetect.SafetyDetectClient');
+    ['sysIntegrity', 'appsCheck', 'getWifiDetectStatus', 'userDetection'].forEach(function (m) {
+      try {
+        SD[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            writeRoot('ent.integrity', 'SafetyDetect.' + m, '', 'requested');
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var FAC = Java.use('com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProvider');
+    FAC.getToken.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeRoot('ent.integrity', 'PlayIntegrityAppCheck.getToken', '', 'requested');
         return overload.apply(this, arguments);
       };
     });
@@ -1544,6 +1653,172 @@ function hookNativeRootAccess() {
   } catch (e) {}
 }
 
+function hookNativeSyscall() {
+  try {
+    var addr = Module.findExportByName('libc.so', 'syscall');
+    if (!addr) return;
+    Interceptor.attach(addr, {
+      onEnter: function (args) {
+        var nr = args[0].toInt32();
+        this.nr = nr;
+        this.interesting = (nr === 56 || nr === 48 || nr === 79 || nr === 221 || nr === 203 || nr === 117 ||
+          nr === 5 || nr === 33 || nr === 11);
+        if (!this.interesting) return;
+        try {
+          if (nr === 56 || nr === 48 || nr === 79) this.path = Memory.readUtf8String(args[2]);
+          else if (nr === 221 || nr === 5 || nr === 33 || nr === 11) this.path = Memory.readUtf8String(args[1]);
+          else this.path = 'nr=' + nr;
+        } catch (e) { this.path = 'nr=' + nr; }
+      },
+      onLeave: function (retval) {
+        if (!this.interesting) return;
+        var p = this.path || '';
+        if (p && (isRootPath(p) || isProcInjectPath(p) || this.nr === 117 || this.nr === 221 || this.nr === 11)) {
+          writeRoot('root.svc', 'libc.syscall', 'nr=' + this.nr + ' ' + p, 'rc=' + retval.toInt32());
+        }
+      }
+    });
+  } catch (e) {}
+}
+
+function hookProcessIsolated() {
+  try {
+    var P = Java.use('android.os.Process');
+    P.isIsolated.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var r = overload.apply(this, arguments);
+        writeRoot('root.isolated', 'Process.isIsolated', '', safeStr(r));
+        return r;
+      };
+    });
+  } catch (e) {}
+  try {
+    var P = Java.use('android.os.Process');
+    var origUid = P.myUid;
+    origUid.implementation = function () {
+      var uid = origUid.call(this);
+      if (uid >= 99000 && uid <= 99999) {
+        writeRoot('root.isolated', 'Process.myUid', '', '' + uid);
+      }
+      return uid;
+    };
+  } catch (e) {}
+}
+
+function hookVpnProxyPin() {
+  try {
+    var NC = Java.use('android.net.NetworkCapabilities');
+    NC.hasTransport.implementation = function (t) {
+      var r = this.hasTransport(t);
+      if (t === 4) writeEvent('net.vpn', 'NetworkCapabilities.hasTransport(VPN)', '' + t, safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var CM = Java.use('android.net.ConnectivityManager');
+    CM.getNetworkCapabilities.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var caps = overload.apply(this, arguments);
+        var vpn = false;
+        try { vpn = caps && caps.hasTransport(4); } catch (e) {}
+        if (vpn) writeEvent('net.vpn', 'ConnectivityManager.getNetworkCapabilities', '', 'TRANSPORT_VPN', null);
+        return caps;
+      };
+    });
+  } catch (e) {}
+  try {
+    var NI = Java.use('java.net.NetworkInterface');
+    NI.getName.implementation = function () {
+      var name = this.getName();
+      if (name && /^(tun|tap|ppp|wg)/.test(name)) {
+        writeEvent('net.vpn', 'NetworkInterface.getName', name, '', null);
+      }
+      return name;
+    };
+  } catch (e) {}
+  try {
+    var VS = Java.use('android.net.VpnService');
+    VS.prepare.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var r = overload.apply(this, arguments);
+        writeEvent('net.vpn', 'VpnService.prepare', '', safeStr(r), null);
+        return r;
+      };
+    });
+  } catch (e) {}
+  try {
+    var Proxy = Java.use('android.net.Proxy');
+    ['getDefaultHost', 'getDefaultPort', 'getHost', 'getPort'].forEach(function (m) {
+      try {
+        Proxy[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            writeEvent('net.proxy', 'android.net.Proxy.' + m, '', safeStr(r), null);
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Sys = Java.use('java.lang.System');
+    var origGet = Sys.getProperty.overload('java.lang.String');
+    origGet.implementation = function (key) {
+      var r = origGet.call(this, key);
+      if (key && /proxy/i.test(key)) writeEvent('net.proxy', 'System.getProperty', key, safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var PS = Java.use('java.net.ProxySelector');
+    PS.select.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var r = overload.apply(this, arguments);
+        writeEvent('net.proxy', 'ProxySelector.select', safeStr(arguments[0]), safeStr(r), null);
+        return r;
+      };
+    });
+  } catch (e) {}
+  try {
+    var Ex = Java.use('javax.net.ssl.SSLPeerUnverifiedException');
+    Ex.$init.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('net.pin_fail', 'SSLPeerUnverifiedException', safeStr(arguments[0]), '', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var HS = Java.use('javax.net.ssl.SSLHandshakeException');
+    HS.$init.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var msg = safeStr(arguments[0]);
+        if (/pin|trust|cert|anchor|hostname/i.test(msg)) {
+          writeEvent('net.pin_fail', 'SSLHandshakeException', msg, '', null);
+        }
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  if (!MITM_ENABLED) {
+    try {
+      var Pinner = Java.use('okhttp3.CertificatePinner');
+      Pinner.check.overloads.forEach(function (overload) {
+        overload.implementation = function () {
+          try {
+            var r = overload.apply(this, arguments);
+            writeEvent('net.pin_fail', 'CertificatePinner.check', safeStr(arguments[0]), 'ok', null);
+            return r;
+          } catch (err) {
+            writeEvent('net.pin_fail', 'CertificatePinner.check FAIL', safeStr(arguments[0]), safeStr(err), null);
+            throw err;
+          }
+        };
+      });
+    } catch (e) {}
+  }
+}
+
 function hookRootDetection() {
   hookRootFiles();
   hookRootExec();
@@ -1557,6 +1832,8 @@ function hookRootDetection() {
   hookInjectThreads();
   hookInjectClassLoader();
   hookInjectEnvAndLoad();
+  hookProcessIsolated();
+  hookVpnProxyPin();
 }
 
 function installJavaHooks() {
@@ -1605,6 +1882,7 @@ setTimeout(function () {
   try { hookNativeProperties(); } catch (e) {}
   try { hookNativeNetMeta(); } catch (e) {}
   try { hookNativeRootAccess(); } catch (e) {}
+  try { hookNativeSyscall(); } catch (e) {}
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
@@ -1626,8 +1904,9 @@ function truncateHttp(buf, maxLen) {
 
 function looksHttpish(s) {
   if (!s || s.length < 4) return false;
-  return /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|HTTP\/) |\b(content-type|application\/json|authorization|\"lat\"|\"lon\")/i.test(s) ||
-    s.indexOf('{') === 0 || s.indexOf('[') === 0;
+  return /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|HTTP\/|PRI \*) |\b(content-type|application\/json|authorization|\"lat\"|\"lon\")/i.test(s) ||
+    s.indexOf('{') === 0 || s.indexOf('[') === 0 ||
+    s.indexOf('PRI * HTTP/2') === 0;
 }
 
 function installMitmHooks() {
@@ -1660,7 +1939,10 @@ function unpinCertificates() {
   try {
     var Pinner = Java.use('okhttp3.CertificatePinner');
     Pinner.check.overloads.forEach(function (overload) {
-      overload.implementation = function () { return; };
+      overload.implementation = function () {
+        writeEvent('net.pin_fail', 'CertificatePinner.check (MITM bypass)', safeStr(arguments[0]), 'bypassed', null);
+        return;
+      };
     });
   } catch (e) {}
   try {

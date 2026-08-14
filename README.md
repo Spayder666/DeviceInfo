@@ -14,7 +14,8 @@ Android-приложение для мониторинга **системных 
 | Камера | Camera API, open(/dev/camera) |
 | Микрофон | AudioRecord, MediaRecorder |
 | Телефон / SIM | IMEI, IMSI, номер SIM, TelephonyManager |
-| Идентификаторы (**165 типов**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP, DNS, SNI, HTTPS… |
+| Идентификаторы (**222 типа**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP/2, Integrity verdict, root hide… |
+| Root / Integrity | su, Magisk/Shamiko, Play Integrity verdict, VPN/CA/pin, hooks, isolated, .text |
 | Контакты / SMS | ContactsProvider, SmsManager |
 | Сеть / API | HTTP-запросы (метаданные), connect(), сокеты |
 | Разрешения | AppOps, checkPermission, requestPermissions |
@@ -73,7 +74,8 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`
 - Без root мониторинг невозможен
 - Некоторые API могут не попадать в logcat на release-сборках (обфускация/ProGuard)
 - strace может быть недоступен на некоторых прошивках
-- **HTTPS MITM** только вручную (кнопка «MITM HTTPS»): локальный CA + iptables REDIRECT и Frida `SSL_read`/`SSL_write` + снятие pinning. Не расшифровывает чужой Wi‑Fi — только выбранное приложение на этом устройстве.
+- **HTTPS MITM** только вручную (кнопка «MITM HTTPS»): локальный CA + iptables REDIRECT, ALPN `h2`/`http/1.1`, разбор HTTP/2 HEADERS и Frida `SSL_read`/`SSL_write` + снятие pinning. Не расшифровывает чужой Wi‑Fi — только выбранное приложение на этом устройстве.
+- Токен Play Integrity на клиенте зашифрован: verdict (`MEETS_DEVICE_INTEGRITY` и т.д.) появляется, если сервер вернул JSON или виден SafetyNet JWS. Сырой SVC в `.text` (не через libc) не перехватывается.
 
 ## Архитектура
 
@@ -102,6 +104,10 @@ AccessMonitorService  → foreground-сервис
   ├── SyncPushMonitor       → FCM / sync / wake
   ├── SecurityKeystoreMonitor
   ├── OemIndoorMonitor      → IZat / RTT / UWB
+  ├── RootDetectionMonitor  → maps / ports / RootBeer / LSPosed
+  ├── EnvironmentAnalysisMonitor → Shamiko/DenyList, isolated, libc .text
+  ├── NetworkEnvMonitor     → VPN / proxy / user CA / pin fail
+  ├── DecisionTracker       → после root-check → login/403
   └── FridaMonitor          → ручной frida-inject + Java hooks
 ```
 
@@ -111,13 +117,13 @@ AccessMonitorService  → foreground-сервис
 
 **Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Хуки: Location/GNSS/Fused, Telephony, Camera, Audio, OkHttp, HttpURLConnection, WebView, SQLite, SharedPreferences, файлы с lat/lon, Geofence, ActivityRecognition, WorkManager, ContentResolver, Build/getprop/Settings.
+Хуки: Location/GNSS/Fused, Telephony, Camera, Audio, OkHttp, HttpURLConnection, WebView, SQLite, SharedPreferences, файлы с lat/lon, Geofence, ActivityRecognition, WorkManager, ContentResolver, Build/getprop/Settings, Play Integrity / SafetyNet (в т.ч. token/JWS), NetworkCapabilities/VPN/proxy, pinning, Process.isIsolated, libc `syscall()`, RootBeer/Talsec/JailMonkey.
 
 События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог идентификаторов (165 типов)
+## Каталог идентификаторов (222 типа)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 
@@ -137,11 +143,12 @@ AccessMonitorService  → foreground-сервис
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
 | **CONTENT_PROVIDER** | 6 | telephony/siminfo, GSF, settings, ICC, SQLite, SharedPreferences |
 | **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
-| **NETWORK** | 10 | IP, MAC, hostname, IPv6, HTTP, WebView, DNS, pcap, SNI, HTTPS MITM |
+| **NETWORK** | 15 | IP, MAC, HTTP/HTTPS/HTTP2, WebView, DNS, SNI, VPN, proxy, user CA, pin fail |
 | **LOCATION** | 14 | GPS, fused, NLP, GNSS, geofence, cell, Wi‑Fi scan, RTT, UWB, HAL, SUPL |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
-| **OEM** | 5 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
-| **ATTESTATION** | 5 | Key attestation, StrongBox, Play Integrity, SafetyNet, verified boot |
+| **OEM** | 6 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
+| **ATTESTATION** | 6 | Key attestation, StrongBox, Play Integrity, SafetyNet, **verdict**, verified boot |
+| **ROOT** | 28 | su, Magisk, Shamiko/DenyList, isolated, .text диск≠RAM, libc syscall, Talsec, Frida/LSPosed |
 
 Каждый идентификатор содержит: API, system property, file path, regex для logcat/strace, требуемое разрешение.
 

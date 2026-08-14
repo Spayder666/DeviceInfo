@@ -273,6 +273,11 @@ object IdentifierCatalog {
         id("net.pcap", "pcap заголовки", IdentifierGroup.NETWORK, "tcpdump -s 96"),
         id("net.sni", "TLS SNI (имя хоста)", IdentifierGroup.NETWORK, "SSL_get_servername / SSLSocket.getPeerHost"),
         id("net.https", "HTTPS plaintext (MITM)", IdentifierGroup.NETWORK, "SSL_read/write + local CA proxy"),
+        id("net.http2", "HTTP/2 MITM (ALPN h2)", IdentifierGroup.NETWORK, "ALPN h2 + HEADERS :path/:status"),
+        id("net.vpn", "VPN / TRANSPORT_VPN", IdentifierGroup.NETWORK, "NetworkCapabilities.hasTransport(TRANSPORT_VPN)", logcat = listOf("TRANSPORT_VPN", "VpnService", "tun0")),
+        id("net.proxy", "HTTP proxy", IdentifierGroup.NETWORK, "Proxy.getDefaultHost / http.proxyHost", logcat = listOf("http_proxy", "http.proxyHost", "ProxySelector")),
+        id("net.user_ca", "User CA", IdentifierGroup.NETWORK, "/data/misc/user/0/cacerts-added", file = "/data/misc/user/0/cacerts-added", strace = listOf("cacerts-added", "UserCertificateSource")),
+        id("net.pin_fail", "Certificate pinning fail", IdentifierGroup.NETWORK, "CertificatePinner / SSLPeerUnverifiedException", logcat = listOf("CertificatePinner", "SSLPeerUnverified", "Trust anchor", "ERR_CERT")),
         id("storage.sqlite", "SQLite query", IdentifierGroup.CONTENT_PROVIDER, "SQLiteDatabase.rawQuery", logcat = listOf("SQLiteDatabase", "SQLiteLog")),
         id("storage.prefs", "SharedPreferences", IdentifierGroup.CONTENT_PROVIDER, "SharedPreferences.getString", logcat = listOf("SharedPreferences")),
         id("storage.file", "Файлы приложения", IdentifierGroup.PROC_SYS, "FileInputStream / FileOutputStream", strace = listOf("/data/data/"))
@@ -281,8 +286,9 @@ object IdentifierCatalog {
     private fun enterpriseIdentifiers() = listOf(
         id("ent.esid", "Enrollment Specific ID", IdentifierGroup.ENTERPRISE, "DevicePolicyManager.getEnrollmentSpecificId()", logcat = listOf("getEnrollmentSpecificId", "enterpriseSpecificId")),
         id("ent.org_id", "Organization ID", IdentifierGroup.ENTERPRISE, "DevicePolicyManager.setOrganizationId()", logcat = listOf("setOrganizationId")),
-        id("ent.integrity", "Play Integrity token", IdentifierGroup.ATTESTATION, "IntegrityManager.requestIntegrityToken()", logcat = listOf("IntegrityService", "PlayIntegrity")),
-        id("ent.safetynet", "SafetyNet attestation", IdentifierGroup.ATTESTATION, "SafetyNetClient.attest()", logcat = listOf("SafetyNet"))
+        id("ent.integrity", "Play Integrity token", IdentifierGroup.ATTESTATION, "IntegrityManager.requestIntegrityToken()", logcat = listOf("IntegrityService", "PlayIntegrity", "StandardIntegrity")),
+        id("ent.safetynet", "SafetyNet attestation", IdentifierGroup.ATTESTATION, "SafetyNetClient.attest()", logcat = listOf("SafetyNet")),
+        id("ent.verdict", "Integrity verdict", IdentifierGroup.ATTESTATION, "MEETS_DEVICE_INTEGRITY / ctsProfileMatch / decodeIntegrityToken", logcat = listOf("MEETS_DEVICE_INTEGRITY", "MEETS_STRONG_INTEGRITY", "MEETS_BASIC_INTEGRITY", "NO_INTEGRITY", "ctsProfileMatch", "deviceRecognitionVerdict", "decodeIntegrityToken"))
     )
 
     private fun oemIdentifiers() = listOf(
@@ -338,7 +344,13 @@ object IdentifierCatalog {
         id("root.dlsym", "dlsym frida/xposed символы", IdentifierGroup.ROOT, "dlsym(frida_agent_main / MSHookFunction)", logcat = listOf("frida_agent_main", "gum_interceptor", "MSHookFunction", "xposedCallHandler")),
         id("root.stack", "Стек на Xposed/LSPosed", IdentifierGroup.ROOT, "Thread.getAllStackTraces / handleHookedMethod", logcat = listOf("handleHookedMethod", "invokeOriginalMethodNative", "LSPHooker")),
         id("root.emulator", "Детект эмулятора", IdentifierGroup.ROOT, "qemu/goldfish/ranchu", logcat = listOf("goldfish", "ranchu", "qemu_pipe", "ro.kernel.qemu"), strace = listOf("/dev/qemu_pipe", "/dev/goldfish_pipe", "/sys/qemu_trace")),
-        id("root.mounts", "mount magisk/rw system", IdentifierGroup.ROOT, "/proc/mounts", file = "/proc/mounts", strace = listOf("/proc/mounts", "/proc/self/mounts"))
+        id("root.mounts", "mount magisk/rw system", IdentifierGroup.ROOT, "/proc/mounts", file = "/proc/mounts", strace = listOf("/proc/mounts", "/proc/self/mounts")),
+        id("root.hide", "Hide root (Shamiko / DenyList)", IdentifierGroup.ROOT, "/proc/pid/root vs host su", file = "/data/adb/modules/zygisk_shamiko", logcat = listOf("Shamiko", "DenyList", "denylist", "zygisk_shamiko"), strace = listOf("zygisk_shamiko", "/data/adb/modules/shamiko")),
+        id("root.isolated", "Isolated process", IdentifierGroup.ROOT, "Process.isIsolated / u0iN", logcat = listOf("isIsolated", "isolated_app", ":isolated")),
+        id("root.text", "libc .text диск≠RAM", IdentifierGroup.ROOT, "/proc/pid/mem vs libc.so r-xp", file = "/proc/self/mem"),
+        id("root.decision", "После проверки → решение", IdentifierGroup.ROOT, "root-check → login/403/finish"),
+        id("root.svc", "libc syscall() (SVC wrapper)", IdentifierGroup.ROOT, "libc.so!syscall openat/faccessat/execve/ptrace"),
+        id("root.talsec", "Talsec / freeRASP / JailMonkey", IdentifierGroup.ROOT, "com.aheaditec.talsec / JailMonkey", logcat = listOf("Talsec", "freeRASP", "ThreatListener", "JailMonkey"))
     )
 
     // --- helpers ---
@@ -383,11 +395,12 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
     return IdentifierCatalog.findById(id)?.toAccessCategory()
         ?: when {
             id.startsWith("tel.") || id.startsWith("sub.") -> AccessCategory.TELEPHONY
+            id == "net.pin_fail" -> AccessCategory.SECURITY
             id.startsWith("net.") || id.startsWith("wifi.") -> AccessCategory.NETWORK
             id.startsWith("location.") -> AccessCategory.LOCATION
             id.startsWith("bt.") -> AccessCategory.BLUETOOTH
             id.startsWith("root.") || id.startsWith("attest.") ||
-                id == "ent.integrity" || id == "ent.safetynet" -> AccessCategory.SECURITY
+                id == "ent.integrity" || id == "ent.safetynet" || id == "ent.verdict" -> AccessCategory.SECURITY
             else -> null
         }
 }

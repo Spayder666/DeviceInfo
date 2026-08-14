@@ -1,5 +1,6 @@
 package com.deviceinfo.trafficmonitor.mitm
 
+import com.deviceinfo.trafficmonitor.analysis.Http2Frames
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -67,10 +68,13 @@ class HttpsMitmProxy(
         val engine = creds.sslContext.createSSLEngine(host, 443)
         engine.useClientMode = false
         engine.needClientAuth = false
+        applyAlpn(engine, arrayOf("h2", "http/1.1"))
         handshakeWithLeftover(engine, client, leftover)
 
+        val negotiated = negotiatedProtocol(engine)
         val upstream = SSLSocketFactory.getDefault().createSocket(host, 443) as SSLSocket
         upstream.soTimeout = 20_000
+        applyAlpn(upstream, arrayOf(negotiated))
         upstream.startHandshake()
 
         val fromClient = Thread {
@@ -217,6 +221,8 @@ class HttpsMitmProxy(
     }
 
     private fun decodePlain(data: ByteArray): String {
+        val h2 = Http2Frames.summarize(data)
+        if (h2 != null) return "HTTP/2 $h2"
         val s = data.toString(Charsets.UTF_8)
         if (s.startsWith("GET ") || s.startsWith("POST ") || s.startsWith("PUT ") ||
             s.startsWith("HTTP/") || s.startsWith("{") || s.startsWith("[") ||
@@ -224,6 +230,39 @@ class HttpsMitmProxy(
         ) return s
         val printable = s.filter { it == '\n' || it == '\r' || it == '\t' || it.code in 32..126 }
         return if (printable.length >= 8) printable else ""
+    }
+
+    private fun applyAlpn(engine: SSLEngine, protocols: Array<String>) {
+        try {
+            val params = engine.sslParameters
+            params.applicationProtocols = protocols
+            engine.sslParameters = params
+            engine.setHandshakeApplicationProtocolSelector { _, offered ->
+                when {
+                    offered.contains("h2") && protocols.contains("h2") -> "h2"
+                    offered.contains("http/1.1") -> "http/1.1"
+                    else -> offered.firstOrNull()
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun applyAlpn(socket: SSLSocket, protocols: Array<String>) {
+        try {
+            val params = socket.sslParameters
+            params.applicationProtocols = protocols
+            socket.sslParameters = params
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun negotiatedProtocol(engine: SSLEngine): String {
+        return try {
+            engine.applicationProtocol?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        } ?: "http/1.1"
     }
 
     private fun runTasks(engine: SSLEngine) {

@@ -162,8 +162,13 @@ class RootDetectionMonitor(
             "lspatch" in t || "virtualxposed" in t || "taichi" in t -> "root.lspatch"
             "handlehookedmethod" in t || "invokeoriginalmethod" in t -> "root.stack"
             "rootbeer" in t || "isrooted" in t -> "root.rootbeer"
-            "playintegrity" in t || "integrityservice" in t || "integritytoken" in t -> "ent.integrity"
+            "meets_device" in t || "meets_strong" in t || "meets_basic" in t ||
+                "ctsprofile" in t || "devicerecognitionverdict" in t -> "ent.verdict"
+            "playintegrity" in t || "integrityservice" in t || "integritytoken" in t ||
+                "standardintegrity" in t -> "ent.integrity"
             "safetynet" in t -> "ent.safetynet"
+            "talsec" in t || "freerasp" in t || "jailmonkey" in t -> "root.talsec"
+            "shamiko" in t || "denylist" in t -> "root.hide"
             "attestation" in t || "keymint" in t -> "attest.key"
             "frida" in t || "27042" in t || "27043" in t || "gum-js" in t || "linjector" in t -> "root.frida_detect"
             "xposed" in t -> "root.xposed"
@@ -210,17 +215,19 @@ class RootDetectionMonitor(
 
         private val ROOT_LOG = Regex(
             "(?i)RootBeer|isRooted|SafetyNet|PlayIntegrity|IntegrityService|IntegrityToken|" +
+                "StandardIntegrity|MEETS_DEVICE_INTEGRITY|MEETS_STRONG_INTEGRITY|ctsProfileMatch|" +
                 "Magisk|Zygisk|KernelSU|APatch|XposedBridge|XposedHelpers|LSPosed|LSPosedBridge|" +
                 "EdXposed|LSPatch|VirtualXposed|TaiChi|handleHookedMethod|LSPHooker|" +
                 "frida-server|frida-agent|gum-js-loop|LIBFRIDA|linjector|27042|27043|" +
                 "which su|/system/bin/su|/system/xbin/su|su binary|SuperSU|Superuser|" +
                 "getenforce|test-keys|ro\\.secure|ro\\.debuggable|verifiedboot|" +
                 "KeyAttestation|goldfish|ranchu|qemu_pipe|TracerPid|adb_enabled|" +
-                "sandhook|yahfa|dobby|liblspd|lsplant|memfd"
+                "sandhook|yahfa|dobby|liblspd|lsplant|memfd|" +
+                "Shamiko|DenyList|Talsec|freeRASP|JailMonkey|CertificatePinner|SSLPeerUnverified"
         )
         private val GLOBAL_TAGS = Regex(
             "(?i)RootBeer|SafetyNet|PlayIntegrity|IntegrityService|Magisk|Xposed|LSPosed|" +
-                "frida-server|LSPatch|handleHookedMethod"
+                "frida-server|LSPatch|handleHookedMethod|Talsec|Shamiko|MEETS_DEVICE"
         )
     }
 }

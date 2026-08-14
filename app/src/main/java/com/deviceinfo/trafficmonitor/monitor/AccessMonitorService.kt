@@ -61,6 +61,9 @@ class AccessMonitorService : Service() {
     private var oemIndoorMonitor: OemIndoorMonitor? = null
     private var telephonyAccessMonitor: TelephonyAccessMonitor? = null
     private var rootDetectionMonitor: RootDetectionMonitor? = null
+    private var environmentAnalysisMonitor: EnvironmentAnalysisMonitor? = null
+    private var networkEnvMonitor: NetworkEnvMonitor? = null
+    private var decisionTracker: DecisionTracker? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -134,6 +137,9 @@ class AccessMonitorService : Service() {
             oemIndoorMonitor = OemIndoorMonitor(targetPackage, repository, serviceScope).also { it.start() }
             telephonyAccessMonitor = TelephonyAccessMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
             rootDetectionMonitor = RootDetectionMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            environmentAnalysisMonitor = EnvironmentAnalysisMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            networkEnvMonitor = NetworkEnvMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            decisionTracker = DecisionTracker(targetPackage, repository, serviceScope).also { it.start() }
             appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
             if (targetPid > 0) {
@@ -206,6 +212,9 @@ class AccessMonitorService : Service() {
         oemIndoorMonitor?.stop()
         telephonyAccessMonitor?.stop()
         rootDetectionMonitor?.stop()
+        environmentAnalysisMonitor?.stop()
+        networkEnvMonitor?.stop()
+        decisionTracker?.stop()
         HttpsMitmController.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false

@@ -1,5 +1,6 @@
 package com.deviceinfo.trafficmonitor.frida
 
+import com.deviceinfo.trafficmonitor.analysis.IntegrityVerdict
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
@@ -63,12 +64,26 @@ class FridaEventPoller(
             val identifierId = json.optString("identifierId", "")
             if (identifierId == "frida.init") return
 
-            val def = IdentifierCatalog.findById(identifierId)
             val action = json.optString("action", identifierId)
             val request = json.optString("request", null)
             val response = json.optString("response", null)
             val permission = json.optString("permission", null).takeIf { it.isNotEmpty() }
             val timestamp = json.optLong("timestamp", System.currentTimeMillis())
+            val verdict = IntegrityVerdict.summarize(
+                listOfNotNull(request, response, line).joinToString(" ")
+            )
+            val resolvedId = when {
+                verdict != null && (
+                    identifierId == "ent.integrity" ||
+                        identifierId == "ent.safetynet" ||
+                        identifierId == "ent.verdict"
+                    ) -> "ent.verdict"
+                else -> identifierId
+            }
+            val def = IdentifierCatalog.findById(resolvedId)
+            val enriched = listOfNotNull(response?.takeIf { it.isNotEmpty() }, verdict)
+                .joinToString(" · ")
+                .ifBlank { null }
 
             if (repository.isDuplicate(packageName, action, line, sinceMs = 800)) return
 
@@ -77,15 +92,19 @@ class FridaEventPoller(
                     timestamp = timestamp,
                     targetPackage = packageName,
                     category = def?.toAccessCategory()
-                        ?: categoryForIdentifierId(identifierId)
+                        ?: categoryForIdentifierId(resolvedId)
                         ?: categoryFor(action, permission, def?.group?.name),
                     source = EventSource.FRIDA,
-                    action = def?.displayName ?: action,
+                    action = if (verdict != null && resolvedId == "ent.verdict") {
+                        "Integrity verdict: $verdict"
+                    } else {
+                        def?.displayName ?: action
+                    },
                     permission = permission ?: def?.permission,
                     requestDetails = request?.takeIf { it.isNotEmpty() } ?: def?.api,
-                    responseDetails = response?.takeIf { it.isNotEmpty() },
+                    responseDetails = enriched,
                     rawData = line,
-                    identifierName = def?.id ?: identifierId.takeIf { it.isNotEmpty() },
+                    identifierName = def?.id ?: resolvedId.takeIf { it.isNotEmpty() },
                     identifierGroup = def?.group?.name
                 )
             )
@@ -121,7 +140,8 @@ class FridaEventPoller(
             "biometric" in text || "fingerprint" in text || "projection" in text -> AccessCategory.SYSTEM_API
             "root" in text || "magisk" in text || "safetynet" in text || "integrity" in text ||
                 "xposed" in text || "frida" in text || "selinux" in text || "emulator" in text ||
-                "debugger" in text || "attest" in text -> AccessCategory.SECURITY
+                "debugger" in text || "attest" in text || "talsec" in text || "shamiko" in text ||
+                "pin_fail" in text || "pinning" in text -> AccessCategory.SECURITY
             group == "LOCATION" -> AccessCategory.LOCATION
             group == "ROOT" || group == "ATTESTATION" -> AccessCategory.SECURITY
             group == "TELEPHONY" || group == "SUBSCRIPTION" -> AccessCategory.TELEPHONY

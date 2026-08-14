@@ -21,7 +21,9 @@ object IdentifierReader {
         val id = event.identifierName
         val values = when {
             id == "net.dns" || event.action.equals("DNS", ignoreCase = true) -> readDnsReplay(event)
-            id == "net.http" || id == "net.https" || id == "net.sni" -> readHttpReplay(event)
+            id == "net.http" || id == "net.https" || id == "net.sni" || id == "net.http2" -> readHttpReplay(event)
+            id == "net.vpn" || id == "net.proxy" || id == "net.user_ca" || id == "net.pin_fail" ->
+                readNetworkEnv(event)
             id?.startsWith("tel.") == true || id?.startsWith("sub.") == true ->
                 readTelephonyReplay(event)
             event.category == AccessCategory.LOCATION -> readLocation()
@@ -468,6 +470,27 @@ object IdentifierReader {
         }
     }
 
+    private fun readNetworkEnv(event: CaptureEvent): List<IdentifierValue> {
+        val vpn = RootShell.execAndRead(
+            "dumpsys connectivity 2>/dev/null | grep -i -E 'TRANSPORT_VPN|type: VPN|tun0' | head -n 10",
+            timeoutSec = 8
+        ).trim()
+        val proxy = RootShell.execAndRead(
+            "settings get global http_proxy; getprop http.proxyHost",
+            timeoutSec = 6
+        ).trim()
+        val cas = RootShell.execAndRead(
+            "ls /data/misc/user/0/cacerts-added /data/misc/keychain/cacerts-added 2>/dev/null | head -n 8",
+            timeoutSec = 6
+        ).trim()
+        return listOfNotEmpty(
+            IdentifierValue("net.vpn", "VPN", vpn),
+            IdentifierValue("net.proxy", "proxy", proxy),
+            IdentifierValue("net.user_ca", "user CA", cas),
+            IdentifierValue("net.captured", "перехват", event.responseDetails.orEmpty())
+        )
+    }
+
     private fun readNetwork(packageName: String): List<IdentifierValue> {
         val wifi = readWifi()
         val conn = RootShell.execAndRead("dumpsys connectivity 2>/dev/null | head -c 4000", timeoutSec = 8)
@@ -551,10 +574,26 @@ object IdentifierReader {
                 IdentifierValue("root.hardware", "ro.hardware", getprop("ro.hardware")),
                 IdentifierValue("root.fingerprint", "fingerprint", getprop("ro.build.fingerprint"))
             )
-            id == "ent.integrity" || id == "ent.safetynet" || id.startsWith("attest.") -> listOfNotEmpty(
+            id == "root.hide" -> listOfNotEmpty(
+                IdentifierValue("root.hide", "DenyList/Shamiko", RootShell.execAndRead(
+                    "(/data/adb/magisk/magisk --denylist ls 2>/dev/null || magisk --denylist ls 2>/dev/null || true) | head -n 20; " +
+                        "ls -ld /data/adb/modules/zygisk_shamiko /data/adb/modules/shamiko 2>&1 | head -n 6",
+                    timeoutSec = 8
+                ).take(400))
+            )
+            id == "root.isolated" -> listOfNotEmpty(
+                IdentifierValue("root.isolated", "isolated", RootShell.execAndRead(
+                    "ps -A 2>/dev/null | grep -E 'isolated|${event.targetPackage}' | head -n 12",
+                    timeoutSec = 6
+                ).take(400))
+            )
+            id == "root.text" || id == "root.svc" || id == "root.decision" || id == "root.talsec" ->
+                readFromCaptured(event)
+            id == "ent.integrity" || id == "ent.safetynet" || id == "ent.verdict" || id.startsWith("attest.") -> listOfNotEmpty(
                 IdentifierValue("attest.vb", "verifiedbootstate", getprop("ro.boot.verifiedbootstate")),
                 IdentifierValue("attest.lock", "flash.locked", getprop("ro.boot.flash.locked")),
-                IdentifierValue("attest.vbmeta", "vbmeta.device_state", getprop("ro.boot.vbmeta.device_state"))
+                IdentifierValue("attest.vbmeta", "vbmeta.device_state", getprop("ro.boot.vbmeta.device_state")),
+                IdentifierValue("ent.verdict", "перехват", event.responseDetails.orEmpty())
             )
             else -> readRootSnapshot()
         }.ifEmpty { readRootSnapshot() } + readFromCaptured(event)

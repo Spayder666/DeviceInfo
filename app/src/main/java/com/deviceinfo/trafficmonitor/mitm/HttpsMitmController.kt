@@ -1,6 +1,7 @@
 package com.deviceinfo.trafficmonitor.mitm
 
 import android.content.Context
+import com.deviceinfo.trafficmonitor.analysis.IntegrityVerdict
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
@@ -122,19 +123,33 @@ object HttpsMitmController {
         val now = System.currentTimeMillis()
         val prev = seen.put(key, now)
         if (prev != null && now - prev < 1500) return
-        val first = text.lineSequence().firstOrNull { it.isNotBlank() }?.take(180) ?: host
+        val verdict = IntegrityVerdict.summarize(text)
+        val http2 = text.startsWith("HTTP/2")
+        val first = listOfNotNull(
+            verdict,
+            text.lineSequence().firstOrNull { it.isNotBlank() }?.take(180)
+        ).joinToString(" · ").ifBlank { host }
+        val id = when {
+            verdict != null -> "ent.verdict"
+            http2 -> "net.http2"
+            else -> "net.https"
+        }
         kotlinx.coroutines.runBlocking {
             repository.insert(
                 CaptureEvent(
                     targetPackage = packageName,
-                    category = AccessCategory.NETWORK,
+                    category = if (verdict != null) AccessCategory.SECURITY else AccessCategory.NETWORK,
                     source = EventSource.MITM,
-                    action = "HTTPS $direction",
+                    action = when {
+                        verdict != null -> "Integrity $direction: $verdict"
+                        http2 -> "HTTP/2 $direction"
+                        else -> "HTTPS $direction"
+                    },
                     requestDetails = host,
                     responseDetails = first,
                     rawData = text.take(1500),
-                    identifierName = "net.https",
-                    identifierGroup = "NETWORK"
+                    identifierName = id,
+                    identifierGroup = if (verdict != null) "ATTESTATION" else "NETWORK"
                 )
             )
         }
