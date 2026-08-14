@@ -361,15 +361,110 @@ function hookContentResolver() {
   } catch (e) {}
 }
 
+function formatLocation(loc) {
+  if (!loc) return '';
+  try {
+    return 'lat=' + loc.getLatitude() + ' lon=' + loc.getLongitude() +
+      ' acc=' + loc.getAccuracy() + ' provider=' + loc.getProvider() +
+      ' time=' + loc.getTime();
+  } catch (e) {
+    return safeStr(loc);
+  }
+}
+
 function hookLocation() {
   try {
     var LM = Java.use('android.location.LocationManager');
-    ['getLastKnownLocation', 'requestLocationUpdates', 'getCurrentLocation'].forEach(function (m) {
+    var methods = [
+      'getLastKnownLocation', 'requestLocationUpdates', 'requestSingleUpdate',
+      'getCurrentLocation', 'removeUpdates', 'getProviders', 'getAllProviders',
+      'isProviderEnabled', 'getBestProvider', 'addNmeaListener',
+      'registerGnssStatusCallback', 'registerGnssMeasurementsCallback',
+      'registerGnssNavigationMessageCallback', 'addGpsStatusListener',
+      'sendExtraCommand', 'getGnssYearOfHardware'
+    ];
+    methods.forEach(function (m) {
       try {
         LM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
+            var args = [];
+            for (var i = 0; i < arguments.length; i++) args.push(safeStr(arguments[i]));
             var result = overload.apply(this, arguments);
-            writeEvent('location.gps', 'LocationManager.' + m, safeStr(arguments[0]), safeStr(result), 'ACCESS_FINE_LOCATION');
+            var response = (m.indexOf('getLast') === 0 || m === 'getCurrentLocation')
+              ? formatLocation(result) : safeStr(result);
+            writeEvent('location.gps', 'LocationManager.' + m, args.join(', '), response, 'ACCESS_FINE_LOCATION');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+
+  try {
+    var Loc = Java.use('android.location.Location');
+    Loc.getLatitude.implementation = function () {
+      var lat = this.getLatitude();
+      var lon = this.getLongitude();
+      writeEvent('location.gps', 'Location.getLatitude', this.getProvider(), 'lat=' + lat + ' lon=' + lon, 'ACCESS_FINE_LOCATION');
+      return lat;
+    };
+  } catch (e) {}
+
+  try {
+    var Listener = Java.use('android.location.LocationListener');
+    Listener.onLocationChanged.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var loc = arguments[0];
+        writeEvent('location.gps', 'LocationListener.onLocationChanged', '', formatLocation(loc), 'ACCESS_FINE_LOCATION');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+
+  try {
+    var CB = Java.use('android.location.LocationCallback');
+    CB.onLocationResult.implementation = function (result) {
+      var text = '';
+      try {
+        var list = result.getLocations();
+        for (var i = 0; i < list.size(); i++) text += formatLocation(list.get(i)) + '; ';
+      } catch (e) { text = safeStr(result); }
+      writeEvent('location.fused', 'LocationCallback.onLocationResult', '', text, 'ACCESS_FINE_LOCATION');
+      return this.onLocationResult(result);
+    };
+  } catch (e) {}
+
+  try {
+    var FLP = Java.use('com.google.android.gms.location.FusedLocationProviderClient');
+    ['getLastLocation', 'getCurrentLocation', 'requestLocationUpdates', 'getLastLocation'].forEach(function (m) {
+      try {
+        FLP[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            writeEvent('location.fused', 'FusedLocationProviderClient.' + m, safeStr(arguments[0]), 'Task scheduled', 'ACCESS_FINE_LOCATION');
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+
+  try {
+    var LR = Java.use('com.google.android.gms.location.LocationResult');
+    LR.getLastLocation.implementation = function () {
+      var loc = this.getLastLocation();
+      writeEvent('location.fused', 'LocationResult.getLastLocation', '', formatLocation(loc), 'ACCESS_FINE_LOCATION');
+      return loc;
+    };
+  } catch (e) {}
+
+  try {
+    var TM = Java.use('android.telephony.TelephonyManager');
+    ['getAllCellInfo', 'getCellLocation', 'requestCellInfoUpdate', 'getNeighboringCellInfo'].forEach(function (m) {
+      try {
+        TM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeEvent('location.cell', 'TelephonyManager.' + m, '', safeStr(result), 'ACCESS_FINE_LOCATION');
             return result;
           };
         });

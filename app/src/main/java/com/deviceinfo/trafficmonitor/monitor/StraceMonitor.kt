@@ -115,7 +115,12 @@ class StraceMonitor(
     private fun classifySyscall(line: String): SyscallInfo? {
         return when {
             line.contains("openat") || line.contains("open(") -> classifyOpen(line)
-            line.contains("connect(") -> classifyConnect(line)
+            line.contains("connect(") -> classifyConnect(line).let { info ->
+                val dest = info.request.orEmpty().lowercase()
+                if (listOf("7275", "7276", "1883", "8883", "mqtt", "supl", "googleapis.com/geolocation").any { it in dest }) {
+                    info.copy(category = AccessCategory.LOCATION, action = "location-network")
+                } else info
+            }
             line.contains("ioctl(") -> classifyIoctl(line)
             line.contains("execve") && line.contains("getprop") -> SyscallInfo(
                 AccessCategory.IDENTIFIER,
@@ -143,7 +148,8 @@ class StraceMonitor(
         val path = extractPath(line) ?: return null
         val category = when {
             path.contains("camera", ignoreCase = true) -> AccessCategory.CAMERA
-            path.contains("gps", ignoreCase = true) || path.contains("location", ignoreCase = true) -> AccessCategory.LOCATION
+            path.contains("gps", ignoreCase = true) || path.contains("gnss", ignoreCase = true) ||
+                path.contains("location", ignoreCase = true) || path.contains("supl", ignoreCase = true) -> AccessCategory.LOCATION
             path.contains("audio", ignoreCase = true) || path.contains("mic", ignoreCase = true) -> AccessCategory.MICROPHONE
             path.contains("bluetooth", ignoreCase = true) -> AccessCategory.BLUETOOTH
             path.contains("telephony", ignoreCase = true) || path.contains("radio", ignoreCase = true) -> AccessCategory.TELEPHONY
@@ -175,7 +181,7 @@ class StraceMonitor(
         val lower = line.lowercase()
         val category = when {
             "camera" in lower -> AccessCategory.CAMERA
-            "gps" in lower || "gnss" in lower -> AccessCategory.LOCATION
+            "gps" in lower || "gnss" in lower || "binder" in lower && "location" in lower -> AccessCategory.LOCATION
             "audio" in lower -> AccessCategory.MICROPHONE
             "sensor" in lower -> AccessCategory.SENSOR
             else -> return null
@@ -190,7 +196,7 @@ class StraceMonitor(
 
     private fun isSensitiveRead(line: String): Boolean {
         val lower = line.lowercase()
-        return listOf("settings", "telephony", "contacts", "sms", "imei", "android_id", "sim", "gservices")
+        return listOf("settings", "telephony", "contacts", "sms", "imei", "android_id", "sim", "gservices", "gps", "gnss", "location", "nmea")
             .any { it in lower }
     }
 

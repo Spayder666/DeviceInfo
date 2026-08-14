@@ -36,6 +36,8 @@ class AccessMonitorService : Service() {
     private var straceMonitor: StraceMonitor? = null
     private var procMonitor: ProcMonitor? = null
     private var fridaMonitor: FridaMonitor? = null
+    private var locationDumpMonitor: LocationDumpMonitor? = null
+    private var systemLocationLogcat: SystemLocationLogcatMonitor? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -71,6 +73,9 @@ class AccessMonitorService : Service() {
                 .also { it.start() }
 
             IdentifierSnapshot.record(targetPackage, targetPid, repository)
+
+            locationDumpMonitor = LocationDumpMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            systemLocationLogcat = SystemLocationLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
 
             if (targetPid > 0) {
                 appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
@@ -119,6 +124,8 @@ class AccessMonitorService : Service() {
         straceMonitor?.stop()
         procMonitor?.stop()
         fridaMonitor?.stop()
+        locationDumpMonitor?.stop()
+        systemLocationLogcat?.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }

@@ -38,9 +38,22 @@ object RootShell {
         }
     }
 
-    fun findPid(packageName: String): Int? {
-        val output = execAndRead("pidof $packageName")
-        return output.trim().split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()
+    fun findPid(packageName: String): Int? = findAllPids(packageName).firstOrNull()
+
+    fun findAllPids(packageName: String): List<Int> {
+        val pids = linkedSetOf<Int>()
+        execAndRead("pidof $packageName").trim()
+            .split("\\s+".toRegex())
+            .mapNotNull { it.toIntOrNull() }
+            .forEach { pids.add(it) }
+
+        val ps = execAndRead("ps -A -o PID,NAME 2>/dev/null")
+        for (line in ps.lines()) {
+            val trimmed = line.trim()
+            if (!trimmed.contains(packageName)) continue
+            trimmed.split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()?.let { pids.add(it) }
+        }
+        return pids.toList()
     }
 
     fun getUid(packageName: String): Int? {

@@ -58,7 +58,8 @@ class LogcatMonitor(
     fun start() {
         job = scope.launch(Dispatchers.IO) {
             try {
-                val cmd = "logcat -v threadtime --pid=$pid -T 1 *:V 2>&1"
+                val uidFilter = if (uid > 0) "--uid=$uid" else "--pid=$pid"
+                val cmd = "logcat -v threadtime $uidFilter -T 1 *:V 2>&1"
                 RootShell.execStreaming(cmd) { line ->
                     if (isActive) scope.launch { parseLine(line) }
                 }

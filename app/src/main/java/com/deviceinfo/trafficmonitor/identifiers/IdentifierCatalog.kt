@@ -22,7 +22,8 @@ enum class IdentifierGroup(val label: String) {
     NETWORK("Сеть / IP"),
     ENTERPRISE("Enterprise / MDM"),
     OEM("OEM-специфичные"),
-    ATTESTATION("Attestation / Integrity")
+    ATTESTATION("Attestation / Integrity"),
+    LOCATION("GPS / локация")
 }
 
 data class IdentifierDefinition(
@@ -59,6 +60,7 @@ object IdentifierCatalog {
         addAll(enterpriseIdentifiers())
         addAll(oemIdentifiers())
         addAll(attestationIdentifiers())
+        addAll(locationIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -266,6 +268,21 @@ object IdentifierCatalog {
         id("oem.samsung_imsi", "Samsung SIM IMSI cache", IdentifierGroup.OEM, "dsa_sim1_value", logcat = listOf("dsa_sim")),
         id("oem.vivo_wifi", "Vivo ext Wi‑Fi scan", IdentifierGroup.OEM, logcat = listOf("getExtWifiScanResults")),
         id("oem.huawei_oaid", "Huawei OAID", IdentifierGroup.OEM, logcat = listOf("HmsAdsIdentifier"))
+    )
+
+    private fun locationIdentifiers() = listOf(
+        id("location.gps", "GPS / GNSS (LocationManager)", IdentifierGroup.LOCATION, "LocationManager.requestLocationUpdates(GPS)", logcat = listOf("requestLocationUpdates", "getLastKnownLocation", "getCurrentLocation", "LocationManager"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.fused", "Fused Location (GMS/AOSP)", IdentifierGroup.LOCATION, "FusedLocationProviderClient", logcat = listOf("FusedLocation", "GCoreFlp", "FusedLocationProvider", "FLP"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.network", "Network Location (NLP/Wi‑Fi/Cell)", IdentifierGroup.LOCATION, "LocationManager.NETWORK_PROVIDER", logcat = listOf("NetworkLocation", "NlpService", "NlpLocationHelper"), perm = "ACCESS_COARSE_LOCATION"),
+        id("location.passive", "Passive location", IdentifierGroup.LOCATION, "LocationManager.PASSIVE_PROVIDER", logcat = listOf("passive provider", "PassiveProvider")),
+        id("location.gnss_nmea", "NMEA / GNSS raw", IdentifierGroup.LOCATION, "LocationManager.addNmeaListener / GnssMeasurements", logcat = listOf("Nmea", "GnssMeasurement", "GnssNavigation", "GnssStatus"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.geofence", "Geofence", IdentifierGroup.LOCATION, "GeofencingClient", logcat = listOf("Geofence", "GeofencerStateMachine")),
+        id("location.cell", "Cell location", IdentifierGroup.LOCATION, "TelephonyManager.getAllCellInfo / getCellLocation", logcat = listOf("getAllCellInfo", "getCellLocation", "requestCellInfoUpdate", "CellIdentity"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.wifi_scan", "Wi‑Fi scan for location", IdentifierGroup.LOCATION, "WifiManager.getScanResults / startScan", logcat = listOf("WifiScanningService", "getScanResults", "startScan"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.gms", "GMS LocationServices", IdentifierGroup.LOCATION, "LocationServices.getFusedLocationProviderClient", logcat = listOf("LocationServices", "GoogleLocationManager", "GmsLocation")),
+        id("location.hal", "GNSS HAL /dev", IdentifierGroup.LOCATION, file = "/dev/gnss0", strace = listOf("/dev/gnss", "/dev/gps", "/dev/ttyGPS", "/vendor/etc/gps", "/data/vendor/gps")),
+        id("location.supl", "SUPL / AGPS", IdentifierGroup.LOCATION, logcat = listOf("SUPL", "AGps", "agps", "supl.google")),
+        id("location.activity", "Activity Recognition", IdentifierGroup.LOCATION, "ActivityRecognitionClient", logcat = listOf("ActivityRecognition", "DetectedActivity"))
     )
 
     private fun attestationIdentifiers() = listOf(

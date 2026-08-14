@@ -28,6 +28,10 @@ class AppOpsMonitor(
         "COARSE_LOCATION" to AccessCategory.LOCATION,
         "FINE_LOCATION" to AccessCategory.LOCATION,
         "GPS" to AccessCategory.LOCATION,
+        "MONITOR_LOCATION" to AccessCategory.LOCATION,
+        "MONITOR_HIGH_POWER_LOCATION" to AccessCategory.LOCATION,
+        "NEARBY_WIFI_DEVICES" to AccessCategory.LOCATION,
+        "ACTIVITY_RECOGNITION" to AccessCategory.LOCATION,
         "CAMERA" to AccessCategory.CAMERA,
         "RECORD_AUDIO" to AccessCategory.MICROPHONE,
         "READ_PHONE_STATE" to AccessCategory.TELEPHONY,
@@ -101,9 +105,9 @@ class AppOpsMonitor(
 
             if (currentOp == null) continue
 
-            val accessMatch = Regex("Access:\\s*\\[(\\w+)\\]").find(line)
+            val accessMatch = Regex("Access:\\s*\\[([^\\]]+)]\\s*(.*)").find(line)
             if (accessMatch != null) {
-                val accessTime = accessMatch.groupValues[1]
+                val accessTime = accessMatch.groupValues[2].trim().ifBlank { accessMatch.groupValues[1] }
                 val stateKey = "$currentOp:$accessTime"
                 if (lastState.put(stateKey, accessTime) == null) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION

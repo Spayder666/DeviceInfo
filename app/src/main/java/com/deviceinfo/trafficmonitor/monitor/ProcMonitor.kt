@@ -124,7 +124,9 @@ class ProcMonitor(
     }
 
     private suspend fun pollNetworkConnections() {
-        val tcpOutput = RootShell.execAndRead("cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 2>/dev/null")
+        val tcpOutput = RootShell.execAndRead(
+            "cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 /proc/$pid/net/udp /proc/$pid/net/udp6 2>/dev/null"
+        )
         for (line in tcpOutput.lines()) {
             if (line.startsWith("sl")) continue
             val parts = line.trim().split("\\s+".toRegex())
@@ -132,13 +134,15 @@ class ProcMonitor(
 
             val local = decodeAddress(parts[1])
             val remote = decodeAddress(parts[2])
-            val state = tcpStateName(parts[3])
+            val state = if (parts.size > 3) tcpStateName(parts[3]) else "UDP"
             val key = "$local->$remote:$state"
             if (knownConnections.put(key, state) != null) continue
 
+            val dest = "$local $remote".lowercase()
+            val locationNet = listOf(":7275", ":7276", ":1883", ":8883", ":5683", "supl").any { it in dest }
             record(
-                category = AccessCategory.NETWORK,
-                action = "TCP $state",
+                category = if (locationNet) AccessCategory.LOCATION else AccessCategory.NETWORK,
+                action = if (locationNet) "Location/MQTT/SUPL $state" else "TCP/UDP $state",
                 request = "Соединение $local → $remote",
                 response = "Состояние: $state",
                 raw = line.trim()
