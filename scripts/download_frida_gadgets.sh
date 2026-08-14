@@ -4,7 +4,7 @@ VERSION="16.5.9"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ASSETS="$ROOT/app/src/main/assets/frida"
 
-mkdir -p "$ASSETS/arm64-v8a" "$ASSETS/armeabi-v7a" "$ASSETS/x86_64"
+mkdir -p "$ASSETS/arm64-v8a"
 
 download_one() {
   local abi="$1"
@@ -19,8 +19,7 @@ download_one() {
     | xz -dc > "$dest"
 }
 
+# arm64 покрывает большинство устройств Android 13+; остальные ABI — через downloadGadget()
 download_one arm64 arm64-v8a
-download_one arm armeabi-v7a
-download_one x86_64 x86_64
 
-echo "Frida gadgets ready"
+echo "Frida gadget (arm64) ready"
