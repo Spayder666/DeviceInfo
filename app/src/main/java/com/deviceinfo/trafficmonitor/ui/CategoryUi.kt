@@ -174,6 +174,9 @@ fun identifierGroupIcon(group: IdentifierGroup): ImageVector = when (group) {
     IdentifierGroup.ATTESTATION -> Icons.Outlined.VerifiedUser
     IdentifierGroup.LOCATION -> Icons.Outlined.MyLocation
     IdentifierGroup.ROOT -> Icons.Outlined.GppMaybe
+    IdentifierGroup.PERSONAL -> Icons.Outlined.Contacts
+    IdentifierGroup.HARDWARE -> Icons.Outlined.PhotoCamera
+    IdentifierGroup.IDENTITY -> Icons.Outlined.VpnKey
 }
 
 fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
@@ -197,6 +200,9 @@ fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
     IdentifierGroup.ATTESTATION -> "Attest"
     IdentifierGroup.LOCATION -> "GPS"
     IdentifierGroup.ROOT -> "Root"
+    IdentifierGroup.PERSONAL -> "Личное"
+    IdentifierGroup.HARDWARE -> "Железо"
+    IdentifierGroup.IDENTITY -> "Токен"
 }
 
 fun allIcon(): ImageVector = Icons.Outlined.Apps

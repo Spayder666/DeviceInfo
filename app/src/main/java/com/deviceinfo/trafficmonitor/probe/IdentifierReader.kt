@@ -24,6 +24,17 @@ object IdentifierReader {
             id == "net.http" || id == "net.https" || id == "net.sni" || id == "net.http2" -> readHttpReplay(event)
             id == "net.vpn" || id == "net.proxy" || id == "net.user_ca" || id == "net.pin_fail" ->
                 readNetworkEnv(event)
+            id?.startsWith("contacts.") == true || id == "cp.contacts" -> readContacts()
+            id?.startsWith("sms.") == true || id == "cp.sms" || id?.startsWith("mms.") == true -> readSms()
+            id?.startsWith("calendar.") == true || id == "cp.calendar" -> readCalendar()
+            id?.startsWith("camera.") == true -> readCamera()
+            id?.startsWith("mic.") == true -> readMicrophone()
+            id?.startsWith("sensor.") == true -> readSensors()
+            id?.startsWith("clipboard.") == true -> readClipboard()
+            id?.startsWith("fcm.") == true || id?.startsWith("cred.") == true ||
+                id?.startsWith("play.") == true || id == "webview.ua" -> readFromCaptured(event)
+            id?.startsWith("pkg.") == true || id?.startsWith("perm.") == true ->
+                readSystemApi(event.targetPackage) + readFromCaptured(event)
             id?.startsWith("tel.") == true || id?.startsWith("sub.") == true ->
                 readTelephonyReplay(event)
             event.category == AccessCategory.LOCATION -> readLocation()
@@ -59,8 +70,10 @@ object IdentifierReader {
             IdentifierGroup.WIFI -> readWifi()
             IdentifierGroup.BLUETOOTH -> readBluetooth()
             IdentifierGroup.DRM -> readDrm()
-            IdentifierGroup.ACCOUNT -> readAccounts()
+            IdentifierGroup.ACCOUNT, IdentifierGroup.IDENTITY -> readAccounts()
             IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION -> readSecurity(event)
+            IdentifierGroup.PERSONAL -> readContacts() + readSms() + readCalendar()
+            IdentifierGroup.HARDWARE -> readCamera() + readMicrophone() + readSensors() + readClipboard()
             else -> emptyList()
         }
         return buildList {

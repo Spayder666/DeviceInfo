@@ -55,6 +55,73 @@ function writeEvent(identifierId, action, request, response, permission) {
   writeLine(line);
 }
 
+var lastReq = {};
+function writeReq(identifierId, action, request, response, permission) {
+  var key = (identifierId || '') + '|' + (action || '') + '|' + (request || '');
+  var now = Date.now();
+  if (lastReq[key] && now - lastReq[key] < 800) return;
+  lastReq[key] = now;
+  writeEvent(identifierId, action, request, response, permission);
+}
+
+var onceReq = {};
+function writeOnce(identifierId, action, request, response, permission) {
+  var key = (identifierId || '') + '|' + (action || '') + '|' + (request || '');
+  if (onceReq[key]) return;
+  onceReq[key] = 1;
+  writeEvent(identifierId, action, request, response, permission);
+}
+
+function classifyUri(uri) {
+  var u = String(uri || '').toLowerCase();
+  if (u.indexOf('contacts') >= 0) return 'cp.contacts';
+  if (u.indexOf('sms') >= 0 || u.indexOf('mms') >= 0) return 'cp.sms';
+  if (u.indexOf('call_log') >= 0) return 'cp.call_log';
+  if (u.indexOf('calendar') >= 0) return 'cp.calendar';
+  if (u.indexOf('telephony') >= 0 || u.indexOf('icc') >= 0) return 'cp.telephony';
+  if (u.indexOf('gsf') >= 0 || u.indexOf('gservices') >= 0) return 'ad.gsf_id';
+  if (u.indexOf('settings/secure') >= 0) return 'settings.secure';
+  if (u.indexOf('settings/global') >= 0) return 'settings.global';
+  if (u.indexOf('settings/system') >= 0) return 'settings.system';
+  if (u.indexOf('media') >= 0) return 'storage.media';
+  if (u.indexOf('browser') >= 0) return 'cp.browser';
+  if (u.indexOf('voicemail') >= 0) return 'cp.voicemail';
+  if (u.indexOf('blocked') >= 0) return 'cp.blocked';
+  if (u.indexOf('download') >= 0) return 'storage.downloads';
+  if (u.indexOf('health') >= 0) return 'cp.other';
+  if (u.indexOf('content://') === 0) return 'cp.other';
+  return '';
+}
+
+function mapBuildField(name) {
+  var map = {
+    MODEL: 'build.model', DEVICE: 'build.device', MANUFACTURER: 'build.manufacturer',
+    BRAND: 'build.brand', PRODUCT: 'build.product', HARDWARE: 'build.hardware',
+    BOARD: 'build.board', FINGERPRINT: 'build.fingerprint', SERIAL: 'build.serial',
+    ID: 'build.id', DISPLAY: 'build.display', HOST: 'build.host', TAGS: 'build.tags',
+    TYPE: 'build.type', USER: 'build.user', RADIO: 'build.radio', BOOTLOADER: 'build.bootloader',
+    SDK_INT: 'version.sdk', RELEASE: 'version.release', INCREMENTAL: 'version.incremental',
+    SECURITY_PATCH: 'version.security_patch', CODENAME: 'version.codename'
+  };
+  return map[name] || 'build.model';
+}
+
+function classifySettingsKey(key) {
+  var k = String(key || '');
+  if (k === 'android_id') return 'settings.android_id';
+  if (k === 'bluetooth_address') return 'settings.bluetooth_address';
+  if (k === 'bluetooth_name') return 'settings.bluetooth_name';
+  if (k === 'device_name') return 'settings.device_name';
+  if (k === 'adb_enabled' || k === 'development_settings_enabled') return 'root.adb';
+  if (k.indexOf('accessibility') >= 0) return 'settings.accessibility';
+  if (k.indexOf('notification_listener') >= 0) return 'settings.notification_listeners';
+  if (k.indexOf('input_method') >= 0) return 'settings.input_method';
+  if (k.indexOf('location') >= 0) return 'settings.location_mode';
+  if (k.indexOf('mock_location') >= 0) return 'settings.mock_location';
+  if (k.indexOf('http_proxy') >= 0) return 'net.proxy';
+  return 'settings.secure';
+}
+
 function safeStr(v) {
   if (v === null || v === undefined) return '';
   try { return String(v); } catch (e) { return '<error>'; }
@@ -131,7 +198,7 @@ function hookSubscriptionManager() {
         SM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeEvent('sub.phone_number', 'SubscriptionManager.' + m, '', safeStr(result), 'READ_PHONE_NUMBERS');
+            writeEvent(m.indexOf('PhoneNumber') >= 0 ? 'sub.phone_number' : 'sub.subscription_id', 'SubscriptionManager.' + m, '', safeStr(result), 'READ_PHONE_NUMBERS');
             return result;
           };
         });
@@ -147,7 +214,8 @@ function hookSubscriptionManager() {
       try {
         SI[m].implementation = function () {
           var result = this[m]();
-          writeEvent('sub.iccid', 'SubscriptionInfo.' + m, '', safeStr(result), null);
+          var sid = m === 'getIccId' ? 'sub.iccid' : (m === 'getNumber' ? 'sub.phone_number' : 'sub.subscription_id');
+          writeEvent(sid, 'SubscriptionInfo.' + m, '', safeStr(result), null);
           return result;
         };
       } catch (e) {}
@@ -164,12 +232,20 @@ function hookSettings() {
   classes.forEach(function (c) {
     try {
       var Cls = Java.use(c[0]);
-      Cls.getString.overload('android.content.ContentResolver', 'java.lang.String').implementation = function (cr, key) {
-        var result = this.getString(cr, key);
-        var id = key === 'android_id' ? 'settings.android_id' : c[1];
-        writeEvent(id, c[0] + '.getString', safeStr(key), safeStr(result), null);
-        return result;
-      };
+      try {
+        Cls.getString.overload('android.content.ContentResolver', 'java.lang.String').implementation = function (cr, key) {
+          var result = this.getString(cr, key);
+          writeEvent(classifySettingsKey(key), c[0] + '.getString', safeStr(key), safeStr(result), null);
+          return result;
+        };
+      } catch (e) {}
+      try {
+        Cls.getInt.overload('android.content.ContentResolver', 'java.lang.String', 'int').implementation = function (cr, key, def) {
+          var result = this.getInt(cr, key, def);
+          writeEvent(classifySettingsKey(key), c[0] + '.getInt', safeStr(key), safeStr(result), null);
+          return result;
+        };
+      } catch (e) {}
     } catch (e) {}
   });
 }
@@ -225,7 +301,17 @@ function isInterestingProperty(key) {
     key.indexOf('ro.magisk') === 0 ||
     key.indexOf('ro.boot.zygisk') === 0 ||
     key.indexOf('persist.zygisk') === 0 ||
-    key === 'ro.dalvik.vm.native.bridge';
+    key === 'ro.dalvik.vm.native.bridge' ||
+    key.indexOf('ro.product.') === 0 ||
+    key.indexOf('ro.build.') === 0 ||
+    key.indexOf('ro.boot.') === 0 ||
+    key.indexOf('ro.serial') === 0 ||
+    key.indexOf('persist.sys.timezone') === 0 ||
+    key.indexOf('persist.sys.locale') === 0 ||
+    key === 'ro.opengles.version' ||
+    key === 'ro.sf.lcd_density' ||
+    key.indexOf('gsm.operator') === 0 ||
+    key.indexOf('gsm.sim') === 0;
 }
 
 function mapPropertyToId(key) {
@@ -280,7 +366,8 @@ function hookWifiAndBluetooth() {
       try {
         WifiInfo[m].implementation = function () {
           var result = this[m]();
-          writeEvent('wifi.mac', 'WifiInfo.' + m, '', safeStr(result), 'ACCESS_FINE_LOCATION');
+          var wid = m === 'getBSSID' ? 'wifi.bssid' : (m === 'getSSID' ? 'wifi.ssid' : (m === 'getIpAddress' ? 'wifi.ip' : (m === 'getNetworkId' ? 'wifi.network_id' : 'wifi.mac')));
+          writeEvent(wid, 'WifiInfo.' + m, '', safeStr(result), 'ACCESS_FINE_LOCATION');
           return result;
         };
       } catch (e) {}
@@ -353,6 +440,24 @@ function hookAdvertisingId() {
       return result;
     };
   } catch (e) {}
+  try {
+    var ASM = Java.use('com.google.android.gms.appset.AppSetIdClient');
+    ASM.getAppSetIdInfo.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('ad.app_set_id', 'AppSetIdClient.getAppSetIdInfo', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var AS = Java.use('com.google.android.gms.appset.AppSet');
+    AS.getClient.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('ad.app_set_id', 'AppSet.getClient', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
 }
 
 function hookAccounts() {
@@ -393,33 +498,79 @@ function bytesToHex(bytes) {
 }
 
 function hookPackageManager() {
-  try {
-    var PM = Java.use('android.content.pm.PackageManager');
-    PM.getInstallerPackageName.implementation = function (pkg) {
-      var result = this.getInstallerPackageName(pkg);
-      writeEvent('install.installer', 'PackageManager.getInstallerPackageName', safeStr(pkg), safeStr(result), null);
-      return result;
-    };
-  } catch (e) {}
+  var classes = ['android.app.ApplicationPackageManager', 'android.content.pm.PackageManager'];
+  classes.forEach(function (name) {
+    try {
+      var PM = Java.use(name);
+      try {
+        PM.getInstallerPackageName.overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var pkg = safeStr(arguments[0]);
+            var result = overload.apply(this, arguments);
+            writeReq('install.installer', name + '.getInstallerPackageName', pkg, safeStr(result), null);
+            return result;
+          };
+        });
+      } catch (e) {}
+      ['getPackageInfo', 'getApplicationInfo'].forEach(function (m) {
+        try {
+          PM[m].overloads.forEach(function (overload) {
+            overload.implementation = function () {
+              var pkg = safeStr(arguments[0]);
+              var flags = safeStr(arguments[1]);
+              var result = overload.apply(this, arguments);
+              if (isRootPkg(pkg)) writeRoot(classifyClass(pkg), name + '.' + m, pkg, 'found');
+              else writeReq(m === 'getPackageInfo' ? 'install.package_info' : 'install.application_info', name + '.' + m, pkg + ' flags=' + flags, 'ok', null);
+              return result;
+            };
+          });
+        } catch (e) {}
+      });
+      ['getInstalledPackages', 'getInstalledApplications'].forEach(function (scan) {
+        try {
+          PM[scan].overloads.forEach(function (overload) {
+            overload.implementation = function () {
+              var result = overload.apply(this, arguments);
+              writeReq('pkg.installed', name + '.' + scan, safeStr(arguments[0]), 'count=' + (result ? result.size() : 0), 'QUERY_ALL_PACKAGES');
+              return result;
+            };
+          });
+        } catch (e) {}
+      });
+      ['queryIntentActivities', 'queryBroadcastReceivers', 'queryIntentServices', 'queryContentProviders'].forEach(function (q) {
+        try {
+          PM[q].overloads.forEach(function (overload) {
+            overload.implementation = function () {
+              var result = overload.apply(this, arguments);
+              writeReq('pkg.query_intent', name + '.' + q, safeStr(arguments[0]), 'count=' + (result ? result.size() : 0), null);
+              return result;
+            };
+          });
+        } catch (e) {}
+      });
+    } catch (e) {}
+  });
 }
 
 function hookContentResolver() {
   try {
     var CR = Java.use('android.content.ContentResolver');
-    CR.query.overloads.forEach(function (overload) {
-      overload.implementation = function () {
-        var uri = arguments[0] ? safeStr(arguments[0].toString()) : '';
-        var result = overload.apply(this, arguments);
-        if (uri.indexOf('settings') >= 0 || uri.indexOf('telephony') >= 0 || uri.indexOf('gsf') >= 0 ||
-            uri.indexOf('contacts') >= 0 || uri.indexOf('sms') >= 0 || uri.indexOf('mms') >= 0 ||
-            uri.indexOf('call_log') >= 0 || uri.indexOf('calendar') >= 0 || uri.indexOf('media') >= 0 ||
-            uri.indexOf('browser') >= 0 || uri.indexOf('voicemail') >= 0 || uri.indexOf('blocked') >= 0) {
-          var rows = 0;
-          try { rows = result ? result.getCount() : 0; } catch (e) {}
-          writeEvent('cp.settings_secure', 'ContentResolver.query', uri, 'rows=' + rows, null);
-        }
-        return result;
-      };
+    ['query', 'insert', 'update', 'delete'].forEach(function (m) {
+      try {
+        CR[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var uri = arguments[0] ? safeStr(arguments[0].toString()) : '';
+            var id = classifyUri(uri);
+            var result = overload.apply(this, arguments);
+            if (id) {
+              var extra = '';
+              try { if (m === 'query' && result) extra = 'rows=' + result.getCount(); } catch (e) {}
+              writeReq(id, 'ContentResolver.' + m, uri, extra, null);
+            }
+            return result;
+          };
+        });
+      } catch (e) {}
     });
   } catch (e) {}
 }
@@ -574,7 +725,7 @@ function hookCamera() {
         CM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeEvent('location.gps', 'CameraManager.' + m, safeStr(arguments[0]), safeStr(result), 'CAMERA');
+            writeEvent(m === 'getCameraIdList' ? 'camera.ids' : 'camera.open', 'CameraManager.' + m, safeStr(arguments[0]), safeStr(result), 'CAMERA');
             return result;
           };
         });
@@ -585,7 +736,7 @@ function hookCamera() {
     var Cam = Java.use('android.hardware.Camera');
     Cam.open.overloads.forEach(function (overload) {
       overload.implementation = function () {
-        writeEvent('location.gps', 'Camera.open', safeStr(arguments[0]), 'opened', 'CAMERA');
+        writeEvent('camera.open', 'Camera.open', safeStr(arguments[0]), 'opened', 'CAMERA');
         return overload.apply(this, arguments);
       };
     });
@@ -597,7 +748,7 @@ function hookAudio() {
     var AR = Java.use('android.media.AudioRecord');
     AR.startRecording.overloads.forEach(function (overload) {
       overload.implementation = function () {
-        writeEvent('location.gps', 'AudioRecord.startRecording', '', 'recording', 'RECORD_AUDIO');
+        writeEvent('mic.record', 'AudioRecord.startRecording', '', 'recording', 'RECORD_AUDIO');
         return overload.apply(this, arguments);
       };
     });
@@ -605,7 +756,7 @@ function hookAudio() {
   try {
     var MR = Java.use('android.media.MediaRecorder');
     MR.start.implementation = function () {
-      writeEvent('location.gps', 'MediaRecorder.start', '', 'recording', 'RECORD_AUDIO');
+      writeEvent('mic.record', 'MediaRecorder.start', '', 'recording', 'RECORD_AUDIO');
       return this.start();
     };
   } catch (e) {}
@@ -616,7 +767,7 @@ function hookAudio() {
         AM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeEvent('location.gps', 'AudioManager.' + m, '', safeStr(result), 'RECORD_AUDIO');
+            writeEvent('mic.record', 'AudioManager.' + m, '', safeStr(result), 'RECORD_AUDIO');
             return result;
           };
         });
@@ -632,7 +783,7 @@ function hookSensors() {
       overload.implementation = function () {
         var sensor = '';
         try { sensor = safeStr(arguments[1]); } catch (e) {}
-        writeEvent('location.gps', 'SensorManager.registerListener', sensor, 'registered', null);
+        writeEvent('sensor.register', 'SensorManager.registerListener', sensor, 'registered', null);
         return overload.apply(this, arguments);
       };
     });
@@ -647,7 +798,7 @@ function hookClipboard() {
         CL[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeEvent('location.gps', 'ClipboardManager.' + m, '', safeStr(result), 'READ_CLIPBOARD');
+            writeEvent('clipboard.primary', 'ClipboardManager.' + m, '', safeStr(result), 'READ_CLIPBOARD');
             return result;
           };
         });
@@ -666,7 +817,7 @@ function hookSms() {
             var args = [];
             for (var i = 0; i < Math.min(arguments.length, 3); i++) args.push(safeStr(arguments[i]));
             var result = overload.apply(this, arguments);
-            writeEvent('location.gps', 'SmsManager.' + m, args.join(', '), safeStr(result), 'SEND_SMS');
+            writeEvent(m === 'getDefault' ? 'sms.inbox' : 'sms.send', 'SmsManager.' + m, args.join(', '), safeStr(result), 'SEND_SMS');
             return result;
           };
         });
@@ -707,7 +858,7 @@ function hookBiometric() {
     var BP = Java.use('android.hardware.biometrics.BiometricPrompt');
     BP.authenticate.overloads.forEach(function (overload) {
       overload.implementation = function () {
-        writeEvent('attest.key', 'BiometricPrompt.authenticate', '', 'prompt', null);
+        writeEvent('hw.biometric', 'BiometricPrompt.authenticate', '', 'prompt', null);
         return overload.apply(this, arguments);
       };
     });
@@ -718,7 +869,7 @@ function hookMediaProjection() {
   try {
     var MPM = Java.use('android.media.projection.MediaProjectionManager');
     MPM.createScreenCaptureIntent.implementation = function () {
-      writeEvent('location.gps', 'MediaProjectionManager.createScreenCaptureIntent', '', 'screen capture', null);
+      writeEvent('display.capture', 'MediaProjectionManager.createScreenCaptureIntent', '', 'screen capture', null);
       return this.createScreenCaptureIntent();
     };
   } catch (e) {}
@@ -1206,29 +1357,16 @@ function hookRootPackages() {
   classes.forEach(function (name) {
     try {
       var PM = Java.use(name);
-      ['getPackageInfo', 'getApplicationInfo', 'getPackageUid'].forEach(function (m) {
-        try {
-          PM[m].overloads.forEach(function (overload) {
-            overload.implementation = function () {
-              var pkg = safeStr(arguments[0]);
-              var result = overload.apply(this, arguments);
-              if (isRootPkg(pkg)) writeRoot(classifyClass(pkg), name + '.' + m, pkg, 'found');
-              return result;
-            };
-          });
-        } catch (e) {}
-      });
-      ['getInstalledPackages', 'getInstalledApplications'].forEach(function (scan) {
-        try {
-          PM[scan].overloads.forEach(function (overload) {
-            overload.implementation = function () {
-              var result = overload.apply(this, arguments);
-              writeRoot('root.packages', name + '.' + scan, safeStr(arguments[0]), 'count=' + (result ? result.size() : 0));
-              return result;
-            };
-          });
-        } catch (e) {}
-      });
+      try {
+        PM.getPackageUid.overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var pkg = safeStr(arguments[0]);
+            var result = overload.apply(this, arguments);
+            if (isRootPkg(pkg)) writeRoot(classifyClass(pkg), name + '.getPackageUid', pkg, 'found');
+            return result;
+          };
+        });
+      } catch (e) {}
     } catch (e) {}
   });
 }
@@ -1580,7 +1718,7 @@ function hookInjectEnvAndLoad() {
     var origProc = AM.getRunningAppProcesses;
     origProc.implementation = function () {
       var result = origProc.call(this);
-      writeRoot('root.threads', 'ActivityManager.getRunningAppProcesses', '', 'count=' + (result ? result.size() : 0));
+      writeReq('pkg.running', 'ActivityManager.getRunningAppProcesses', '', 'count=' + (result ? result.size() : 0), null);
       return result;
     };
   } catch (e) {}
@@ -1836,6 +1974,284 @@ function hookRootDetection() {
   hookVpnProxyPin();
 }
 
+function hookRequestSurface() {
+  try {
+    var Field = Java.use('java.lang.reflect.Field');
+    var origGet = Field.get.overload('java.lang.Object');
+    origGet.implementation = function (obj) {
+      var result = origGet.call(this, obj);
+      try {
+        var cls = this.getDeclaringClass().getName();
+        var name = this.getName();
+        if (cls === 'android.os.Build' || cls === 'android.os.Build$VERSION') {
+          writeOnce(cls.indexOf('VERSION') >= 0 ? 'version.release' : mapBuildField(name), 'Build.' + name + ' (reflect)', cls, safeStr(result), null);
+        }
+      } catch (e) {}
+      return result;
+    };
+  } catch (e) {}
+  try {
+    var USM = Java.use('android.app.usage.UsageStatsManager');
+    ['queryUsageStats', 'queryEvents', 'queryConfigurations'].forEach(function (m) {
+      try {
+        USM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeReq('pkg.usage', 'UsageStatsManager.' + m, safeStr(arguments[0]), safeStr(result), 'PACKAGE_USAGE_STATS');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Ctx = Java.use('android.app.ContextImpl');
+    Ctx.checkSelfPermission.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var perm = safeStr(arguments[0]);
+        var result = overload.apply(this, arguments);
+        if (/PHONE|SMS|CONTACTS|LOCATION|CAMERA|RECORD|STORAGE|AD_ID|ACCOUNTS|CALENDAR|CALL_LOG|BODY_SENSORS|NEARBY|BLUETOOTH|PACKAGE/i.test(perm)) {
+          writeReq('perm.check', 'checkSelfPermission', perm, safeStr(result), perm);
+        }
+        return result;
+      };
+    });
+  } catch (e) {}
+  try {
+    var Act = Java.use('android.app.Activity');
+    Act.requestPermissions.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('perm.check', 'Activity.requestPermissions', safeStr(arguments[0]), '', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var AOM = Java.use('android.app.AppOpsManager');
+    ['checkOp', 'checkOpNoThrow', 'noteOp', 'noteOpNoThrow', 'unsafeCheckOp'].forEach(function (m) {
+      try {
+        AOM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeReq('perm.appops', 'AppOpsManager.' + m, safeStr(arguments[0]), safeStr(result), null);
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var DM = Java.use('android.util.DisplayMetrics');
+    var orig = DM.setTo;
+    orig.implementation = function (o) {
+      writeOnce('display.metrics', 'DisplayMetrics.setTo', '', 'w=' + this.widthPixels + ' h=' + this.heightPixels + ' dpi=' + this.densityDpi, null);
+      return orig.call(this, o);
+    };
+  } catch (e) {}
+  try {
+    var Win = Java.use('android.view.Display');
+    ['getMetrics', 'getRealMetrics', 'getSize', 'getRealSize'].forEach(function (m) {
+      try {
+        Win[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            writeOnce('display.metrics', 'Display.' + m, '', '', null);
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Loc = Java.use('java.util.Locale');
+    var origDef = Loc.getDefault.overload();
+    origDef.implementation = function () {
+      var r = origDef.call(this);
+      writeOnce('locale.default', 'Locale.getDefault', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var TZ = Java.use('java.util.TimeZone');
+    var origTz = TZ.getDefault;
+    origTz.implementation = function () {
+      var r = origTz.call(this);
+      writeOnce('locale.default', 'TimeZone.getDefault', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var BM = Java.use('android.os.BatteryManager');
+    BM.getIntProperty.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var r = overload.apply(this, arguments);
+        writeReq('battery.status', 'BatteryManager.getIntProperty', safeStr(arguments[0]), safeStr(r), null);
+        return r;
+      };
+    });
+  } catch (e) {}
+  try {
+    var Nfc = Java.use('android.nfc.NfcAdapter');
+    ['getDefaultAdapter', 'isEnabled', 'enableReaderMode'].forEach(function (m) {
+      try {
+        Nfc[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            writeReq('nfc.adapter', 'NfcAdapter.' + m, '', safeStr(r), null);
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var USB = Java.use('android.hardware.usb.UsbManager');
+    USB.getDeviceList.implementation = function () {
+      var r = this.getDeviceList();
+      writeReq('usb.devices', 'UsbManager.getDeviceList', '', 'count=' + (r ? r.size() : 0), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var SF = Java.use('android.os.StatFs');
+    SF.$init.overload('java.lang.String').implementation = function (path) {
+      writeReq('storage.statfs', 'StatFs', safeStr(path), '', null);
+      return this.$init(path);
+    };
+  } catch (e) {}
+  try {
+    var Env = Java.use('android.os.Environment');
+    ['getExternalStorageDirectory', 'getExternalStorageState', 'getDataDirectory'].forEach(function (m) {
+      try {
+        Env[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            writeOnce('storage.statfs', 'Environment.' + m, '', safeStr(r), null);
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var WS = Java.use('android.webkit.WebSettings');
+    WS.getUserAgentString.implementation = function () {
+      var ua = this.getUserAgentString();
+      writeReq('webview.ua', 'WebSettings.getUserAgentString', '', safeStr(ua), null);
+      return ua;
+    };
+  } catch (e) {}
+  try {
+    var FCM = Java.use('com.google.firebase.messaging.FirebaseMessaging');
+    FCM.getToken.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('fcm.token', 'FirebaseMessaging.getToken', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var CM = Java.use('androidx.credentials.CredentialManager');
+    CM.getCredential.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('cred.manager', 'CredentialManager.getCredential', safeStr(arguments[0]), 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Id = Java.use('com.google.android.gms.auth.api.identity.Identity');
+    Id.getSignInClient.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('cred.phone_hint', 'Identity.getSignInClient', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var SR = Java.use('com.google.android.gms.auth.api.phone.SmsRetriever');
+    SR.getClient.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('sms.retriever', 'SmsRetriever.getClient', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var LC = Java.use('com.google.android.vending.licensing.LicenseChecker');
+    LC.checkAccess.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('play.license', 'LicenseChecker.checkAccess', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var SN = Java.use('com.google.android.gms.safetynet.SafetyNetClient');
+    SN.verifyWithRecaptcha.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('play.recaptcha', 'SafetyNet.verifyWithRecaptcha', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Settings = Java.use('android.provider.Settings');
+    Settings.canDrawOverlays.implementation = function (ctx) {
+      var r = this.canDrawOverlays(ctx);
+      writeReq('settings.overlay', 'Settings.canDrawOverlays', '', safeStr(r), 'SYSTEM_ALERT_WINDOW');
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var AM = Java.use('android.view.accessibility.AccessibilityManager');
+    AM.isEnabled.implementation = function () {
+      var r = this.isEnabled();
+      writeReq('settings.accessibility', 'AccessibilityManager.isEnabled', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var GLES = Java.use('android.opengl.GLES20');
+    GLES.glGetString.implementation = function (name) {
+      var r = this.glGetString(name);
+      writeOnce('gpu.gl', 'GLES20.glGetString', '' + name, safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var WM = Java.use('android.net.wifi.WifiManager');
+    ['getConnectionInfo', 'getConfiguredNetworks', 'getDhcpInfo', 'getScanResults'].forEach(function (m) {
+      try {
+        WM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            var id = m === 'getScanResults' ? 'wifi.scan_results' : 'wifi.mac';
+            writeReq(id, 'WifiManager.' + m, '', safeStr(r), 'ACCESS_FINE_LOCATION');
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var BLE = Java.use('android.bluetooth.le.BluetoothLeScanner');
+    BLE.startScan.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('bt.remote_mac', 'BluetoothLeScanner.startScan', '', 'scan', 'BLUETOOTH_SCAN');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var NI = Java.use('java.net.NetworkInterface');
+    NI.getInetAddresses.implementation = function () {
+      var r = this.getInetAddresses();
+      writeReq('net.link_addresses', 'NetworkInterface.getInetAddresses', this.getName(), '', null);
+      return r;
+    };
+  } catch (e) {}
+}
+
 function installJavaHooks() {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
   hookBuild();
@@ -1869,6 +2285,7 @@ function installJavaHooks() {
   hookCronetVolleyRetrofit();
   hookHmsAndFlutter();
   hookSniAndIntent();
+  hookRequestSurface();
   hookRootDetection();
 }
 

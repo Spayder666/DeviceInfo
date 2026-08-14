@@ -14,8 +14,8 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Hide (Shamiko/DenyList), isolated process, сверка .text libc диск↔RAM.
- * Смотрит глазами root и глазами mount-ns приложения.
+ * Не наш чекер root, а ответ на вопрос «что увидит целевое приложение, если спросит»:
+ * su в его mount-ns, isolated helper, libc .text диск≠RAM.
  */
 class EnvironmentAnalysisMonitor(
     private val packageName: String,

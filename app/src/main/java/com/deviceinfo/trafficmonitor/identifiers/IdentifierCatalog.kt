@@ -3,8 +3,8 @@ package com.deviceinfo.trafficmonitor.identifiers
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 
 /**
- * Полный каталог идентификаторов Android (AOSP API 33–35).
- * Источники: Build.java, TelephonyManager, SettingsProvider, MediaDrm, AOSP docs.
+ * Каталог того, что целевое приложение может *запросить* (AOSP API 33–35).
+ * Это не чекер root/ресурсов: каждая запись — API/путь/prop, который приложение читает.
  */
 enum class IdentifierGroup(val label: String) {
     BUILD("Build / устройство"),
@@ -26,7 +26,10 @@ enum class IdentifierGroup(val label: String) {
     OEM("OEM-специфичные"),
     ATTESTATION("Attestation / Integrity"),
     LOCATION("GPS / локация"),
-    ROOT("Root / детект среды")
+    ROOT("Root / детект среды"),
+    PERSONAL("Контакты / SMS / календарь"),
+    HARDWARE("Камера / датчики / экран / NFC"),
+    IDENTITY("Токены / credentials / FCM")
 }
 
 data class IdentifierDefinition(
@@ -65,6 +68,10 @@ object IdentifierCatalog {
         addAll(attestationIdentifiers())
         addAll(locationIdentifiers())
         addAll(rootIdentifiers())
+        addAll(personalIdentifiers())
+        addAll(hardwareIdentifiers())
+        addAll(identityIdentifiers())
+        addAll(packageQueryIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -141,7 +148,13 @@ object IdentifierCatalog {
         id("settings.device_name", "Имя устройства", IdentifierGroup.SETTINGS, "Settings.Global.DEVICE_NAME", logcat = listOf("device_name", "DEVICE_NAME")),
         id("settings.secure", "Settings.Secure (bulk)", IdentifierGroup.SETTINGS, "content://settings/secure", strace = listOf("content://settings/secure", "settings/secure")),
         id("settings.global", "Settings.Global (bulk)", IdentifierGroup.SETTINGS, "content://settings/global", strace = listOf("content://settings/global")),
-        id("settings.system", "Settings.System (bulk)", IdentifierGroup.SETTINGS, "content://settings/system", strace = listOf("content://settings/system"))
+        id("settings.system", "Settings.System (bulk)", IdentifierGroup.SETTINGS, "content://settings/system", strace = listOf("content://settings/system")),
+        id("settings.accessibility", "Accessibility services", IdentifierGroup.SETTINGS, "Settings.Secure.enabled_accessibility_services", logcat = listOf("enabled_accessibility_services", "accessibility_enabled")),
+        id("settings.notification_listeners", "Notification listeners", IdentifierGroup.SETTINGS, "enabled_notification_listeners", logcat = listOf("enabled_notification_listeners")),
+        id("settings.input_method", "Клавиатура / IME", IdentifierGroup.SETTINGS, "default_input_method", logcat = listOf("default_input_method")),
+        id("settings.location_mode", "Location mode", IdentifierGroup.SETTINGS, "location_mode / location_providers_allowed", logcat = listOf("location_mode", "location_providers_allowed")),
+        id("settings.mock_location", "Mock location", IdentifierGroup.SETTINGS, "allow_mock_location", logcat = listOf("allow_mock_location", "mock_location")),
+        id("settings.overlay", "SYSTEM_ALERT_WINDOW", IdentifierGroup.SETTINGS, "Settings.canDrawOverlays", logcat = listOf("canDrawOverlays", "SYSTEM_ALERT_WINDOW"))
     )
 
     private fun telephonyIdentifiers() = listOf(
@@ -233,7 +246,9 @@ object IdentifierCatalog {
         id("install.installer", "Installer package", IdentifierGroup.INSTALL, "PackageManager.getInstallerPackageName()", logcat = listOf("getInstallerPackageName")),
         id("install.first_install", "First install time", IdentifierGroup.INSTALL, "PackageInfo.firstInstallTime", logcat = listOf("firstInstallTime")),
         id("install.last_update", "Last update time", IdentifierGroup.INSTALL, "PackageInfo.lastUpdateTime", logcat = listOf("lastUpdateTime")),
-        id("install.signing_cert", "Signing certificate hash", IdentifierGroup.INSTALL, "PackageManager GET_SIGNING_CERTIFICATES", logcat = listOf("GET_SIGNING_CERTIFICATES", "signatures"))
+        id("install.signing_cert", "Signing certificate hash", IdentifierGroup.INSTALL, "PackageManager GET_SIGNING_CERTIFICATES", logcat = listOf("GET_SIGNING_CERTIFICATES", "signatures")),
+        id("install.package_info", "PackageManager.getPackageInfo", IdentifierGroup.INSTALL, "PackageManager.getPackageInfo", logcat = listOf("getPackageInfo")),
+        id("install.application_info", "getApplicationInfo", IdentifierGroup.INSTALL, "PackageManager.getApplicationInfo", logcat = listOf("getApplicationInfo"))
     )
 
     private fun accountIdentifiers() = listOf(
@@ -248,7 +263,17 @@ object IdentifierCatalog {
         id("cp.telephony", "Telephony provider", IdentifierGroup.CONTENT_PROVIDER, "content://telephony/siminfo", strace = listOf("content://telephony"), perm = "READ_PHONE_STATE"),
         id("cp.gsf", "GSF provider", IdentifierGroup.CONTENT_PROVIDER, "content://com.google.android.gsf.gservices", strace = listOf("gsf\\.gservices")),
         id("cp.settings_secure", "Settings secure CP", IdentifierGroup.CONTENT_PROVIDER, "content://settings/secure"),
-        id("cp.icc", "SIM ICC provider", IdentifierGroup.CONTENT_PROVIDER, "content://icc/adn", strace = listOf("content://icc"))
+        id("cp.icc", "SIM ICC provider", IdentifierGroup.CONTENT_PROVIDER, "content://icc/adn", strace = listOf("content://icc")),
+        id("cp.contacts", "Contacts provider", IdentifierGroup.PERSONAL, "content://com.android.contacts", strace = listOf("content://com.android.contacts")),
+        id("cp.sms", "SMS/MMS provider", IdentifierGroup.PERSONAL, "content://sms", strace = listOf("content://sms", "content://mms")),
+        id("cp.call_log", "CallLog provider", IdentifierGroup.PERSONAL, "content://call_log", strace = listOf("content://call_log")),
+        id("cp.calendar", "Calendar provider", IdentifierGroup.PERSONAL, "content://com.android.calendar", strace = listOf("content://com.android.calendar")),
+        id("cp.browser", "Browser bookmarks/history", IdentifierGroup.PERSONAL, "content://browser", strace = listOf("content://browser")),
+        id("cp.voicemail", "Voicemail provider", IdentifierGroup.PERSONAL, "content://com.android.voicemail", strace = listOf("voicemail")),
+        id("cp.blocked", "Blocked numbers", IdentifierGroup.PERSONAL, "content://com.android.blockednumber", strace = listOf("blockednumber")),
+        id("storage.media", "MediaStore", IdentifierGroup.CONTENT_PROVIDER, "content://media", strace = listOf("content://media")),
+        id("storage.downloads", "DownloadManager / downloads", IdentifierGroup.CONTENT_PROVIDER, "content://downloads", strace = listOf("content://downloads")),
+        id("cp.other", "Другой ContentProvider", IdentifierGroup.CONTENT_PROVIDER, "ContentResolver.query")
     )
 
     private fun procSysIdentifiers() = listOf(
@@ -353,6 +378,55 @@ object IdentifierCatalog {
         id("root.talsec", "Talsec / freeRASP / JailMonkey", IdentifierGroup.ROOT, "com.aheaditec.talsec / JailMonkey", logcat = listOf("Talsec", "freeRASP", "ThreatListener", "JailMonkey"))
     )
 
+    private fun personalIdentifiers() = listOf(
+        id("contacts.query", "Контакты", IdentifierGroup.PERSONAL, "ContactsContract / content://com.android.contacts", logcat = listOf("ContactsContract", "ContactsProvider"), perm = "READ_CONTACTS", strace = listOf("content://com.android.contacts", "content://contacts")),
+        id("contacts.profile", "Профиль владельца", IdentifierGroup.PERSONAL, "ContactsContract.Profile", logcat = listOf("ContactsContract.Profile"), perm = "READ_CONTACTS"),
+        id("sms.inbox", "SMS inbox", IdentifierGroup.PERSONAL, "content://sms", logcat = listOf("content://sms", "Telephony.Sms"), perm = "READ_SMS", strace = listOf("content://sms")),
+        id("sms.send", "Отправка SMS", IdentifierGroup.PERSONAL, "SmsManager.sendTextMessage", logcat = listOf("sendTextMessage", "sendMultipartTextMessage"), perm = "SEND_SMS"),
+        id("mms.query", "MMS", IdentifierGroup.PERSONAL, "content://mms", logcat = listOf("content://mms"), perm = "READ_SMS", strace = listOf("content://mms")),
+        id("call_log.query", "Журнал звонков", IdentifierGroup.PERSONAL, "CallLog.Calls / content://call_log", logcat = listOf("CallLog", "content://call_log"), perm = "READ_CALL_LOG", strace = listOf("content://call_log")),
+        id("calendar.query", "Календарь", IdentifierGroup.PERSONAL, "CalendarContract", logcat = listOf("CalendarContract", "content://com.android.calendar"), perm = "READ_CALENDAR", strace = listOf("content://com.android.calendar")),
+        id("voicemail.query", "Голосовая почта (CP)", IdentifierGroup.PERSONAL, "content://com.android.voicemail", logcat = listOf("VoicemailContract"), perm = "READ_VOICEMAIL"),
+        id("blocked.query", "Заблокированные номера", IdentifierGroup.PERSONAL, "BlockedNumberContract", logcat = listOf("BlockedNumber"), perm = "READ_CONTACTS"),
+        id("browser.history", "История браузера", IdentifierGroup.PERSONAL, "content://browser/bookmarks", logcat = listOf("Browser.BOOKMARKS", "content://browser"))
+    )
+
+    private fun hardwareIdentifiers() = listOf(
+        id("camera.open", "Камера", IdentifierGroup.HARDWARE, "CameraManager.openCamera", logcat = listOf("openCamera", "CameraManager", "CameraDevice"), perm = "CAMERA"),
+        id("camera.ids", "Список камер", IdentifierGroup.HARDWARE, "CameraManager.getCameraIdList", logcat = listOf("getCameraIdList")),
+        id("mic.record", "Микрофон / запись", IdentifierGroup.HARDWARE, "AudioRecord.startRecording", logcat = listOf("AudioRecord", "MediaRecorder.start"), perm = "RECORD_AUDIO"),
+        id("sensor.register", "Сенсоры", IdentifierGroup.HARDWARE, "SensorManager.registerListener", logcat = listOf("SensorManager", "registerListener")),
+        id("clipboard.primary", "Буфер обмена", IdentifierGroup.HARDWARE, "ClipboardManager.getPrimaryClip", logcat = listOf("ClipboardManager", "getPrimaryClip")),
+        id("display.metrics", "Экран / density", IdentifierGroup.HARDWARE, "Display.getMetrics / DisplayMetrics", logcat = listOf("DisplayMetrics", "getRealMetrics")),
+        id("display.capture", "Захват экрана", IdentifierGroup.HARDWARE, "MediaProjectionManager.createScreenCaptureIntent", logcat = listOf("MediaProjection", "createScreenCaptureIntent")),
+        id("hw.biometric", "Биометрия", IdentifierGroup.HARDWARE, "BiometricPrompt.authenticate", logcat = listOf("BiometricPrompt", "FingerprintManager")),
+        id("nfc.adapter", "NFC", IdentifierGroup.HARDWARE, "NfcAdapter", logcat = listOf("NfcAdapter", "enableReaderMode")),
+        id("usb.devices", "USB устройства", IdentifierGroup.HARDWARE, "UsbManager.getDeviceList", logcat = listOf("UsbManager", "getDeviceList")),
+        id("battery.status", "Батарея", IdentifierGroup.HARDWARE, "BatteryManager / ACTION_BATTERY_CHANGED", logcat = listOf("BatteryManager", "EXTRA_LEVEL")),
+        id("locale.default", "Locale / timezone", IdentifierGroup.HARDWARE, "Locale.getDefault / TimeZone.getDefault", logcat = listOf("Locale.getDefault", "TimeZone.getDefault")),
+        id("gpu.gl", "GPU / GLES renderer", IdentifierGroup.HARDWARE, "GLES20.glGetString(GL_RENDERER)", logcat = listOf("GL_RENDERER", "glGetString")),
+        id("storage.statfs", "StatFs / свободное место", IdentifierGroup.HARDWARE, "StatFs / StorageStatsManager", logcat = listOf("StatFs", "StorageStatsManager"))
+    )
+
+    private fun identityIdentifiers() = listOf(
+        id("fcm.token", "FCM push token", IdentifierGroup.IDENTITY, "FirebaseMessaging.getToken", logcat = listOf("FirebaseMessaging", "getToken", "InstanceID")),
+        id("cred.manager", "Credential Manager / passkey", IdentifierGroup.IDENTITY, "CredentialManager.getCredential", logcat = listOf("CredentialManager", "GetCredentialRequest")),
+        id("cred.phone_hint", "Phone number hint", IdentifierGroup.IDENTITY, "Identity.getPhoneNumberHintIntent", logcat = listOf("PhoneNumberHint", "HintRequest")),
+        id("sms.retriever", "SMS Retriever / User Consent", IdentifierGroup.IDENTITY, "SmsRetrieverClient", logcat = listOf("SmsRetriever", "SmsToken")),
+        id("play.license", "Play Licensing (LVL)", IdentifierGroup.IDENTITY, "LicenseChecker.checkAccess", logcat = listOf("LicenseChecker", "ILicensingService")),
+        id("play.recaptcha", "reCAPTCHA / SafetyNet", IdentifierGroup.IDENTITY, "SafetyNet.Recaptcha / RecaptchaAction", logcat = listOf("Recaptcha", "verifyWithRecaptcha")),
+        id("webview.ua", "WebView User-Agent", IdentifierGroup.IDENTITY, "WebSettings.getUserAgentString", logcat = listOf("getUserAgentString", "user-agent"))
+    )
+
+    private fun packageQueryIdentifiers() = listOf(
+        id("pkg.installed", "Список установленных пакетов", IdentifierGroup.INSTALL, "getInstalledPackages / getInstalledApplications", logcat = listOf("getInstalledPackages", "getInstalledApplications"), perm = "QUERY_ALL_PACKAGES"),
+        id("pkg.query_intent", "queryIntentActivities", IdentifierGroup.INSTALL, "PackageManager.queryIntentActivities", logcat = listOf("queryIntentActivities", "queryBroadcastReceivers", "queryIntentServices")),
+        id("pkg.running", "Running processes", IdentifierGroup.INSTALL, "ActivityManager.getRunningAppProcesses", logcat = listOf("getRunningAppProcesses", "getRunningTasks")),
+        id("pkg.usage", "UsageStats", IdentifierGroup.INSTALL, "UsageStatsManager.queryUsageStats", logcat = listOf("UsageStatsManager", "queryUsageStats"), perm = "PACKAGE_USAGE_STATS"),
+        id("perm.check", "checkSelfPermission / requestPermissions", IdentifierGroup.INSTALL, "Context.checkSelfPermission", logcat = listOf("checkSelfPermission", "requestPermissions", "checkPermission")),
+        id("perm.appops", "AppOpsManager.checkOp / noteOp", IdentifierGroup.INSTALL, "AppOpsManager", logcat = listOf("AppOpsManager", "noteOp", "checkOp"))
+    )
+
     // --- helpers ---
 
     private fun id(
@@ -386,7 +460,24 @@ fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {
     IdentifierGroup.WIFI, IdentifierGroup.NETWORK -> AccessCategory.NETWORK
     IdentifierGroup.BLUETOOTH -> AccessCategory.BLUETOOTH
     IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION -> AccessCategory.SECURITY
-    IdentifierGroup.ACCOUNT -> AccessCategory.IDENTIFIER
+    IdentifierGroup.CONTENT_PROVIDER -> when {
+        id.contains("telephony") || id.contains("icc") -> AccessCategory.TELEPHONY
+        id.startsWith("storage.") -> AccessCategory.STORAGE
+        else -> AccessCategory.IDENTIFIER
+    }
+    IdentifierGroup.ACCOUNT, IdentifierGroup.IDENTITY -> AccessCategory.IDENTIFIER
+    IdentifierGroup.PERSONAL -> when {
+        id.startsWith("sms.") || id.startsWith("mms.") -> AccessCategory.SMS
+        id.startsWith("calendar.") -> AccessCategory.CALENDAR
+        else -> AccessCategory.CONTACTS
+    }
+    IdentifierGroup.HARDWARE -> when {
+        id.startsWith("camera.") -> AccessCategory.CAMERA
+        id.startsWith("mic.") -> AccessCategory.MICROPHONE
+        id.startsWith("sensor.") -> AccessCategory.SENSOR
+        id.startsWith("clipboard.") -> AccessCategory.CLIPBOARD
+        else -> AccessCategory.SYSTEM_API
+    }
     else -> AccessCategory.IDENTIFIER
 }
 
@@ -401,6 +492,15 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id.startsWith("bt.") -> AccessCategory.BLUETOOTH
             id.startsWith("root.") || id.startsWith("attest.") ||
                 id == "ent.integrity" || id == "ent.safetynet" || id == "ent.verdict" -> AccessCategory.SECURITY
+            id.startsWith("contacts.") || id.startsWith("call_log.") || id == "cp.contacts" -> AccessCategory.CONTACTS
+            id.startsWith("sms.") || id.startsWith("mms.") || id == "cp.sms" -> AccessCategory.SMS
+            id.startsWith("calendar.") || id == "cp.calendar" -> AccessCategory.CALENDAR
+            id.startsWith("camera.") -> AccessCategory.CAMERA
+            id.startsWith("mic.") -> AccessCategory.MICROPHONE
+            id.startsWith("sensor.") -> AccessCategory.SENSOR
+            id.startsWith("clipboard.") -> AccessCategory.CLIPBOARD
+            id.startsWith("perm.") || id.startsWith("pkg.") -> AccessCategory.SYSTEM_API
+            id.startsWith("fcm.") || id.startsWith("cred.") || id.startsWith("play.") -> AccessCategory.IDENTIFIER
             else -> null
         }
 }

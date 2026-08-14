@@ -1,6 +1,6 @@
 # Access Monitor
 
-Android-приложение для мониторинга **системных запросов** выбранного приложения через **root-доступ**.
+Android-приложение, которое смотрит **что целевое приложение запрашивает** (идентификаторы, SIM, контакты, пакеты, Integrity…), а не проверяет root/ресурсы само. Root нужен только нам, чтобы видеть чужие запросы.
 
 Поддерживаемые версии Android: **13–17** (API 33–35).
 
@@ -14,8 +14,8 @@ Android-приложение для мониторинга **системных 
 | Камера | Camera API, open(/dev/camera) |
 | Микрофон | AudioRecord, MediaRecorder |
 | Телефон / SIM | IMEI, IMSI, номер SIM, TelephonyManager |
-| Идентификаторы (**222 типа**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP/2, Integrity verdict, root hide… |
-| Root / Integrity | su, Magisk/Shamiko, Play Integrity verdict, VPN/CA/pin, hooks, isolated, .text |
+| Идентификаторы (каталог запросов) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP/2, FCM, UsageStats, пакеты… |
+| Что приложение проверяет | su/Magisk **если оно само ищет**, Play Integrity, VPN/CA/pin, список приложений |
 | Контакты / SMS | ContactsProvider, SmsManager |
 | Сеть / API | HTTP-запросы (метаданные), connect(), сокеты |
 | Разрешения | AppOps, checkPermission, requestPermissions |
@@ -117,13 +117,13 @@ AccessMonitorService  → foreground-сервис
 
 **Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Хуки: Location/GNSS/Fused, Telephony, Camera, Audio, OkHttp, HttpURLConnection, WebView, SQLite, SharedPreferences, файлы с lat/lon, Geofence, ActivityRecognition, WorkManager, ContentResolver, Build/getprop/Settings, Play Integrity / SafetyNet (в т.ч. token/JWS), NetworkCapabilities/VPN/proxy, pinning, Process.isIsolated, libc `syscall()`, RootBeer/Talsec/JailMonkey.
+Хуки — **запросы целевого приложения**: Location, Telephony, Camera, Audio, контакты/SMS/календарь/call log, PackageManager (пакеты, подписи, queryIntent), UsageStats, AppOps/permissions, Display/locale/battery/GPU, NFC/USB, FCM/credentials/SMS Retriever/LVL, OkHttp/WebView, Build/getprop/Settings, Play Integrity, VPN/proxy/pin.
 
 События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог идентификаторов (222 типа)
+## Каталог запросов (276 типов)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 
@@ -132,23 +132,26 @@ AccessMonitorService  → foreground-сервис
 | **BUILD** | 27 | MODEL, MANUFACTURER, DEVICE, BRAND, HARDWARE, BOARD, FINGERPRINT, SERIAL, SOC, SKU, ABI, эмулятор… |
 | **OS_VERSION** | 9 | SDK, RELEASE, security patch, incremental, codename, **версия ядра** (`/proc/version`) |
 | **SYSTEM_PROPERTY** | 17 | `getprop`: ro.serialno, ro.product.*, ro.build.*, gsm.*, persist.radio.imei… |
-| **SETTINGS** | 7 | Android ID (SSAID), bluetooth_address/name, device_name, settings providers |
+| **SETTINGS** | 13 | Android ID, BT name, accessibility, notification listeners, overlay, mock location |
 | **TELEPHONY** | 19 | IMEI, MEID, IMSI, ICCID, номер телефона, MCC/MNC, carrier ID, TAC, IMEISV… |
 | **SUBSCRIPTION** | 9 | Subscription ID, ICCID, phone number, SIM slot, MCC/MNC, eSIM port |
 | **WIFI** | 9 | MAC, BSSID, SSID, scan results, IP, sysfs MAC |
 | **BLUETOOTH** | 6 | Local/remote MAC и name, sysfs, audio device MAC |
 | **ADVERTISING** | 7 | GAID, GSF ID, Firebase FID, App Set ID, OAID, limit ad tracking |
 | **DRM** | 6 | Widevine deviceUniqueId, PlayReady, security level L1/L3 |
-| **INSTALL** | 5 | Install referrer, installer package, signing cert, install times |
+| **INSTALL** | 13 | installer, подписи, getPackageInfo, список пакетов, UsageStats, checkPermission |
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
-| **CONTENT_PROVIDER** | 6 | telephony/siminfo, GSF, settings, ICC, SQLite, SharedPreferences |
+| **CONTENT_PROVIDER** | 8 | telephony, GSF, MediaStore, downloads, SQLite, prefs |
 | **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
 | **NETWORK** | 15 | IP, MAC, HTTP/HTTPS/HTTP2, WebView, DNS, SNI, VPN, proxy, user CA, pin fail |
 | **LOCATION** | 14 | GPS, fused, NLP, GNSS, geofence, cell, Wi‑Fi scan, RTT, UWB, HAL, SUPL |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 6 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
 | **ATTESTATION** | 6 | Key attestation, StrongBox, Play Integrity, SafetyNet, **verdict**, verified boot |
-| **ROOT** | 28 | su, Magisk, Shamiko/DenyList, isolated, .text диск≠RAM, libc syscall, Talsec, Frida/LSPosed |
+| **ROOT** | 28 | если приложение само ищет su/Magisk/LSPosed/Frida (не наш чекер) |
+| **PERSONAL** | 17 | контакты, SMS/MMS, call log, календарь, voicemail, browser history |
+| **HARDWARE** | 14 | камера, микрофон, сенсоры, экран, NFC, USB, батарея, locale, GPU |
+| **IDENTITY** | 7 | FCM token, Credential Manager, phone hint, SMS Retriever, LVL, reCAPTCHA, UA |
 
 Каждый идентификатор содержит: API, system property, file path, regex для logcat/strace, требуемое разрешение.
 

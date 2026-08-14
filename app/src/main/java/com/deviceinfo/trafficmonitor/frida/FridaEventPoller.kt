@@ -135,8 +135,12 @@ class FridaEventPoller(
                 "ssl_write" in text || "mitm" in text || "connectivity" in text || "socket" in text ->
                 AccessCategory.NETWORK
             "telephony" in text || "imei" in text || "sim" in text || "phone" in text -> AccessCategory.TELEPHONY
+            "usage" in text || "installed" in text || "queryintent" in text || "appops" in text ||
+                "permission" in text -> AccessCategory.SYSTEM_API
+            "nfc" in text || "usb" in text || "display" in text || "battery" in text ||
+                "locale" in text || "biometric" in text -> AccessCategory.SYSTEM_API
             "storage" in text || "file" in text || "sqlite" in text || "sharedpref" in text ||
-                "media/" in text -> AccessCategory.STORAGE
+                "media/" in text || "mediastore" in text -> AccessCategory.STORAGE
             "biometric" in text || "fingerprint" in text || "projection" in text -> AccessCategory.SYSTEM_API
             "root" in text || "magisk" in text || "safetynet" in text || "integrity" in text ||
                 "xposed" in text || "frida" in text || "selinux" in text || "emulator" in text ||
