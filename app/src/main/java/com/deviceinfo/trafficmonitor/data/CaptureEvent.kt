@@ -33,7 +33,8 @@ enum class EventSource {
     PERFETTO,
     TCPDUMP,
     STATSD,
-    EBPF
+    EBPF,
+    MITM
 }
 
 @Entity(tableName = "capture_events")

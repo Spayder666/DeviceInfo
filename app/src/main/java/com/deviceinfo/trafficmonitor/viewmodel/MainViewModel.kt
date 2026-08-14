@@ -7,6 +7,7 @@ import com.deviceinfo.trafficmonitor.TrafficMonitorApp
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
+import com.deviceinfo.trafficmonitor.mitm.HttpsMitmController
 import com.deviceinfo.trafficmonitor.model.InstalledApp
 import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
@@ -234,5 +235,40 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearFridaMessage() {
         _fridaMessage.value = null
+    }
+
+    private val _mitmActive = MutableStateFlow(HttpsMitmController.active)
+    val mitmActive = _mitmActive.asStateFlow()
+
+    private val _isMitmStarting = MutableStateFlow(false)
+    val isMitmStarting = _isMitmStarting.asStateFlow()
+
+    fun startMitm() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isMitmStarting.value = true
+            val uid = RootShell.getUid(_packageName.value) ?: -1
+            val ok = HttpsMitmController.start(
+                getApplication(),
+                _packageName.value,
+                uid,
+                repository
+            )
+            _mitmActive.value = HttpsMitmController.active
+            _fridaStatus.value = FridaInstaller.status
+            _fridaMessage.value = if (ok) {
+                "MITM HTTPS: plaintext + CA. При pinning смотрите события Frida."
+            } else {
+                HttpsMitmController.lastError ?: "MITM не запустился"
+            }
+            _isMitmStarting.value = false
+        }
+    }
+
+    fun stopMitm() {
+        viewModelScope.launch(Dispatchers.IO) {
+            HttpsMitmController.stop()
+            _mitmActive.value = false
+            _fridaMessage.value = "MITM HTTPS выключен"
+        }
     }
 }

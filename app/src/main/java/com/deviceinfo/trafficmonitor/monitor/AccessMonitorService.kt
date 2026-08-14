@@ -16,6 +16,7 @@ import com.deviceinfo.trafficmonitor.R
 import com.deviceinfo.trafficmonitor.TrafficMonitorApp
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.frida.FridaMonitor
+import com.deviceinfo.trafficmonitor.mitm.HttpsMitmController
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -183,6 +184,7 @@ class AccessMonitorService : Service() {
         syncPushMonitor?.stop()
         securityKeystoreMonitor?.stop()
         oemIndoorMonitor?.stop()
+        HttpsMitmController.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }

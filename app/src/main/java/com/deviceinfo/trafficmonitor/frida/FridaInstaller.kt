@@ -21,6 +21,10 @@ object FridaInstaller {
     const val SERVER_PATH = "$BASE_DIR/frida-server"
     const val INJECT_PATH = "$BASE_DIR/frida-inject"
     const val INJECT_LOG = "$BASE_DIR/inject.log"
+    const val HTTPS_LOG = "$BASE_DIR/https.jsonl"
+
+    @Volatile
+    var mitmEnabled: Boolean = false
 
     @Volatile
     var status: FridaStatus = FridaStatus.NOT_INSTALLED
@@ -87,9 +91,11 @@ object FridaInstaller {
         val template = context.assets.open("frida/identifier_hooks.js")
             .bufferedReader().readText()
             .replace("__TARGET_PACKAGE__", packageName)
+            .replace("__MITM_ENABLED__", if (mitmEnabled) "true" else "false")
         val local = File(context.filesDir, "identifier_hooks_active.js")
         local.writeText(template)
         RootShell.execAndRead("cp ${local.absolutePath} $HOOKS_PATH && chmod 644 $HOOKS_PATH")
+        RootShell.execAndRead("touch $HTTPS_LOG && chmod 666 $HTTPS_LOG")
     }
 
     private fun isGadgetPresent(): Boolean {

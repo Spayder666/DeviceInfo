@@ -14,7 +14,7 @@ Android-приложение для мониторинга **системных 
 | Камера | Camera API, open(/dev/camera) |
 | Микрофон | AudioRecord, MediaRecorder |
 | Телефон / SIM | IMEI, IMSI, номер SIM, TelephonyManager |
-| Идентификаторы (**164 типа**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP, DNS, SNI, RTT… |
+| Идентификаторы (**165 типов**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP, DNS, SNI, HTTPS… |
 | Контакты / SMS | ContactsProvider, SmsManager |
 | Сеть / API | HTTP-запросы (метаданные), connect(), сокеты |
 | Разрешения | AppOps, checkPermission, requestPermissions |
@@ -43,6 +43,7 @@ Android-приложение для мониторинга **системных 
 18. **FCM / Sync / wakelock** — пуши и синк, которые будят локацию
 19. **security / keystore / ANR** — буфер security, attestation, tombstones
 20. **OEM + indoor** — IZat/HMS/SEM, Wi‑Fi RTT, UWB
+21. **MITM HTTPS** (вручную) — plaintext запросов/ответов выбранного приложения
 
 ## Требования
 
@@ -72,7 +73,7 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`
 - Без root мониторинг невозможен
 - Некоторые API могут не попадать в logcat на release-сборках (обфускация/ProGuard)
 - strace может быть недоступен на некоторых прошивках
-- Приложение **не перехватывает содержимое HTTPS-трафика** — фиксируются только метаданные сетевых подключений и API-вызовы из логов
+- **HTTPS MITM** только вручную (кнопка «MITM HTTPS»): локальный CA + iptables REDIRECT и Frida `SSL_read`/`SSL_write` + снятие pinning. Не расшифровывает чужой Wi‑Fi — только выбранное приложение на этом устройстве.
 
 ## Архитектура
 
@@ -116,7 +117,7 @@ AccessMonitorService  → foreground-сервис
 
 Данные хранятся локально в Room Database.
 
-## Каталог идентификаторов (164 типа)
+## Каталог идентификаторов (165 типов)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 
@@ -136,7 +137,7 @@ AccessMonitorService  → foreground-сервис
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
 | **CONTENT_PROVIDER** | 6 | telephony/siminfo, GSF, settings, ICC, SQLite, SharedPreferences |
 | **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
-| **NETWORK** | 9 | IP, MAC, hostname, IPv6, HTTP URL, WebView, DNS, pcap, TLS SNI |
+| **NETWORK** | 10 | IP, MAC, hostname, IPv6, HTTP, WebView, DNS, pcap, SNI, HTTPS MITM |
 | **LOCATION** | 14 | GPS, fused, NLP, GNSS, geofence, cell, Wi‑Fi scan, RTT, UWB, HAL, SUPL |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 5 | Samsung, Huawei, Vivo, OAID-специфичные ключи |

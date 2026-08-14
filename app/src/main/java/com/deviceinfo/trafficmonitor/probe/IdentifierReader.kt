@@ -416,11 +416,16 @@ object IdentifierReader {
             "cat /proc/net/nf_conntrack 2>/dev/null | grep -F '$packageName' | head -n 8",
             timeoutSec = 5
         ).trim()
+        val https = RootShell.execAndRead(
+            "grep net.https ${com.deviceinfo.trafficmonitor.frida.FridaInstaller.EVENTS_PATH} 2>/dev/null | tail -n 8",
+            timeoutSec = 5
+        ).trim()
         return wifi + listOfNotEmpty(
             IdentifierValue("net.active", "Активная сеть", active),
             IdentifierValue("net.pcap", "pcap (заголовки)", pcap.ifBlank { MonitorPaths.PCAP }),
             IdentifierValue("net.dns", "DNS из pcap", dns),
-            IdentifierValue("net.conntrack", "conntrack", ct)
+            IdentifierValue("net.conntrack", "conntrack", ct),
+            IdentifierValue("net.https", "HTTPS plaintext", https)
         )
     }
 

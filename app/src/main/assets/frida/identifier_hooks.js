@@ -2,6 +2,7 @@
 
 var EVENT_FILE = '/data/local/tmp/access_monitor/events.jsonl';
 var TARGET_PKG = '__TARGET_PACKAGE__';
+var MITM_ENABLED = __MITM_ENABLED__;
 
 var nativeIo = null;
 
@@ -1059,4 +1060,145 @@ setTimeout(function () {
   }
   try { hookNativeProperties(); } catch (e) {}
   try { hookNativeNetMeta(); } catch (e) {}
+  if (MITM_ENABLED) {
+    try { installMitmHooks(); } catch (e) {}
+  }
 }, 1500);
+
+function truncateHttp(buf, maxLen) {
+  maxLen = maxLen || 1800;
+  var s = '';
+  try {
+    if (buf && buf.readUtf8String) s = buf.readUtf8String();
+    else s = String(buf);
+  } catch (e) {
+    try { s = Memory.readUtf8String(buf); } catch (e2) { return ''; }
+  }
+  if (!s) return '';
+  if (s.length > maxLen) s = s.substring(0, maxLen) + '…';
+  return s;
+}
+
+function looksHttpish(s) {
+  if (!s || s.length < 4) return false;
+  return /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|HTTP\/) |\b(content-type|application\/json|authorization|\"lat\"|\"lon\")/i.test(s) ||
+    s.indexOf('{') === 0 || s.indexOf('[') === 0;
+}
+
+function installMitmHooks() {
+  writeEvent('net.https', 'MITM HTTPS on', TARGET_PKG, 'SSL_read/write + unpin + OkHttp body', null);
+  unpinCertificates();
+  hookSslReadWrite();
+  hookOkHttpBodies();
+}
+
+function unpinCertificates() {
+  try {
+    var X509 = Java.use('javax.net.ssl.X509TrustManager');
+    var TrustAll = Java.registerClass({
+      name: 'am.TrustAllTM',
+      implements: [X509],
+      methods: {
+        checkClientTrusted: function (c, a) {},
+        checkServerTrusted: function (c, a) {},
+        getAcceptedIssuers: function () { return []; }
+      }
+    });
+    var SSLContext = Java.use('javax.net.ssl.SSLContext');
+    SSLContext.init.overloads.forEach(function (overload) {
+      overload.implementation = function (km, tm, sr) {
+        var trust = Java.array('javax.net.ssl.TrustManager', [TrustAll.$new()]);
+        return overload.call(this, km, trust, sr);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Pinner = Java.use('okhttp3.CertificatePinner');
+    Pinner.check.overloads.forEach(function (overload) {
+      overload.implementation = function () { return; };
+    });
+  } catch (e) {}
+  try {
+    var HV = Java.use('javax.net.ssl.HttpsURLConnection');
+    HV.setDefaultHostnameVerifier(Java.use('javax.net.ssl.HostnameVerifier').$new({
+      verify: function () { return true; }
+    }));
+  } catch (e) {}
+  try {
+    var NV = Java.use('okhttp3.internal.tls.OkHostnameVerifier');
+    NV.verify.overloads.forEach(function (overload) {
+      overload.implementation = function () { return true; };
+    });
+  } catch (e) {}
+  try {
+    var TM = Java.use('android.webkit.WebViewClient');
+    TM.onReceivedSslError.overloads.forEach(function (overload) {
+      overload.implementation = function (view, handler, error) {
+        try { handler.proceed(); } catch (e) {}
+      };
+    });
+  } catch (e) {}
+}
+
+function hookSslReadWrite() {
+  var libs = ['libssl.so', 'libconscrypt_jni.so', 'libcronet.so'];
+  libs.forEach(function (lib) {
+    ['SSL_write', 'SSL_read'].forEach(function (fn) {
+      var addr = Module.findExportByName(lib, fn);
+      if (!addr) return;
+      try {
+        Interceptor.attach(addr, {
+          onEnter: function (args) {
+            this.fn = fn;
+            this.buf = args[1];
+            this.len = args[2].toInt32();
+          },
+          onLeave: function (retval) {
+            var n = retval.toInt32();
+            if (n <= 0 || !this.buf) return;
+            var take = Math.min(n, 1800);
+            var text = '';
+            try { text = this.buf.readUtf8String(take); } catch (e) {
+              try { text = Memory.readUtf8String(this.buf); } catch (e2) { return; }
+            }
+            if (!looksHttpish(text) && text.indexOf('http') < 0) return;
+            writeEvent('net.https', this.fn, TARGET_PKG, truncateHttp(text), null);
+          }
+        });
+      } catch (e) {}
+    });
+  });
+}
+
+function hookOkHttpBodies() {
+  try {
+    var RealCall = Java.use('okhttp3.RealCall');
+    RealCall.execute.implementation = function () {
+      var req = this.request();
+      var url = '';
+      var method = '';
+      var reqBody = '';
+      try {
+        url = req.url().toString();
+        method = req.method();
+        var body = req.body();
+        if (body) {
+          var Buffer = Java.use('okio.Buffer');
+          var buf = Buffer.$new();
+          body.writeTo(buf);
+          reqBody = buf.readUtf8();
+        }
+      } catch (e) {}
+      var resp = this.execute();
+      var respText = '';
+      var code = '';
+      try {
+        code = '' + resp.code();
+        var peek = resp.peekBody(2048);
+        respText = peek.string();
+      } catch (e) {}
+      writeEvent('net.https', 'OkHttp MITM ' + method, url, 'HTTP ' + code + ' ' + truncateHttp(reqBody + '\n---\n' + respText), null);
+      return resp;
+    };
+  } catch (e) {}
+}

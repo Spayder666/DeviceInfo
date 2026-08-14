@@ -152,6 +152,8 @@ fun MonitorScreen(
     val fridaStatus by viewModel.fridaStatus.collectAsState()
     val isFridaInjecting by viewModel.isFridaInjecting.collectAsState()
     val fridaMessage by viewModel.fridaMessage.collectAsState()
+    val mitmActive by viewModel.mitmActive.collectAsState()
+    val isMitmStarting by viewModel.isMitmStarting.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -252,7 +254,12 @@ fun MonitorScreen(
                 status = fridaStatus,
                 isInjecting = isFridaInjecting,
                 onAttach = { viewModel.injectFridaAttach() },
-                onWrap = { viewModel.injectFridaWrap() }
+                onWrap = { viewModel.injectFridaWrap() },
+                mitmActive = mitmActive,
+                isMitmStarting = isMitmStarting,
+                onMitm = {
+                    if (mitmActive) viewModel.stopMitm() else viewModel.startMitm()
+                }
             )
 
             if (events.isEmpty()) {
@@ -571,7 +578,10 @@ fun FridaControlRow(
     status: FridaInstaller.FridaStatus,
     isInjecting: Boolean,
     onAttach: () -> Unit,
-    onWrap: () -> Unit
+    onWrap: () -> Unit,
+    mitmActive: Boolean = false,
+    isMitmStarting: Boolean = false,
+    onMitm: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -599,6 +609,17 @@ fun FridaControlRow(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
         ) {
             Text("Запустить + Frida", fontSize = 12.sp)
+        }
+        Button(
+            onClick = onMitm,
+            enabled = !isMitmStarting,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            if (isMitmStarting) {
+                CircularProgressIndicator(modifier = Modifier.height(14.dp).width(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(if (mitmActive) "MITM выкл" else "MITM HTTPS", fontSize = 12.sp)
         }
         Text(
             text = fridaStatusLabel(status),
