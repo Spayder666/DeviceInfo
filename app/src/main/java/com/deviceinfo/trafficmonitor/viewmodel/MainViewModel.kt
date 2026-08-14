@@ -392,21 +392,26 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun startMitm() {
         viewModelScope.launch(Dispatchers.IO) {
             _isMitmStarting.value = true
-            val uid = RootShell.getUid(_packageName.value) ?: -1
-            val ok = HttpsMitmController.start(
-                getApplication(),
-                _packageName.value,
-                uid,
-                repository
-            )
-            _mitmActive.value = HttpsMitmController.active
-            _fridaStatus.value = FridaInstaller.status
-            _fridaMessage.value = if (ok) {
-                "MITM HTTPS: plaintext + CA. При pinning смотрите события Frida."
-            } else {
-                HttpsMitmController.lastError ?: "MITM не запустился"
+            try {
+                val uid = RootShell.getUid(_packageName.value) ?: -1
+                val ok = HttpsMitmController.start(
+                    getApplication(),
+                    _packageName.value,
+                    uid,
+                    repository
+                )
+                _mitmActive.value = HttpsMitmController.active
+                _fridaStatus.value = FridaInstaller.status
+                _fridaMessage.value = if (ok) {
+                    "MITM HTTPS: plaintext + CA. При pinning смотрите события Frida."
+                } else {
+                    HttpsMitmController.lastError ?: "MITM не запустился"
+                }
+            } catch (t: Throwable) {
+                _fridaMessage.value = "MITM: ${t.javaClass.simpleName}: ${t.message}"
+            } finally {
+                _isMitmStarting.value = false
             }
-            _isMitmStarting.value = false
         }
     }
 

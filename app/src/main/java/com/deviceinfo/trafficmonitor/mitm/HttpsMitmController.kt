@@ -32,7 +32,13 @@ object HttpsMitmController {
     ): Boolean = withContext(Dispatchers.IO) {
         if (active) return@withContext true
         lastError = null
-        if (!MitmCaManager.ensureCa(context)) {
+        val caOk = try {
+            MitmCaManager.ensureCa(context)
+        } catch (t: Throwable) {
+            lastError = "Не удалось создать CA: ${t.javaClass.simpleName}: ${t.message}"
+            return@withContext false
+        }
+        if (!caOk) {
             lastError = "Не удалось создать CA: ${MitmCaManager.lastError ?: "unknown"}"
             return@withContext false
         }

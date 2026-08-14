@@ -4,36 +4,23 @@ import android.content.Context
 import android.util.Log
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.root.RootShell
-import org.bouncycastle.asn1.x500.X500Name
-import org.bouncycastle.asn1.x509.BasicConstraints
-import org.bouncycastle.asn1.x509.Extension
-import org.bouncycastle.asn1.x509.GeneralName
-import org.bouncycastle.asn1.x509.GeneralNames
-import org.bouncycastle.asn1.x509.KeyUsage
-import org.bouncycastle.cert.X509CertificateHolder
-import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
-import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
-import java.io.ByteArrayInputStream
 import java.io.File
-import java.math.BigInteger
+import java.net.Socket
 import java.security.KeyPair
-import java.security.KeyPairGenerator
-import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.Principal
 import java.security.PrivateKey
-import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
-import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
-import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLEngine
+import javax.net.ssl.X509ExtendedKeyManager
 
 object MitmCaManager {
     const val PORT = 18888
     private const val TAG = "MitmCa"
-    private const val KS_NAME = "am_mitm.p12"
-    private const val KS_PASS = "accessmonitor"
+    private const val CERT_NAME = "mitm-ca.pem"
+    private const val KEY_NAME = "mitm-ca-key.pem"
 
     data class HostCreds(
         val certificate: X509Certificate,
@@ -49,35 +36,27 @@ object MitmCaManager {
         private set
     private var caKey: PrivateKey? = null
     private val hostCache = ConcurrentHashMap<String, HostCreds>()
+    private val errors = mutableListOf<String>()
 
     fun ensureCa(context: Context): Boolean {
         lastError = null
-        val ksFile = File(context.filesDir, KS_NAME)
-        return try {
-            if (ksFile.exists()) {
-                try {
-                    load(ksFile)
-                } catch (loadError: Exception) {
-                    Log.w(TAG, "keystore load failed, regenerating", loadError)
-                    ksFile.delete()
-                    generateCa()
-                    save(ksFile)
-                }
-            } else {
-                generateCa()
-                save(ksFile)
-            }
-            if (caCert == null || caKey == null) {
-                lastError = "CA пустой после генерации"
-                return false
-            }
-            runCatching { exportPem(context) }
-            true
-        } catch (e: Exception) {
-            lastError = e.toUserMessage()
-            Log.e(TAG, "ensureCa failed", e)
-            false
+        errors.clear()
+        val certFile = File(context.filesDir, CERT_NAME)
+        val keyFile = File(context.filesDir, KEY_NAME)
+        File(context.filesDir, "am_mitm.p12").delete()
+
+        val ok = tryLoad(certFile, keyFile) ||
+            tryCopyAssets(context, certFile, keyFile) ||
+            tryMint(certFile, keyFile) ||
+            tryOpenSsl(certFile, keyFile)
+
+        if (!ok || caCert == null || caKey == null) {
+            lastError = errors.lastOrNull() ?: "все способы выпуска CA провалились"
+            Log.e(TAG, "ensureCa failed: $lastError")
+            return false
         }
+        runCatching { exportPem(context) }
+        return true
     }
 
     fun contextForHost(host: String): HostCreds {
@@ -90,7 +69,7 @@ object MitmCaManager {
     fun installAsSystemCa(): Boolean {
         val cert = caCert ?: return false
         val hash = opensslSubjectHashOld(cert)
-        val pem = toPem(cert)
+        val pem = X509Mint.certToPem(cert)
         val tmp = "${FridaInstaller.BASE_DIR}/$hash.0"
         RootShell.execAndRead("mkdir -p ${FridaInstaller.BASE_DIR}")
         RootShell.execAndRead("printf %s ${RootShell.shellQuote(pem)} > $tmp && chmod 644 $tmp")
@@ -114,108 +93,112 @@ object MitmCaManager {
         RootShell.execAndRead("umount /apex/com.android.conscrypt/cacerts 2>/dev/null")
     }
 
-    private fun generateCa() {
-        val pair = rsaKeyPair()
-        val now = System.currentTimeMillis()
-        val name = X500Name("CN=AccessMonitor MITM CA")
-        val builder = JcaX509v3CertificateBuilder(
-            name,
-            BigInteger(64, java.security.SecureRandom()),
-            Date(now - 86_400_000L),
-            Date(now + 3650L * 86_400_000L),
-            name,
-            pair.public
-        )
-        builder.addExtension(Extension.basicConstraints, true, BasicConstraints(true))
-        builder.addExtension(Extension.keyUsage, true, KeyUsage(KeyUsage.keyCertSign or KeyUsage.cRLSign))
-        val holder = builder.build(contentSigner(pair.private))
-        caCert = holder.toX509()
-        caKey = pair.private
+    private fun tryLoad(certFile: File, keyFile: File): Boolean {
+        if (!certFile.exists() || !keyFile.exists()) return false
+        return try {
+            apply(X509Mint.parseCertificate(certFile.readBytes()), X509Mint.parsePrivateKey(keyFile.readText()))
+            true
+        } catch (t: Throwable) {
+            remember("load PEM", t)
+            certFile.delete()
+            keyFile.delete()
+            false
+        }
+    }
+
+    private fun tryCopyAssets(context: Context, certFile: File, keyFile: File): Boolean {
+        return try {
+            val certPem = context.assets.open("mitm/ca.pem").bufferedReader().readText()
+            val keyPem = context.assets.open("mitm/ca-key.pem").bufferedReader().readText()
+            val cert = X509Mint.parseCertificate(certPem.toByteArray())
+            val key = X509Mint.parsePrivateKey(keyPem)
+            persist(certFile, keyFile, cert, key)
+            apply(cert, key)
+            true
+        } catch (t: Throwable) {
+            remember("assets CA", t)
+            false
+        }
+    }
+
+    private fun tryMint(certFile: File, keyFile: File): Boolean {
+        return try {
+            val pair = X509Mint.rsaKeyPair()
+            val cert = X509Mint.selfSignedCa(pair)
+            persist(certFile, keyFile, cert, pair.private)
+            apply(cert, pair.private)
+            true
+        } catch (t: Throwable) {
+            remember("X509Mint", t)
+            false
+        }
+    }
+
+    private fun tryOpenSsl(certFile: File, keyFile: File): Boolean {
+        val openssl = RootShell.resolveBinary("openssl") ?: run {
+            remember("openssl", IllegalStateException("openssl не найден"))
+            return false
+        }
+        return try {
+            val dir = certFile.parentFile?.absolutePath ?: return false
+            val keyPkcs8 = "$dir/mitm-ca-key.pem"
+            val certPem = "$dir/mitm-ca.pem"
+            val keyTmp = "$dir/mitm-ca-rsa.pem"
+            RootShell.execAndRead(
+                "$openssl genrsa -out $keyTmp 2048 && " +
+                    "$openssl pkcs8 -topk8 -nocrypt -in $keyTmp -out $keyPkcs8 && " +
+                    "$openssl req -new -x509 -key $keyPkcs8 -out $certPem -days 3650 -sha256 " +
+                    "-subj /CN=AccessMonitor\\ MITM\\ CA",
+                timeoutSec = 20
+            )
+            val cert = X509Mint.parseCertificate(File(certPem).readBytes())
+            val key = X509Mint.parsePrivateKey(File(keyPkcs8).readText())
+            apply(cert, key)
+            true
+        } catch (t: Throwable) {
+            remember("openssl", t)
+            false
+        }
     }
 
     private fun issueHost(host: String): HostCreds {
         val ca = caCert ?: error("CA missing")
         val key = caKey ?: error("CA key missing")
-        val pair = rsaKeyPair()
-        val now = System.currentTimeMillis()
-        val builder = JcaX509v3CertificateBuilder(
-            X500Name(ca.subjectX500Principal.name),
-            BigInteger(64, java.security.SecureRandom()),
-            Date(now - 86_400_000L),
-            Date(now + 825L * 86_400_000L),
-            X500Name("CN=$host"),
-            pair.public
-        )
-        builder.addExtension(Extension.basicConstraints, false, BasicConstraints(false))
-        builder.addExtension(
-            Extension.subjectAlternativeName,
-            false,
-            GeneralNames(GeneralName(GeneralName.dNSName, host))
-        )
-        val cert = builder.build(contentSigner(key)).toX509()
-        val ks = KeyStore.getInstance("PKCS12")
-        ks.load(null, null)
-        ks.setKeyEntry("leaf", pair.private, KS_PASS.toCharArray(), arrayOf(cert, ca))
-        val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-        kmf.init(ks, KS_PASS.toCharArray())
+        val pair = X509Mint.rsaKeyPair()
+        val cert = try {
+            X509Mint.issueHost(ca, key, pair, host)
+        } catch (t: Throwable) {
+            Log.e(TAG, "host cert mint failed for $host", t)
+            throw t
+        }
         val ctx = SSLContext.getInstance("TLS")
-        ctx.init(kmf.keyManagers, null, null)
+        ctx.init(arrayOf(LeafKeyManager(cert, ca, pair.private)), null, null)
         return HostCreds(cert, pair, ctx)
     }
 
-    private fun rsaKeyPair(): KeyPair {
-        val kpg = KeyPairGenerator.getInstance("RSA")
-        kpg.initialize(2048)
-        return kpg.generateKeyPair()
-    }
-
-    /** Android already ships a stub JCE provider named BC — never pin BouncyCastle as "BC". */
-    private fun contentSigner(key: PrivateKey) =
-        JcaContentSignerBuilder("SHA256withRSA").build(key)
-
-    private fun X509CertificateHolder.toX509(): X509Certificate {
-        return try {
-            JcaX509CertificateConverter().getCertificate(this)
-        } catch (_: Exception) {
-            val cf = CertificateFactory.getInstance("X.509")
-            cf.generateCertificate(ByteArrayInputStream(encoded)) as X509Certificate
+    private fun persist(certFile: File, keyFile: File, cert: X509Certificate, key: PrivateKey) {
+        runCatching {
+            certFile.writeText(X509Mint.certToPem(cert))
+            keyFile.writeText(X509Mint.keyToPem(key))
         }
     }
 
-    private fun load(file: File) {
-        val ks = KeyStore.getInstance("PKCS12")
-        file.inputStream().use { ks.load(it, KS_PASS.toCharArray()) }
-        caKey = ks.getKey("ca", KS_PASS.toCharArray()) as? PrivateKey
-            ?: error("CA key missing in keystore")
-        caCert = ks.getCertificate("ca") as? X509Certificate
-            ?: error("CA cert missing in keystore")
-    }
-
-    private fun save(file: File) {
-        val key = caKey ?: return
-        val cert = caCert ?: return
-        val ks = KeyStore.getInstance("PKCS12")
-        ks.load(null, null)
-        ks.setKeyEntry("ca", key, KS_PASS.toCharArray(), arrayOf(cert))
-        file.outputStream().use { ks.store(it, KS_PASS.toCharArray()) }
+    private fun apply(cert: X509Certificate, key: PrivateKey) {
+        caCert = cert
+        caKey = key
+        hostCache.clear()
     }
 
     private fun exportPem(context: Context) {
         val cert = caCert ?: return
-        val pem = toPem(cert)
-        File(context.filesDir, "mitm-ca.pem").writeText(pem)
+        val pem = X509Mint.certToPem(cert)
+        File(context.filesDir, CERT_NAME).writeText(pem)
         RootShell.execAndRead("mkdir -p ${FridaInstaller.BASE_DIR}")
         RootShell.execAndRead(
             "printf %s ${RootShell.shellQuote(pem)} > ${FridaInstaller.BASE_DIR}/mitm-ca.pem && chmod 644 ${FridaInstaller.BASE_DIR}/mitm-ca.pem"
         )
     }
 
-    private fun toPem(cert: X509Certificate): String {
-        val b64 = android.util.Base64.encodeToString(cert.encoded, android.util.Base64.DEFAULT)
-        return "-----BEGIN CERTIFICATE-----\n$b64-----END CERTIFICATE-----\n"
-    }
-
-    /** OpenSSL subject_hash_old (first 4 bytes of MD5(subject DER), little-endian). */
     private fun opensslSubjectHashOld(cert: X509Certificate): String {
         val md = MessageDigest.getInstance("MD5")
         val digest = md.digest(cert.subjectX500Principal.encoded)
@@ -226,8 +209,23 @@ object MitmCaManager {
         return String.format("%08x", hash)
     }
 
-    private fun Exception.toUserMessage(): String {
-        val cause = cause?.let { " (${it.javaClass.simpleName}: ${it.message})" } ?: ""
-        return "${javaClass.simpleName}: ${message ?: "unknown"}$cause"
+    private fun remember(step: String, t: Throwable) {
+        val msg = "$step: ${t.javaClass.simpleName}: ${t.message ?: "unknown"}"
+        errors += msg
+        Log.e(TAG, msg, t)
+    }
+
+    private class LeafKeyManager(
+        private val leaf: X509Certificate,
+        private val ca: X509Certificate,
+        private val key: PrivateKey
+    ) : X509ExtendedKeyManager() {
+        override fun getClientAliases(keyType: String?, issuers: Array<Principal>?) = null
+        override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<Principal>?, socket: Socket?) = null
+        override fun getServerAliases(keyType: String?, issuers: Array<Principal>?) = arrayOf("leaf")
+        override fun chooseServerAlias(keyType: String?, issuers: Array<Principal>?, socket: Socket?) = "leaf"
+        override fun chooseEngineServerAlias(keyType: String?, issuers: Array<Principal>?, engine: SSLEngine?) = "leaf"
+        override fun getCertificateChain(alias: String?) = arrayOf(leaf, ca)
+        override fun getPrivateKey(alias: String?) = key
     }
 }
