@@ -29,10 +29,14 @@ object IdentifierProbe {
 
         val values = IdentifierReader.readForEvent(event)
         if (values.isNotEmpty()) {
+            val original = listOfNotNull(event.action, event.requestDetails)
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString(" · ")
             return ProbeResult(
-                requestLabel = def?.displayName ?: event.action,
+                requestLabel = "Повтор: $original",
                 valueAsRoot = IdentifierReader.format(values),
-                valueInTargetContext = event.responseDetails?.takeIf { looksLikeCapturedValue(it) },
+                valueInTargetContext = event.responseDetails?.takeIf { it.isNotBlank() && !it.startsWith("FD=") },
                 note = noteFor(event)
             )
         }
@@ -67,7 +71,7 @@ object IdentifierProbe {
         AccessCategory.CLIPBOARD -> "Текущий буфер обмена."
         AccessCategory.SENSOR -> "Активные сенсоры из sensorservice."
         AccessCategory.BLUETOOTH -> "BT MAC / имя."
-        AccessCategory.NETWORK -> "Wi‑Fi и активная сеть."
+        AccessCategory.NETWORK -> "Повтор того же DNS/HTTP запроса (хост из события), не соседние идентификаторы."
         AccessCategory.STORAGE -> "MediaStore / БД пакета."
         AccessCategory.PERMISSION -> "Статус AppOps / grant для этого разрешения."
         AccessCategory.IDENTIFIER -> "Идентификатор того же типа, что в запросе."

@@ -42,9 +42,10 @@ class ExtraLogcatMonitor(
         val mentions = line.contains(packageName) || (uid > 0 && line.contains("uid=$uid"))
         val radio = line.contains("RIL") || line.contains("GSM") || line.contains("UMTS") ||
             line.contains("LTE") || line.contains("NR_") || line.contains("IMS")
+        val sim = Regex("(?i)sim.?state|imsi|iccid|operator|mccmnc|subscriber|iphonesubinfo|getSim").containsMatchIn(line)
         val loc = line.contains("location", ignoreCase = true) || line.contains("gps", ignoreCase = true)
-        if (!mentions && !radio && !loc) return
-        if (!mentions && radio && !line.contains("imei", ignoreCase = true) &&
+        if (!mentions && !radio && !loc && !sim) return
+        if (!mentions && radio && !sim && !line.contains("imei", ignoreCase = true) &&
             !line.contains("cell", ignoreCase = true)
         ) return
 

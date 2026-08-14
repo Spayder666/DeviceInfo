@@ -1,5 +1,7 @@
 package com.deviceinfo.trafficmonitor.identifiers
 
+import com.deviceinfo.trafficmonitor.data.AccessCategory
+
 /**
  * Полный каталог идентификаторов Android (AOSP API 33–35).
  * Источники: Build.java, TelephonyManager, SettingsProvider, MediaDrm, AOSP docs.
@@ -158,7 +160,17 @@ object IdentifierCatalog {
         id("tel.sim_operator_name", "Имя оператора SIM", IdentifierGroup.TELEPHONY, "TelephonyManager.getSimOperatorName()", logcat = listOf("getSimOperatorName")),
         id("tel.sim_country", "Страна SIM", IdentifierGroup.TELEPHONY, "TelephonyManager.getSimCountryIso()", logcat = listOf("getSimCountryIso")),
         id("tel.carrier_id", "Carrier ID", IdentifierGroup.TELEPHONY, "TelephonyManager.getSimCarrierId()", logcat = listOf("getSimCarrierId", "CarrierId")),
+        id("tel.carrier_name", "Имя carrier ID", IdentifierGroup.TELEPHONY, "TelephonyManager.getSimCarrierIdName()", logcat = listOf("getSimCarrierIdName")),
+        id("tel.specific_carrier_id", "Specific carrier ID", IdentifierGroup.TELEPHONY, "TelephonyManager.getSimSpecificCarrierId()", logcat = listOf("getSimSpecificCarrierId")),
         id("tel.voicemail", "Голосовая почта", IdentifierGroup.TELEPHONY, "TelephonyManager.getVoiceMailNumber()", logcat = listOf("getVoiceMailNumber")),
+        id("tel.voicemail_tag", "Метка голосовой почты", IdentifierGroup.TELEPHONY, "TelephonyManager.getVoiceMailAlphaTag()", logcat = listOf("getVoiceMailAlphaTag")),
+        id("tel.sim_state", "SIM state", IdentifierGroup.TELEPHONY, "TelephonyManager.getSimState()", logcat = listOf("getSimState", "SIM_STATE")),
+        id("tel.phone_type", "Phone type", IdentifierGroup.TELEPHONY, "TelephonyManager.getPhoneType()", logcat = listOf("getPhoneType")),
+        id("tel.modem_count", "Число модемов", IdentifierGroup.TELEPHONY, "TelephonyManager.getActiveModemCount()", logcat = listOf("getActiveModemCount", "getSupportedModemCount", "getPhoneCount")),
+        id("tel.multi_sim", "Multi-SIM", IdentifierGroup.TELEPHONY, "TelephonyManager.isMultiSimSupported()", logcat = listOf("isMultiSimSupported", "getMultiSimConfiguration")),
+        id("tel.has_icc", "hasIccCard", IdentifierGroup.TELEPHONY, "TelephonyManager.hasIccCard()", logcat = listOf("hasIccCard")),
+        id("tel.network_type", "Тип сети", IdentifierGroup.TELEPHONY, "TelephonyManager.getDataNetworkType()", logcat = listOf("getDataNetworkType", "getNetworkType", "getVoiceNetworkType")),
+        id("tel.service_state", "ServiceState", IdentifierGroup.TELEPHONY, "TelephonyManager.getServiceState()", logcat = listOf("getServiceState")),
         id("tel.phone_interface", "PhoneInterfaceManager", IdentifierGroup.TELEPHONY, logcat = listOf("PhoneInterfaceManager", "ITelephony", "TelephonyPermissions"))
     )
 
@@ -327,4 +339,25 @@ object IdentifierCatalog {
         permission = perm,
         description = description
     )
+}
+
+fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {
+    IdentifierGroup.LOCATION -> AccessCategory.LOCATION
+    IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> AccessCategory.TELEPHONY
+    IdentifierGroup.WIFI, IdentifierGroup.NETWORK -> AccessCategory.NETWORK
+    IdentifierGroup.BLUETOOTH -> AccessCategory.BLUETOOTH
+    IdentifierGroup.ACCOUNT -> AccessCategory.IDENTIFIER
+    else -> AccessCategory.IDENTIFIER
+}
+
+fun categoryForIdentifierId(id: String?): AccessCategory? {
+    if (id.isNullOrBlank()) return null
+    return IdentifierCatalog.findById(id)?.toAccessCategory()
+        ?: when {
+            id.startsWith("tel.") || id.startsWith("sub.") -> AccessCategory.TELEPHONY
+            id.startsWith("net.") || id.startsWith("wifi.") -> AccessCategory.NETWORK
+            id.startsWith("location.") -> AccessCategory.LOCATION
+            id.startsWith("bt.") -> AccessCategory.BLUETOOTH
+            else -> null
+        }
 }

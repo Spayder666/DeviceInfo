@@ -5,6 +5,7 @@ import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
+import com.deviceinfo.trafficmonitor.identifiers.toAccessCategory
 import com.deviceinfo.trafficmonitor.probe.IdentifierReader
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
@@ -180,7 +181,7 @@ class AppOpsMonitor(
         repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
-                category = if (def != null) AccessCategory.IDENTIFIER else category,
+                category = def?.toAccessCategory() ?: category,
                 source = EventSource.APPOPS,
                 action = def?.displayName ?: action,
                 permission = permission,

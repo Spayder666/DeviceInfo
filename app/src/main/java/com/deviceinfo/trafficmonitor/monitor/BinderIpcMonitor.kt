@@ -52,7 +52,7 @@ class BinderIpcMonitor(
             timeoutSec = 8
         )
         val dump = RootShell.execAndRead(
-            "grep -E -i '$packageName|location|gnss|gps|camera|audio|telephony|clipboard' $dumpFile 2>/dev/null | head -n 40",
+            "grep -E -i '$packageName|location|gnss|gps|camera|audio|telephony|iphonesubinfo|isub|phone|clipboard' $dumpFile 2>/dev/null | head -n 40",
             timeoutSec = 6
         )
         val text = dump.ifBlank { stop }
@@ -78,6 +78,7 @@ class BinderIpcMonitor(
             LOCATION.containsMatchIn(snippet) -> AccessCategory.LOCATION
             snippet.contains("camera", ignoreCase = true) -> AccessCategory.CAMERA
             snippet.contains("audio", ignoreCase = true) -> AccessCategory.MICROPHONE
+            TELEPHONY.containsMatchIn(snippet) -> AccessCategory.TELEPHONY
             else -> AccessCategory.SYSTEM_API
         }
         repository.insert(
@@ -97,5 +98,6 @@ class BinderIpcMonitor(
 
     companion object {
         private val LOCATION = Regex("(?i)location|gnss|gps|fused|geofence")
+        private val TELEPHONY = Regex("(?i)telephony|iphonesubinfo|isub|phoneinterface|siminfo|ril")
     }
 }

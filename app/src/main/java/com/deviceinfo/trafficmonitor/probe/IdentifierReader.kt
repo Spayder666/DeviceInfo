@@ -18,23 +18,28 @@ data class IdentifierValue(
 object IdentifierReader {
 
     fun readForEvent(event: CaptureEvent): List<IdentifierValue> {
-        val values = when (event.category) {
-            AccessCategory.LOCATION -> readLocation()
-            AccessCategory.TELEPHONY -> readTelephony()
-            AccessCategory.CAMERA -> readCamera()
-            AccessCategory.MICROPHONE -> readMicrophone()
-            AccessCategory.CONTACTS -> readContacts()
-            AccessCategory.SMS -> readSms()
-            AccessCategory.CALENDAR -> readCalendar()
-            AccessCategory.CLIPBOARD -> readClipboard()
-            AccessCategory.SENSOR -> readSensors()
-            AccessCategory.BLUETOOTH -> readBluetooth()
-            AccessCategory.NETWORK -> readNetwork(event.targetPackage)
-            AccessCategory.STORAGE -> readStorage(event.targetPackage)
-            AccessCategory.PERMISSION -> readPermission(event)
-            AccessCategory.IDENTIFIER -> readIdentifier(event)
-            AccessCategory.SYSTEM_API -> readSystemApi(event.targetPackage)
-            AccessCategory.SYSCALL, AccessCategory.OTHER -> readFromCaptured(event)
+        val id = event.identifierName
+        val values = when {
+            id == "net.dns" || event.action.equals("DNS", ignoreCase = true) -> readDnsReplay(event)
+            id == "net.http" || id == "net.https" || id == "net.sni" -> readHttpReplay(event)
+            id?.startsWith("tel.") == true || id?.startsWith("sub.") == true ->
+                readTelephonyReplay(event)
+            event.category == AccessCategory.LOCATION -> readLocation()
+            event.category == AccessCategory.TELEPHONY -> readTelephonyReplay(event)
+            event.category == AccessCategory.CAMERA -> readCamera()
+            event.category == AccessCategory.MICROPHONE -> readMicrophone()
+            event.category == AccessCategory.CONTACTS -> readContacts()
+            event.category == AccessCategory.SMS -> readSms()
+            event.category == AccessCategory.CALENDAR -> readCalendar()
+            event.category == AccessCategory.CLIPBOARD -> readClipboard()
+            event.category == AccessCategory.SENSOR -> readSensors()
+            event.category == AccessCategory.BLUETOOTH -> readBluetooth()
+            event.category == AccessCategory.NETWORK -> readDnsReplay(event).ifEmpty { readHttpReplay(event) }
+            event.category == AccessCategory.STORAGE -> readStorage(event.targetPackage)
+            event.category == AccessCategory.PERMISSION -> readPermission(event)
+            event.category == AccessCategory.IDENTIFIER -> readIdentifier(event)
+            event.category == AccessCategory.SYSTEM_API -> readSystemApi(event.targetPackage)
+            else -> readFromCaptured(event)
         }
         return values.filter { it.value.isNotBlank() && it.value != "(пусто)" }
     }
@@ -394,6 +399,70 @@ object IdentifierReader {
         return listOfNotEmpty(
             IdentifierValue("sensors.active", "Активные сенсоры", active.ifBlank { dump.lines().take(8).joinToString("\n") })
         )
+    }
+
+    private fun extractHost(event: CaptureEvent): String? {
+        val blob = listOfNotNull(event.requestDetails, event.action, event.responseDetails, event.rawData)
+            .joinToString("\n")
+        Regex("""(?i)(?:A\?|AAAA\?)\s+([A-Za-z0-9._-]+\.[A-Za-z]{2,})""")
+            .find(blob)?.groupValues?.get(1)?.let { return it.trim('.') }
+        Regex("""(?i)https?://([A-Za-z0-9.-]+\.[A-Za-z]{2,})""")
+            .find(blob)?.groupValues?.get(1)?.let { return it }
+        event.requestDetails?.trim()
+            ?.takeIf { it.contains('.') && !it.contains(' ') && it.length < 128 }
+            ?.let { return it.trim('.') }
+        return Regex("""([A-Za-z0-9._-]+\.[A-Za-z]{2,})""").find(event.requestDetails.orEmpty())
+            ?.groupValues?.get(1)
+    }
+
+    private fun readDnsReplay(event: CaptureEvent): List<IdentifierValue> {
+        val host = extractHost(event) ?: return readFromCaptured(event)
+        val resolver = RootShell.execAndRead(
+            "dumpsys dnsresolver 2>/dev/null | grep -i -F ${RootShell.shellQuote(host)} | head -n 8",
+            timeoutSec = 8
+        ).trim()
+        val hosts = firstNonEmpty(
+            RootShell.execAndRead("getent hosts $host 2>/dev/null", timeoutSec = 6).trim(),
+            RootShell.execAndRead("nslookup $host 2>/dev/null | head -n 12", timeoutSec = 8).trim(),
+            RootShell.execAndRead("ping -c 1 -W 2 $host 2>/dev/null | head -n 4", timeoutSec = 6).trim()
+        )
+        return listOfNotEmpty(
+            IdentifierValue("net.dns.query", "Запрос", "A? $host"),
+            IdentifierValue("net.dns.replay", "Повтор DNS", hosts ?: resolver),
+            IdentifierValue("net.dns.resolver", "dnsresolver", resolver),
+            IdentifierValue("net.dns.captured", "Перехват", event.responseDetails.orEmpty())
+        )
+    }
+
+    private fun readHttpReplay(event: CaptureEvent): List<IdentifierValue> {
+        val host = extractHost(event)
+        val url = event.requestDetails?.takeIf { it.contains('/') || it.startsWith("http") } ?: host
+        val dns = host?.let { h ->
+            firstNonEmpty(
+                RootShell.execAndRead("getent hosts $h 2>/dev/null", timeoutSec = 6).trim(),
+                RootShell.execAndRead("dumpsys dnsresolver 2>/dev/null | grep -i -F ${RootShell.shellQuote(h)} | head -n 6", timeoutSec = 6).trim()
+            )
+        }
+        return listOfNotEmpty(
+            IdentifierValue("net.http.query", "Запрос", url ?: event.action),
+            IdentifierValue("net.http.dns", "Повтор (DNS хоста)", dns ?: ""),
+            IdentifierValue("net.http.captured", "Перехват", event.responseDetails.orEmpty())
+        )
+    }
+
+    private fun readTelephonyReplay(event: CaptureEvent): List<IdentifierValue> {
+        val all = readTelephony()
+        val wanted = event.identifierName
+        val primary = wanted?.let { id -> all.firstOrNull { it.id == id } }
+            ?: event.identifierName?.let { IdentifierCatalog.findById(it) }?.let { readDefinition(it) }
+        return buildList {
+            if (primary != null) add(primary)
+            event.requestDetails?.let { add(IdentifierValue("tel.request", "Оригинал", it)) }
+            event.responseDetails?.takeIf { it.isNotBlank() }?.let {
+                add(IdentifierValue("tel.captured", "Перехват", it))
+            }
+            addAll(all.filter { it.id != primary?.id })
+        }
     }
 
     private fun readNetwork(packageName: String): List<IdentifierValue> {

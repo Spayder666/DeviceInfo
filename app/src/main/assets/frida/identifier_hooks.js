@@ -81,7 +81,26 @@ function hookTelephonyManager() {
     ['getSimOperatorName', 'tel.sim_operator_name', null],
     ['getSimCountryIso', 'tel.sim_country', null],
     ['getSimCarrierId', 'tel.carrier_id', null],
-    ['getVoiceMailNumber', 'tel.voicemail', 'READ_PHONE_STATE']
+    ['getSimCarrierIdName', 'tel.carrier_name', null],
+    ['getSimSpecificCarrierId', 'tel.specific_carrier_id', null],
+    ['getSimSpecificCarrierIdName', 'tel.carrier_name', null],
+    ['getVoiceMailNumber', 'tel.voicemail', 'READ_PHONE_STATE'],
+    ['getVoiceMailAlphaTag', 'tel.voicemail_tag', 'READ_PHONE_STATE'],
+    ['getSimState', 'tel.sim_state', null],
+    ['getPhoneType', 'tel.phone_type', null],
+    ['getPhoneCount', 'tel.modem_count', null],
+    ['getActiveModemCount', 'tel.modem_count', null],
+    ['getSupportedModemCount', 'tel.modem_count', null],
+    ['isMultiSimSupported', 'tel.multi_sim', null],
+    ['getMaxNumberOfSimultaneouslyActiveSims', 'tel.multi_sim', null],
+    ['hasIccCard', 'tel.has_icc', null],
+    ['getNetworkType', 'tel.network_type', 'READ_PHONE_STATE'],
+    ['getDataNetworkType', 'tel.network_type', 'READ_PHONE_STATE'],
+    ['getVoiceNetworkType', 'tel.network_type', 'READ_PHONE_STATE'],
+    ['getServiceState', 'tel.service_state', 'READ_PHONE_STATE'],
+    ['getCallState', 'tel.phone_interface', null],
+    ['getDataState', 'tel.phone_interface', null],
+    ['getUiccCardsInfo', 'tel.has_icc', 'READ_PRIVILEGED_PHONE_STATE']
   ];
 
   hooks.forEach(function (h) {
@@ -103,7 +122,11 @@ function hookTelephonyManager() {
 function hookSubscriptionManager() {
   try {
     var SM = Java.use('android.telephony.SubscriptionManager');
-    ['getPhoneNumber', 'getActiveSubscriptionInfoList', 'getSubscriptionId'].forEach(function (m) {
+    ['getPhoneNumber', 'getActiveSubscriptionInfoList', 'getActiveSubscriptionInfoCount',
+      'getActiveSubscriptionInfoCountMax', 'getActiveSubscriptionInfo',
+      'getActiveSubscriptionInfoForSimSlotIndex', 'getDefaultSubscriptionId',
+      'getDefaultDataSubscriptionId', 'getDefaultVoiceSubscriptionId',
+      'getDefaultSmsSubscriptionId', 'getSubscriptionId'].forEach(function (m) {
       try {
         SM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
@@ -118,7 +141,9 @@ function hookSubscriptionManager() {
 
   try {
     var SI = Java.use('android.telephony.SubscriptionInfo');
-    ['getIccId', 'getSubscriptionId', 'getSimSlotIndex', 'getMccString', 'getMncString', 'getCardId'].forEach(function (m) {
+    ['getIccId', 'getSubscriptionId', 'getSimSlotIndex', 'getMccString', 'getMncString',
+      'getCardId', 'getDisplayName', 'getCarrierName', 'getCountryIso', 'getNumber',
+      'getMcc', 'getMnc'].forEach(function (m) {
       try {
         SI[m].implementation = function () {
           var result = this[m]();

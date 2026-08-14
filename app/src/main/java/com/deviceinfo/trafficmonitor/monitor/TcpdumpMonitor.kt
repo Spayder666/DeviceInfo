@@ -142,7 +142,11 @@ class TcpdumpMonitor(
             host,
             line.trim().take(300),
             key,
-            if (category == AccessCategory.LOCATION) "location.supl" else "net.http"
+            when {
+                category == AccessCategory.LOCATION -> "location.supl"
+                dns != null || dnsPort -> "net.dns"
+                else -> "net.http"
+            }
         )
     }
 

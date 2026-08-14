@@ -7,6 +7,7 @@ import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierMatcher
+import com.deviceinfo.trafficmonitor.identifiers.toAccessCategory
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,12 @@ class LogcatMonitor(
         PatternRule(Regex("(?i)AudioRecord|MediaRecorder|RECORD_AUDIO"), AccessCategory.MICROPHONE, "Microphone API", "RECORD_AUDIO"),
         PatternRule(Regex("(?i)ContactsProvider|ContactsContract|query.*contacts"), AccessCategory.CONTACTS, "Contacts API", "READ_CONTACTS"),
         PatternRule(Regex("(?i)SmsManager|Telephony\\.Sms|content://sms"), AccessCategory.SMS, "SMS API", "READ_SMS"),
+        PatternRule(
+            Regex("(?i)TelephonyManager|getSimState|getSimOperator|getNetworkOperator|getSubscriberId|getSimSerial|getImei|getDeviceId|SubscriptionManager|PhoneInterfaceManager|IPhoneSubInfo"),
+            AccessCategory.TELEPHONY,
+            "Telephony / SIM API",
+            "READ_PHONE_STATE"
+        ),
         PatternRule(Regex("(?i)checkPermission|requestPermissions|PermissionController|grantRuntimePermission"), AccessCategory.PERMISSION, "Permission Check/Request"),
         PatternRule(Regex("(?i)ClipboardManager|getPrimaryClip|setPrimaryClip"), AccessCategory.CLIPBOARD, "Clipboard API"),
         PatternRule(Regex("(?i)BluetoothLeScanner|startScan"), AccessCategory.BLUETOOTH, "Bluetooth Scan", "BLUETOOTH_SCAN"),
@@ -157,7 +164,7 @@ class LogcatMonitor(
         repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
-                category = AccessCategory.IDENTIFIER,
+                category = def.toAccessCategory(),
                 source = EventSource.LOGCAT,
                 action = action,
                 permission = def.permission,

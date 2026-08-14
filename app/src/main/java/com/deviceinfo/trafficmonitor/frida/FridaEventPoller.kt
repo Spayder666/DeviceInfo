@@ -5,6 +5,8 @@ import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
+import com.deviceinfo.trafficmonitor.identifiers.categoryForIdentifierId
+import com.deviceinfo.trafficmonitor.identifiers.toAccessCategory
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,7 +76,9 @@ class FridaEventPoller(
                 CaptureEvent(
                     timestamp = timestamp,
                     targetPackage = packageName,
-                    category = categoryFor(action, permission, def?.group?.name),
+                    category = def?.toAccessCategory()
+                        ?: categoryForIdentifierId(identifierId)
+                        ?: categoryFor(action, permission, def?.group?.name),
                     source = EventSource.FRIDA,
                     action = def?.displayName ?: action,
                     permission = permission ?: def?.permission,
@@ -116,6 +120,8 @@ class FridaEventPoller(
                 "media/" in text -> AccessCategory.STORAGE
             "biometric" in text || "fingerprint" in text || "projection" in text -> AccessCategory.SYSTEM_API
             group == "LOCATION" -> AccessCategory.LOCATION
+            group == "TELEPHONY" || group == "SUBSCRIPTION" -> AccessCategory.TELEPHONY
+            group == "NETWORK" || group == "WIFI" -> AccessCategory.NETWORK
             else -> AccessCategory.IDENTIFIER
         }
     }
