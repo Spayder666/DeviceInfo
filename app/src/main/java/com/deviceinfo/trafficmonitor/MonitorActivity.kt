@@ -244,6 +244,7 @@ fun MonitorScreen(
                         )
                     }
                     IconButton(onClick = onLaunchApp) { Icon(Icons.Outlined.PlayArrow, "Запуск") }
+                    IconButton(onClick = onStop) { Icon(Icons.Outlined.StopCircle, "Стоп") }
                     Box {
                         IconButton(onClick = { menuOpen = true }) { Icon(Icons.Outlined.MoreVert, "Ещё") }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -274,11 +275,6 @@ fun MonitorScreen(
                             DropdownMenuItem(
                                 text = { Text("Очистить лог") },
                                 onClick = { menuOpen = false; viewModel.clearEvents() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Стоп мониторинга") },
-                                leadingIcon = { Icon(Icons.Outlined.StopCircle, null) },
-                                onClick = { menuOpen = false; onStop() }
                             )
                         }
                     }
