@@ -156,7 +156,8 @@ class ProcMonitor(
         return when {
             "camera" in lower -> AccessCategory.CAMERA
             lower.endsWith("/su") || "/su/" in lower || "magisk" in lower || "xposed" in lower ||
-                "frida" in lower || "qemu_pipe" in lower || "goldfish" in lower -> AccessCategory.SECURITY
+                "lsposed" in lower || "lspd" in lower || "frida" in lower || "memfd" in lower ||
+                "qemu_pipe" in lower || "goldfish" in lower -> AccessCategory.SECURITY
             "gps" in lower || "location" in lower || "gnss" in lower -> AccessCategory.LOCATION
             "audio" in lower || "mic" in lower -> AccessCategory.MICROPHONE
             "bluetooth" in lower -> AccessCategory.BLUETOOTH

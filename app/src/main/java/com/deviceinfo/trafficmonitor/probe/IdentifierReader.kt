@@ -537,6 +537,15 @@ object IdentifierReader {
                 IdentifierValue("root.adb", "adb_enabled", settingsGet("global", "adb_enabled")),
                 IdentifierValue("root.dev", "development_settings", settingsGet("global", "development_settings_enabled"))
             )
+            id == "root.lsposed" || id == "root.xposed" || id == "root.lspatch" -> listOfNotEmpty(
+                IdentifierValue("root.lsposed", "lspd dir", RootShell.execAndRead("ls -ld /data/adb/lspd /data/adb/modules/zygisk_lsposed /data/adb/modules/riru_lsposed 2>&1 | head -n 8", timeoutSec = 6).take(300)),
+                IdentifierValue("root.xposedjar", "XposedBridge.jar", RootShell.execAndRead("ls -l /system/framework/XposedBridge.jar 2>&1", timeoutSec = 5).trim())
+            )
+            id == "root.inject" || id == "root.threads" || id == "root.ports" || id == "root.dlsym" || id == "root.stack" ->
+                listOfNotEmpty(
+                    IdentifierValue("root.maps", "maps hook/inject", RootShell.execAndRead("grep -E -i 'frida|lsposed|lspd|xposed|memfd|rwxp' /proc/self/maps 2>/dev/null | head -n 8", timeoutSec = 6).take(400)),
+                    IdentifierValue("root.tracer", "TracerPid", RootShell.execAndRead("grep TracerPid /proc/self/status", timeoutSec = 5).trim())
+                )
             id == "root.emulator" -> listOfNotEmpty(
                 IdentifierValue("root.qemu", "ro.kernel.qemu", getprop("ro.kernel.qemu")),
                 IdentifierValue("root.hardware", "ro.hardware", getprop("ro.hardware")),

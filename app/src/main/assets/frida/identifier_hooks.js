@@ -217,7 +217,15 @@ function isInterestingProperty(key) {
     key.indexOf('ro.boot.warranty') === 0 ||
     key.indexOf('ro.boot.selinux') === 0 ||
     key.indexOf('init.svc.magisk') === 0 ||
-    key.indexOf('persist.sys.magisk') === 0;
+    key.indexOf('persist.sys.magisk') === 0 ||
+    key.indexOf('persist.sys.xposed') === 0 ||
+    key.indexOf('persist.sys.taichi') === 0 ||
+    key.indexOf('ro.lsposed') === 0 ||
+    key.indexOf('ro.edxposed') === 0 ||
+    key.indexOf('ro.magisk') === 0 ||
+    key.indexOf('ro.boot.zygisk') === 0 ||
+    key.indexOf('persist.zygisk') === 0 ||
+    key === 'ro.dalvik.vm.native.bridge';
 }
 
 function mapPropertyToId(key) {
@@ -247,7 +255,9 @@ function mapPropertyToId(key) {
     'ro.boot.flash.locked': 'attest.verified_boot',
     'ro.boot.vbmeta.device_state': 'attest.verified_boot'
   };
-  if (key.indexOf('magisk') >= 0) return 'root.magisk';
+  if (key.indexOf('lsposed') >= 0 || key.indexOf('lspd') >= 0) return 'root.lsposed';
+  if (key.indexOf('xposed') >= 0 || key.indexOf('taichi') >= 0) return 'root.xposed';
+  if (key.indexOf('magisk') >= 0 || key.indexOf('zygisk') >= 0) return 'root.magisk';
   if (key.indexOf('qemu') >= 0 || key.indexOf('goldfish') >= 0) return 'root.emulator';
   return map[key] || 'getprop.shell';
 }
@@ -1081,23 +1091,56 @@ function writeRoot(id, action, req, resp) {
 function isRootPath(p) {
   if (!p) return false;
   var s = String(p).toLowerCase();
-  return /\/su$|\/su\/|superuser|supersu|magisk|zygisk|ksu|apatch|busybox|xposed|lsposed|riru|frida-server|\/data\/adb|\/sbin\/\.|debug_ramdisk|qemu_pipe|goldfish_pipe|\/sys\/qemu/.test(s);
+  return /\/su$|\/su\/|superuser|supersu|magisk|zygisk|ksu|apatch|busybox|xposed|lsposed|lspd|lsplant|lspatch|riru|frida|gadget|linjector|\/data\/adb|\/sbin\/\.|debug_ramdisk|qemu_pipe|goldfish_pipe|\/sys\/qemu|XposedBridge\.jar|app_process_xposed|libxposed|sandhook|yahfa|dobby|libwhale/.test(s) ||
+    isProcInjectPath(s);
+}
+
+function isProcInjectPath(p) {
+  if (!p) return false;
+  var s = String(p).toLowerCase();
+  return /\/proc\/(self|\d+)\/(maps|smaps|status|task|mounts|mountinfo|net\/tcp|net\/unix)/.test(s) ||
+    s.indexOf('/proc/net/tcp') >= 0 || s.indexOf('/proc/net/unix') >= 0;
+}
+
+function classifyPath(path) {
+  var s = String(path || '').toLowerCase();
+  if (/qemu|goldfish|ranchu/.test(s)) return 'root.emulator';
+  if (/lsposed|\/lspd|lsplant|zygisk_lsposed|riru_lsposed/.test(s)) return 'root.lsposed';
+  if (/lspatch|virtualxposed|taichi|io\.va\.exposed/.test(s)) return 'root.lspatch';
+  if (/frida|gadget|gum-js|linjector/.test(s)) return 'root.frida_detect';
+  if (/xposed/.test(s)) return 'root.xposed';
+  if (isProcInjectPath(s) || /sandhook|yahfa|dobby|whale|epic|substrate|memfd/.test(s)) return 'root.inject';
+  if (/magisk|zygisk/.test(s)) return 'root.magisk';
+  return 'root.su';
+}
+
+function classifyClass(name) {
+  var s = String(name || '').toLowerCase();
+  if (/lsposed|lspd|lsplant/.test(s)) return 'root.lsposed';
+  if (/lspatch|virtualxposed|taichi/.test(s)) return 'root.lspatch';
+  if (/xposed/.test(s)) return 'root.xposed';
+  if (/frida|gadget/.test(s)) return 'root.frida_detect';
+  return 'root.rootbeer';
 }
 
 function isRootCmd(cmd) {
   if (!cmd) return false;
-  return /(^|[\/\s])su(\s|$)|which\s+su|magisk|getenforce|busybox|resetprop|zygisk|ksud|apatch|id\s+-u/.test(String(cmd).toLowerCase());
+  return /(^|[\/\s])su(\s|$)|which\s+su|magisk|getenforce|busybox|resetprop|zygisk|ksud|apatch|id\s+-u|\bps\b|frida-server|cat\s+\/proc/.test(String(cmd).toLowerCase());
 }
 
 function isRootPkg(pkg) {
   if (!pkg) return false;
   var s = String(pkg).toLowerCase();
-  return /magisk|supersu|superuser|kernelsu|ksunext|lsposed|xposed|edxposed|apatch|kingroot|kingo|framaroot|hidemyroot|rootcloak|shamiko|me\.weishu|topjohnwu|chainfire/.test(s);
+  return /magisk|supersu|superuser|kernelsu|ksunext|lsposed|lspatch|xposed|edxposed|apatch|kingroot|kingo|framaroot|hidemyroot|rootcloak|shamiko|me\.weishu|topjohnwu|chainfire|frida|saurik\.substrate|io\.va\.exposed|elderdrivers/.test(s);
 }
 
 function isHookClass(name) {
   if (!name) return false;
-  return /rootbeer|xposed|lsposed|edxposed|magisk|frida|de\.robv\.android\.xposed|com\.scottyab\.rootbeer/.test(String(name).toLowerCase());
+  return /rootbeer|xposed|lsposed|lspd|lsplant|lspatch|edxposed|magisk|frida|gadget|substrate|de\.robv\.android\.xposed|org\.lsposed|com\.scottyab\.rootbeer|com\.saurik\.substrate|me\.weishu/.test(String(name).toLowerCase());
+}
+
+function isFridaPort(port) {
+  return (port >= 27040 && port <= 27050) || port === 23946;
 }
 
 function hookRootFiles() {
@@ -1111,8 +1154,7 @@ function hookRootFiles() {
           try { path = this.getAbsolutePath(); } catch (e) {}
           var result = orig.call(this);
           if (isRootPath(path)) {
-            writeRoot(/qemu|goldfish/.test(path) ? 'root.emulator' : 'root.su',
-              'File.' + m, path, safeStr(result));
+            writeRoot(classifyPath(path), 'File.' + m, path, safeStr(result));
           }
           return result;
         };
@@ -1168,21 +1210,23 @@ function hookRootPackages() {
             overload.implementation = function () {
               var pkg = safeStr(arguments[0]);
               var result = overload.apply(this, arguments);
-              if (isRootPkg(pkg)) writeRoot('root.packages', name + '.' + m, pkg, 'found');
+              if (isRootPkg(pkg)) writeRoot(classifyClass(pkg), name + '.' + m, pkg, 'found');
               return result;
             };
           });
         } catch (e) {}
       });
-      try {
-        PM.getInstalledPackages.overloads.forEach(function (overload) {
-          overload.implementation = function () {
-            var result = overload.apply(this, arguments);
-            writeRoot('root.packages', name + '.getInstalledPackages', safeStr(arguments[0]), 'count=' + (result ? result.size() : 0));
-            return result;
-          };
-        });
-      } catch (e) {}
+      ['getInstalledPackages', 'getInstalledApplications'].forEach(function (scan) {
+        try {
+          PM[scan].overloads.forEach(function (overload) {
+            overload.implementation = function () {
+              var result = overload.apply(this, arguments);
+              writeRoot('root.packages', name + '.' + scan, safeStr(arguments[0]), 'count=' + (result ? result.size() : 0));
+              return result;
+            };
+          });
+        } catch (e) {}
+      });
     } catch (e) {}
   });
 }
@@ -1262,14 +1306,173 @@ function hookIntegrityApis() {
 function hookRootClassForName() {
   try {
     var Cls = Java.use('java.lang.Class');
-    var origForName = Cls.forName.overload('java.lang.String');
-    origForName.implementation = function (name) {
-      if (isHookClass(name)) {
-        var id = /xposed|lsposed/.test(String(name).toLowerCase()) ? 'root.xposed' :
-          (/frida/.test(String(name).toLowerCase()) ? 'root.frida_detect' : 'root.rootbeer');
-        writeRoot(id, 'Class.forName', name, '');
+    Cls.forName.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var name = safeStr(arguments[0]);
+        if (isHookClass(name)) writeRoot(classifyClass(name), 'Class.forName', name, '');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookProcReaders() {
+  try {
+    var FIS = Java.use('java.io.FileInputStream');
+    FIS.$init.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var path = '';
+        try {
+          var a0 = arguments[0];
+          path = a0 && a0.getAbsolutePath ? a0.getAbsolutePath() : safeStr(a0);
+        } catch (e) {}
+        if (isProcInjectPath(path) || isRootPath(path)) {
+          writeRoot(classifyPath(path), 'FileInputStream', path, '');
+        }
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var RAF = Java.use('java.io.RandomAccessFile');
+    RAF.$init.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var path = '';
+        try {
+          var a0 = arguments[0];
+          path = a0 && a0.getAbsolutePath ? a0.getAbsolutePath() : safeStr(a0);
+        } catch (e) {}
+        if (isProcInjectPath(path) || isRootPath(path)) {
+          writeRoot(classifyPath(path), 'RandomAccessFile', path, '');
+        }
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Os = Java.use('android.system.Os');
+    Os.open.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var path = safeStr(arguments[0]);
+        var fd = overload.apply(this, arguments);
+        if (isProcInjectPath(path) || isRootPath(path)) {
+          writeRoot(classifyPath(path), 'Os.open', path, 'fd');
+        }
+        return fd;
+      };
+    });
+  } catch (e) {}
+  try {
+    var Files = Java.use('java.nio.file.Files');
+    ['readAllBytes', 'readAllLines', 'newBufferedReader', 'newInputStream'].forEach(function (m) {
+      try {
+        Files[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var path = safeStr(arguments[0]);
+            if (isProcInjectPath(path) || isRootPath(path)) {
+              writeRoot(classifyPath(path), 'Files.' + m, path, '');
+            }
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookInjectSockets() {
+  try {
+    var Sock = Java.use('java.net.Socket');
+    Sock.connect.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var ep = '';
+        var port = -1;
+        try {
+          var addr = arguments[0];
+          ep = safeStr(addr);
+          if (addr && addr.getPort) port = addr.getPort();
+        } catch (e) {}
+        if (isFridaPort(port) || /2704[0-9]|23946/.test(ep)) {
+          writeRoot('root.ports', 'Socket.connect', ep, '');
+        }
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Sock = Java.use('java.net.Socket');
+    Sock.$init.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var host = safeStr(arguments[0]);
+        var port = typeof arguments[1] === 'number' ? arguments[1] : -1;
+        if (isFridaPort(port)) writeRoot('root.ports', 'Socket.<init>', host + ':' + port, '');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookInjectThreads() {
+  try {
+    var Th = Java.use('java.lang.Thread');
+    var origAll = Th.getAllStackTraces;
+    origAll.implementation = function () {
+      var result = origAll.call(this);
+      writeRoot('root.stack', 'Thread.getAllStackTraces', '', 'threads=' + (result ? result.size() : 0));
+      return result;
+    };
+  } catch (e) {}
+  try {
+    var Th = Java.use('java.lang.Thread');
+    Th.enumerate.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeRoot('root.threads', 'Thread.enumerate', '', '');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookInjectClassLoader() {
+  try {
+    var CL = Java.use('java.lang.ClassLoader');
+    var orig = CL.loadClass.overload('java.lang.String');
+    orig.implementation = function (name) {
+      if (isHookClass(name)) writeRoot(classifyClass(name), 'ClassLoader.loadClass', name, '');
+      return orig.call(this, name);
+    };
+  } catch (e) {}
+}
+
+function hookInjectEnvAndLoad() {
+  try {
+    var Sys = Java.use('java.lang.System');
+    var origEnv = Sys.getenv.overload('java.lang.String');
+    origEnv.implementation = function (key) {
+      var result = origEnv.call(this, key);
+      if (key && /LD_PRELOAD|CLASSPATH|XPOSED|FRIDA|MAGISK/i.test(key)) {
+        writeRoot('root.inject', 'System.getenv', key, safeStr(result));
       }
-      return origForName.call(this, name);
+      return result;
+    };
+  } catch (e) {}
+  try {
+    var Sys = Java.use('java.lang.System');
+    var origLoad = Sys.loadLibrary;
+    origLoad.implementation = function (name) {
+      if (/frida|xposed|lsposed|lspd|gadget|substrate|sandhook/i.test(safeStr(name))) {
+        writeRoot(classifyClass(name), 'System.loadLibrary', name, '');
+      }
+      return origLoad.call(this, name);
+    };
+  } catch (e) {}
+  try {
+    var AM = Java.use('android.app.ActivityManager');
+    var origProc = AM.getRunningAppProcesses;
+    origProc.implementation = function () {
+      var result = origProc.call(this);
+      writeRoot('root.threads', 'ActivityManager.getRunningAppProcesses', '', 'count=' + (result ? result.size() : 0));
+      return result;
     };
   } catch (e) {}
 }
@@ -1286,11 +1489,59 @@ function hookNativeRootAccess() {
         },
         onLeave: function (retval) {
           if (!this.path || !isRootPath(this.path)) return;
-          writeRoot('root.su', 'native.' + fn, this.path, 'rc=' + retval.toInt32());
+          writeRoot(classifyPath(this.path), 'native.' + fn, this.path, 'rc=' + retval.toInt32());
         }
       });
     } catch (e) {}
   });
+  ['open', 'openat'].forEach(function (fn) {
+    try {
+      var addr = Module.findExportByName('libc.so', fn);
+      if (!addr) return;
+      Interceptor.attach(addr, {
+        onEnter: function (args) {
+          var idx = fn === 'openat' ? 1 : 0;
+          try { this.path = Memory.readUtf8String(args[idx]); } catch (e) { this.path = ''; }
+        },
+        onLeave: function (retval) {
+          if (!this.path || !isRootPath(this.path)) return;
+          writeRoot(classifyPath(this.path), 'native.' + fn, this.path, 'fd=' + retval.toInt32());
+        }
+      });
+    } catch (e) {}
+  });
+  try {
+    var dlsym = Module.findExportByName('libdl.so', 'dlsym') || Module.findExportByName(null, 'dlsym');
+    if (dlsym) {
+      Interceptor.attach(dlsym, {
+        onEnter: function (args) {
+          try { this.sym = Memory.readUtf8String(args[1]); } catch (e) { this.sym = ''; }
+        },
+        onLeave: function (retval) {
+          if (!this.sym) return;
+          if (!/frida_agent_main|gum_interceptor|MSHookFunction|xposedCallHandler|LSPosed|lspd|lsplant/.test(this.sym)) return;
+          writeRoot('root.dlsym', 'dlsym', this.sym, retval.isNull() ? 'null' : 'hit');
+        }
+      });
+    }
+  } catch (e) {}
+  try {
+    var conn = Module.findExportByName('libc.so', 'connect');
+    if (conn) {
+      Interceptor.attach(conn, {
+        onEnter: function (args) {
+          try {
+            var sa = args[1];
+            var family = sa.readU16();
+            if (family === 2) {
+              var port = (sa.add(2).readU8() << 8) | sa.add(3).readU8();
+              if (isFridaPort(port)) writeRoot('root.ports', 'connect', 'port=' + port, '');
+            }
+          } catch (e) {}
+        }
+      });
+    }
+  } catch (e) {}
 }
 
 function hookRootDetection() {
@@ -1301,6 +1552,11 @@ function hookRootDetection() {
   hookRootBeer();
   hookIntegrityApis();
   hookRootClassForName();
+  hookProcReaders();
+  hookInjectSockets();
+  hookInjectThreads();
+  hookInjectClassLoader();
+  hookInjectEnvAndLoad();
 }
 
 function installJavaHooks() {

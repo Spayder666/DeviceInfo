@@ -14,8 +14,8 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Ловит проверки root / Magisk / Frida / эмулятора / Play Integrity
- * даже без инъекции Frida: logcat + /proc maps/status/fd.
+ * Ловит проверки root / LSPosed / Frida / инжектов в память
+ * даже без Frida: logcat + maps/smaps, потоки, порты, unix-сокеты.
  */
 class RootDetectionMonitor(
     private val packageName: String,
@@ -34,9 +34,13 @@ class RootDetectionMonitor(
             while (isActive) {
                 pid = RootShell.findPid(packageName) ?: pid
                 pollMaps()
+                pollRwx()
+                pollThreads()
+                pollPorts()
+                pollUnix()
                 pollTracer()
                 pollFds()
-                delay(2500)
+                delay(2800)
             }
         }
         logJob = scope.launch(Dispatchers.IO) {
@@ -61,16 +65,54 @@ class RootDetectionMonitor(
     private suspend fun pollMaps() {
         if (pid <= 0) return
         val maps = RootShell.execAndRead(
-            "grep -E -i 'magisk|zygisk|riru|xposed|lsposed|frida|gadget|libsubstrate|libmemtrack_real' /proc/$pid/maps 2>/dev/null | head -n 12",
+            "grep -E -i '$MAPS_GREP' /proc/$pid/maps 2>/dev/null | head -n 16",
             timeoutSec = 6
         )
         if (maps.isBlank()) return
-        val id = when {
-            maps.contains("frida", ignoreCase = true) || maps.contains("gadget", ignoreCase = true) -> "root.frida_detect"
-            maps.contains("xposed", ignoreCase = true) || maps.contains("lsposed", ignoreCase = true) -> "root.xposed"
-            else -> "root.maps"
-        }
-        emit(id, "maps: модули root/hook", "/proc/$pid/maps", maps.lineSequence().take(6).joinToString("\n"), maps)
+        emit(classifyMaps(maps), "maps: hook/inject", "/proc/$pid/maps", maps.lineSequence().take(8).joinToString("\n"), maps)
+    }
+
+    private suspend fun pollRwx() {
+        if (pid <= 0) return
+        val rwx = RootShell.execAndRead(
+            "awk '\$2 ~ /rwx/ {print}' /proc/$pid/maps 2>/dev/null | grep -vE 'system/|apex/|jit-cache|dalvik|anonymous:libc' | head -n 8",
+            timeoutSec = 6
+        )
+        if (rwx.isBlank()) return
+        emit("root.inject", "maps: rwxp", "/proc/$pid/maps", rwx.take(400), rwx)
+    }
+
+    private suspend fun pollThreads() {
+        if (pid <= 0) return
+        val comm = RootShell.execAndRead(
+            "cat /proc/$pid/task/*/comm 2>/dev/null | grep -E -i 'gum-js|gmain|gdbus|pool-frida|linjector|lsposed|lspd|xposed|frida' | head -n 12",
+            timeoutSec = 6
+        )
+        if (comm.isBlank()) return
+        val id = if (comm.contains("gum", ignoreCase = true) || comm.contains("frida", ignoreCase = true) ||
+            comm.contains("linjector", ignoreCase = true)
+        ) "root.threads" else "root.lsposed"
+        emit(id, "task comm", "/proc/$pid/task/*/comm", comm.take(300), comm)
+    }
+
+    private suspend fun pollPorts() {
+        if (pid <= 0) return
+        val tcp = RootShell.execAndRead(
+            "cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 2>/dev/null | grep -E -i '$FRIDA_PORTS_HEX' | head -n 8",
+            timeoutSec = 6
+        )
+        if (tcp.isBlank()) return
+        emit("root.ports", "net/tcp Frida ports", "/proc/$pid/net/tcp", tcp.take(400), tcp)
+    }
+
+    private suspend fun pollUnix() {
+        if (pid <= 0) return
+        val unix = RootShell.execAndRead(
+            "cat /proc/$pid/net/unix 2>/dev/null | grep -E -i 'frida|gum|lsposed|lspd|magisk|zygisk|riru|xposed' | head -n 8",
+            timeoutSec = 6
+        )
+        if (unix.isBlank()) return
+        emit("root.ports", "unix socket", "/proc/$pid/net/unix", unix.take(400), unix)
     }
 
     private suspend fun pollTracer() {
@@ -85,11 +127,11 @@ class RootDetectionMonitor(
     private suspend fun pollFds() {
         if (pid <= 0) return
         val fds = RootShell.execAndRead(
-            "ls -l /proc/$pid/fd 2>/dev/null | grep -E -i 'su|magisk|xposed|frida|qemu_pipe|goldfish' | head -n 12",
+            "ls -l /proc/$pid/fd 2>/dev/null | grep -E -i 'su|magisk|xposed|lsposed|lspd|frida|pipe:|qemu_pipe|goldfish' | head -n 12",
             timeoutSec = 6
         )
         if (fds.isBlank()) return
-        emit("root.su", "fd: su/magisk/frida", "/proc/$pid/fd", fds.take(400), fds)
+        emit(classifyMaps(fds), "fd: inject/root", "/proc/$pid/fd", fds.take(400), fds)
     }
 
     private suspend fun parseLog(line: String) {
@@ -97,19 +139,35 @@ class RootDetectionMonitor(
         val mentionsPkg = line.contains(packageName) || (uid > 0 && line.contains("uid=$uid"))
         val hit = ROOT_LOG.find(line) ?: return
         if (!mentionsPkg && !GLOBAL_TAGS.containsMatchIn(line)) return
-        val id = classifyLog(line)
-        emit(id, hit.value, "logcat", line.substringAfter(": ").take(280), line.trim())
+        emit(classifyLog(line), hit.value, "logcat", line.substringAfter(": ").take(280), line.trim())
+    }
+
+    private fun classifyMaps(text: String): String {
+        val t = text.lowercase()
+        return when {
+            "lsposed" in t || "lspd" in t || "lsplant" in t -> "root.lsposed"
+            "lspatch" in t || "virtualxposed" in t -> "root.lspatch"
+            "frida" in t || "gadget" in t || "gum-js" in t -> "root.frida_detect"
+            "xposed" in t -> "root.xposed"
+            "memfd" in t || "rwxp" in t || "sandhook" in t || "dobby" in t || "yahfa" in t -> "root.inject"
+            "magisk" in t || "zygisk" in t -> "root.magisk"
+            else -> "root.inject"
+        }
     }
 
     private fun classifyLog(line: String): String {
         val t = line.lowercase()
         return when {
+            "lsposed" in t || "lspd" in t || "lsplant" in t || "lsphooker" in t -> "root.lsposed"
+            "lspatch" in t || "virtualxposed" in t || "taichi" in t -> "root.lspatch"
+            "handlehookedmethod" in t || "invokeoriginalmethod" in t -> "root.stack"
             "rootbeer" in t || "isrooted" in t -> "root.rootbeer"
             "playintegrity" in t || "integrityservice" in t || "integritytoken" in t -> "ent.integrity"
             "safetynet" in t -> "ent.safetynet"
             "attestation" in t || "keymint" in t -> "attest.key"
-            "frida" in t || "27042" in t || "gum-js" in t -> "root.frida_detect"
-            "xposed" in t || "lsposed" in t -> "root.xposed"
+            "frida" in t || "27042" in t || "27043" in t || "gum-js" in t || "linjector" in t -> "root.frida_detect"
+            "xposed" in t -> "root.xposed"
+            "sandhook" in t || "yahfa" in t || "dobby" in t || "memfd" in t || "rwxp" in t -> "root.inject"
             "magisk" in t || "zygisk" in t -> "root.magisk"
             "kernelsu" in t || "apatch" in t -> "root.ksu"
             "qemu" in t || "goldfish" in t || "ranchu" in t -> "root.emulator"
@@ -144,16 +202,25 @@ class RootDetectionMonitor(
     }
 
     companion object {
+        private const val MAPS_GREP =
+            "magisk|zygisk|riru|xposed|lsposed|lspd|lsplant|lspatch|frida|gadget|libsubstrate|" +
+                "libmemtrack_real|sandhook|yahfa|dobby|libwhale|epic|memfd:|linjector"
+        // 27040=69A0 … 27050=69AA, 23946=5D8A
+        private const val FRIDA_PORTS_HEX = ":69A[0-9A]|:5D8A"
+
         private val ROOT_LOG = Regex(
             "(?i)RootBeer|isRooted|SafetyNet|PlayIntegrity|IntegrityService|IntegrityToken|" +
-                "Magisk|Zygisk|KernelSU|APatch|XposedBridge|LSPosed|EdXposed|" +
-                "frida-server|gum-js-loop|LIBFRIDA|27042|" +
+                "Magisk|Zygisk|KernelSU|APatch|XposedBridge|XposedHelpers|LSPosed|LSPosedBridge|" +
+                "EdXposed|LSPatch|VirtualXposed|TaiChi|handleHookedMethod|LSPHooker|" +
+                "frida-server|frida-agent|gum-js-loop|LIBFRIDA|linjector|27042|27043|" +
                 "which su|/system/bin/su|/system/xbin/su|su binary|SuperSU|Superuser|" +
                 "getenforce|test-keys|ro\\.secure|ro\\.debuggable|verifiedboot|" +
-                "KeyAttestation|goldfish|ranchu|qemu_pipe|TracerPid|adb_enabled"
+                "KeyAttestation|goldfish|ranchu|qemu_pipe|TracerPid|adb_enabled|" +
+                "sandhook|yahfa|dobby|liblspd|lsplant|memfd"
         )
         private val GLOBAL_TAGS = Regex(
-            "(?i)RootBeer|SafetyNet|PlayIntegrity|IntegrityService|Magisk|Xposed|LSPosed|frida-server"
+            "(?i)RootBeer|SafetyNet|PlayIntegrity|IntegrityService|Magisk|Xposed|LSPosed|" +
+                "frida-server|LSPatch|handleHookedMethod"
         )
     }
 }

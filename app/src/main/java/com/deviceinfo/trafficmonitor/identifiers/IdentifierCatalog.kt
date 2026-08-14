@@ -328,8 +328,15 @@ object IdentifierCatalog {
         id("root.debugger", "Отладчик / TracerPid", IdentifierGroup.ROOT, "Debug.isDebuggerConnected / TracerPid", logcat = listOf("isDebuggerConnected", "TracerPid")),
         id("root.maps", "maps: frida/xposed/magisk", IdentifierGroup.ROOT, "/proc/self/maps", file = "/proc/self/maps", strace = listOf("/proc/self/maps", "/proc/self/status")),
         id("root.rootbeer", "RootBeer.isRooted", IdentifierGroup.ROOT, "com.scottyab.rootbeer.RootBeer", logcat = listOf("RootBeer", "isRooted")),
-        id("root.xposed", "Xposed / LSPosed", IdentifierGroup.ROOT, "Class.forName(XposedBridge)", logcat = listOf("XposedBridge", "LSPosed", "EdXposed"), strace = listOf("XposedBridge", "libxposed", "liblsposed")),
-        id("root.frida_detect", "Детект Frida", IdentifierGroup.ROOT, "frida-server / :27042 / gum-js-loop", logcat = listOf("frida-server", "27042", "gum-js-loop", "LIBFRIDA")),
+        id("root.xposed", "Xposed / EdXposed", IdentifierGroup.ROOT, "Class.forName(XposedBridge)", logcat = listOf("XposedBridge", "XposedHelpers", "EdXposed", "handleHookedMethod"), strace = listOf("XposedBridge", "libxposed_art")),
+        id("root.lsposed", "LSPosed / lspd", IdentifierGroup.ROOT, "Class.forName(LSPosedBridge) / /data/adb/lspd", file = "/data/adb/lspd", logcat = listOf("LSPosed", "LSPosedBridge", "LSPosedContext", "liblspd", "lsplant"), strace = listOf("/data/adb/lspd", "zygisk_lsposed", "riru_lsposed", "liblspd", "liblsplant")),
+        id("root.lspatch", "LSPatch / VirtualXposed", IdentifierGroup.ROOT, "org.lsposed.lspatch / me.weishu.exp", logcat = listOf("LSPatch", "VirtualXposed", "TaiChi", "io.va.exposed")),
+        id("root.frida_detect", "Детект Frida", IdentifierGroup.ROOT, "frida-server / :27042 / gum-js-loop", logcat = listOf("frida-server", "27042", "gum-js-loop", "LIBFRIDA", "frida-agent", "libfrida-gadget")),
+        id("root.inject", "Инжект в память / maps / rwx", IdentifierGroup.ROOT, "/proc/self/maps memfd rwxp sandhook/dobby", file = "/proc/self/maps", logcat = listOf("rwxp", "memfd", "sandhook", "yahfa", "dobby", "libwhale"), strace = listOf("/proc/self/maps", "/proc/self/smaps", "memfd:")),
+        id("root.threads", "Потоки gum-js / linjector", IdentifierGroup.ROOT, "/proc/self/task/*/comm", logcat = listOf("gum-js-loop", "gmain", "gdbus", "pool-frida", "linjector")),
+        id("root.ports", "Порты Frida 27042/27043", IdentifierGroup.ROOT, "Socket.connect(127.0.0.1:27042)", logcat = listOf("27042", "27043", "23946")),
+        id("root.dlsym", "dlsym frida/xposed символы", IdentifierGroup.ROOT, "dlsym(frida_agent_main / MSHookFunction)", logcat = listOf("frida_agent_main", "gum_interceptor", "MSHookFunction", "xposedCallHandler")),
+        id("root.stack", "Стек на Xposed/LSPosed", IdentifierGroup.ROOT, "Thread.getAllStackTraces / handleHookedMethod", logcat = listOf("handleHookedMethod", "invokeOriginalMethodNative", "LSPHooker")),
         id("root.emulator", "Детект эмулятора", IdentifierGroup.ROOT, "qemu/goldfish/ranchu", logcat = listOf("goldfish", "ranchu", "qemu_pipe", "ro.kernel.qemu"), strace = listOf("/dev/qemu_pipe", "/dev/goldfish_pipe", "/sys/qemu_trace")),
         id("root.mounts", "mount magisk/rw system", IdentifierGroup.ROOT, "/proc/mounts", file = "/proc/mounts", strace = listOf("/proc/mounts", "/proc/self/mounts"))
     )
