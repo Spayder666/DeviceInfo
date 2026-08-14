@@ -55,7 +55,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.deviceinfo.trafficmonitor.data.AccessCategory
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.ui.categoryColor
@@ -121,6 +122,7 @@ fun MonitorScreen(
 ) {
     val events by viewModel.events.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val selectedIdentifierGroup by viewModel.selectedIdentifierGroup.collectAsState()
     val selectedEvent by viewModel.selectedEvent.collectAsState()
     val eventCount by viewModel.eventCount.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -170,6 +172,13 @@ fun MonitorScreen(
                 selected = selectedCategory,
                 onSelect = viewModel::setCategoryFilter
             )
+
+            if (selectedCategory == AccessCategory.IDENTIFIER || selectedIdentifierGroup != null) {
+                IdentifierGroupFilterRow(
+                    selected = selectedIdentifierGroup,
+                    onSelect = viewModel::setIdentifierGroupFilter
+                )
+            }
 
             if (events.isEmpty()) {
                 Box(
@@ -242,6 +251,27 @@ fun CategoryFilterRow(selected: AccessCategory?, onSelect: (AccessCategory?) -> 
 }
 
 @Composable
+fun IdentifierGroupFilterRow(selected: String?, onSelect: (String?) -> Unit) {
+    val groups = listOf(null to "Все ID") + IdentifierGroup.entries.map { it.name to it.label }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        groups.forEach { (name, label) ->
+            FilterChip(
+                selected = selected == name,
+                onClick = { onSelect(name) },
+                label = { Text(label, fontSize = 11.sp) }
+            )
+        }
+    }
+}
+
+@Composable
 fun EventCard(event: CaptureEvent, onClick: () -> Unit) {
     val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
     val color = categoryColor(event.category)
@@ -282,6 +312,14 @@ fun EventCard(event: CaptureEvent, onClick: () -> Unit) {
                     fontSize = 14.sp,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+                event.identifierName?.let { id ->
+                    Text(
+                        text = id,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
                 event.requestDetails?.let {
                     Text(
                         text = it,
@@ -316,6 +354,15 @@ fun EventDetailSheet(event: CaptureEvent) {
 
         DetailRow("Категория", categoryLabel(event.category))
         DetailRow("Действие", event.action)
+        event.identifierName?.let { id ->
+            DetailRow("ID тип", id)
+            IdentifierCatalog.findById(id)?.let { def ->
+                def.api?.let { DetailRow("API", it) }
+                def.systemProperty?.let { DetailRow("Property", it) }
+                def.filePath?.let { DetailRow("File", it) }
+                def.group.let { DetailRow("Группа", it.label) }
+            }
+        }
         DetailRow("Источник", sourceLabel(event.source))
         DetailRow("Время", timeFormat.format(Date(event.timestamp)))
         event.permission?.let { DetailRow("Разрешение", it) }

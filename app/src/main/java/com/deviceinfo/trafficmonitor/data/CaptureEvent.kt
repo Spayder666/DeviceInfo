@@ -43,5 +43,9 @@ data class CaptureEvent(
     val requestDetails: String? = null,
     val responseDetails: String? = null,
     val rawData: String? = null,
-    val processId: Int? = null
+    val processId: Int? = null,
+    /** Конкретный идентификатор из [IdentifierCatalog], напр. "tel.imei", "build.model" */
+    val identifierName: String? = null,
+    /** Группа идентификатора: BUILD, TELEPHONY, SETTINGS и т.д. */
+    val identifierGroup: String? = null
 )

@@ -21,7 +21,7 @@ class EnumConverters {
     fun toSource(value: String): EventSource = EventSource.valueOf(value)
 }
 
-@Database(entities = [CaptureEvent::class], version = 1, exportSchema = false)
+@Database(entities = [CaptureEvent::class], version = 2, exportSchema = false)
 @TypeConverters(EnumConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun captureEventDao(): CaptureEventDao
@@ -36,7 +36,8 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "access_monitor.db"
-                ).build().also { instance = it }
+                ).fallbackToDestructiveMigration()
+                .build().also { instance = it }
             }
         }
     }

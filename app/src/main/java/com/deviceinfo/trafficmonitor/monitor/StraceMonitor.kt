@@ -4,6 +4,8 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierMatcher
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,14 +27,12 @@ class StraceMonitor(
         job = scope.launch(Dispatchers.IO) {
             val cmd = buildString {
                 append("$stracePath -p $pid -f ")
-                append("-e trace=network,file,desc,ipc,signal ")
+                append("-e trace=network,file,desc,ipc,signal,process ")
                 append("-s 512 -tt -y 2>&1")
             }
             try {
                 RootShell.execStreaming(cmd) { line ->
-                    if (isActive) {
-                        scope.launch { parseLine(line) }
-                    }
+                    if (isActive) scope.launch { parseLine(line) }
                 }
             } catch (_: Exception) {
                 // Process ended or strace detached
@@ -48,19 +48,56 @@ class StraceMonitor(
     private suspend fun parseLine(line: String) {
         if (line.isBlank() || line.startsWith("strace:")) return
 
-        val parsed = classifySyscall(line) ?: return
-        if (repository.isDuplicate(packageName, parsed.action, line, sinceMs = 500)) return
+        IdentifierMatcher.matchStrace(line)?.let { def ->
+            recordIdentifier(def, line)
+            return
+        }
+
+        val path = extractPath(line)
+        if (path != null) {
+            IdentifierMatcher.matchPath(path)?.let { def ->
+                recordIdentifier(def, line, path)
+                return
+            }
+        }
+
+        classifySyscall(line)?.let { info ->
+            if (repository.isDuplicate(packageName, info.action, line, sinceMs = 500)) return
+            repository.insert(
+                CaptureEvent(
+                    targetPackage = packageName,
+                    category = info.category,
+                    source = EventSource.STRACE,
+                    action = info.action,
+                    requestDetails = info.request,
+                    responseDetails = info.response,
+                    rawData = line.trim(),
+                    processId = pid
+                )
+            )
+        }
+    }
+
+    private suspend fun recordIdentifier(def: IdentifierDefinition, line: String, path: String? = null) {
+        val action = def.displayName
+        if (repository.isDuplicate(packageName, action, line, sinceMs = 500)) return
 
         repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
-                category = parsed.category,
+                category = AccessCategory.IDENTIFIER,
                 source = EventSource.STRACE,
-                action = parsed.action,
-                requestDetails = parsed.request,
-                responseDetails = parsed.response,
+                action = action,
+                permission = def.permission,
+                requestDetails = path?.let { "Доступ к файлу: $it" }
+                    ?: def.filePath?.let { "File: $it" }
+                    ?: def.systemProperty?.let { "Property: $it" }
+                    ?: "Системный вызов: ${def.api ?: def.id}",
+                responseDetails = if (line.contains("= -1")) "Ошибка доступа" else "Успешно",
                 rawData = line.trim(),
-                processId = pid
+                processId = pid,
+                identifierName = def.id,
+                identifierGroup = def.group.name
             )
         )
     }
@@ -77,29 +114,23 @@ class StraceMonitor(
             line.contains("openat") || line.contains("open(") -> classifyOpen(line)
             line.contains("connect(") -> classifyConnect(line)
             line.contains("ioctl(") -> classifyIoctl(line)
+            line.contains("execve") && line.contains("getprop") -> SyscallInfo(
+                AccessCategory.IDENTIFIER,
+                "getprop",
+                extractBetween(line, "execve("),
+                null
+            )
             line.contains("read(") && isSensitiveRead(line) -> SyscallInfo(
                 AccessCategory.STORAGE,
                 "read()",
                 extractBetween(line, "read("),
-                "Чтение данных из файла/дескриптора"
-            )
-            line.contains("write(") && line.contains("/dev/") -> SyscallInfo(
-                AccessCategory.SYSTEM_API,
-                "write()",
-                extractBetween(line, "write("),
-                "Запись в системное устройство"
+                "Чтение данных"
             )
             line.contains("socket(") -> SyscallInfo(
                 AccessCategory.NETWORK,
                 "socket()",
                 extractBetween(line, "socket("),
-                "Создание сетевого сокета"
-            )
-            line.contains("getsockopt") || line.contains("setsockopt") -> SyscallInfo(
-                AccessCategory.NETWORK,
-                "socket option",
-                line.substringAfter("=").take(200),
-                null
+                "Создание сокета"
             )
             else -> null
         }
@@ -115,17 +146,15 @@ class StraceMonitor(
             path.contains("telephony", ignoreCase = true) || path.contains("radio", ignoreCase = true) -> AccessCategory.TELEPHONY
             path.contains("contacts", ignoreCase = true) -> AccessCategory.CONTACTS
             path.contains("sms", ignoreCase = true) || path.contains("mms", ignoreCase = true) -> AccessCategory.SMS
-            path.contains("android_id", ignoreCase = true) || path.contains("settings", ignoreCase = true) -> AccessCategory.IDENTIFIER
             path.contains("sensor", ignoreCase = true) -> AccessCategory.SENSOR
-            path.contains("/proc/", ignoreCase = true) || path.contains("/sys/", ignoreCase = true) -> AccessCategory.SYSTEM_API
             path.contains("/data/", ignoreCase = true) || path.contains("/storage/", ignoreCase = true) -> AccessCategory.STORAGE
-            else -> AccessCategory.SYSCALL
+            else -> return null
         }
         return SyscallInfo(
             category = category,
             action = "open($path)",
             request = "Открытие: $path",
-            response = if (line.contains("= -1")) "Ошибка доступа" else "Успешно"
+            response = if (line.contains("= -1")) "Ошибка" else "Успешно"
         )
     }
 
@@ -135,7 +164,7 @@ class StraceMonitor(
             category = AccessCategory.NETWORK,
             action = "connect()",
             request = "Подключение: $dest",
-            response = if (line.contains("= -1")) "Не удалось подключиться" else "Подключено"
+            response = if (line.contains("= -1")) "Не удалось" else "Подключено"
         )
     }
 
@@ -146,7 +175,7 @@ class StraceMonitor(
             "gps" in lower || "gnss" in lower -> AccessCategory.LOCATION
             "audio" in lower -> AccessCategory.MICROPHONE
             "sensor" in lower -> AccessCategory.SENSOR
-            else -> AccessCategory.SYSCALL
+            else -> return null
         }
         return SyscallInfo(
             category = category,
@@ -158,13 +187,13 @@ class StraceMonitor(
 
     private fun isSensitiveRead(line: String): Boolean {
         val lower = line.lowercase()
-        return listOf("settings", "telephony", "contacts", "sms", "imei", "android_id", "sim")
+        return listOf("settings", "telephony", "contacts", "sms", "imei", "android_id", "sim", "gservices")
             .any { it in lower }
     }
 
     private fun extractPath(line: String): String? {
         val quoted = Regex("\"([^\"]+)\"").findAll(line).map { it.groupValues[1] }.toList()
-        return quoted.lastOrNull { it.startsWith("/") }
+        return quoted.lastOrNull { it.startsWith("/") || it.startsWith("content://") }
     }
 
     private fun extractBetween(line: String, prefix: String): String? {

@@ -72,15 +72,24 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private val _packageName = MutableStateFlow("")
     private val _selectedCategory = MutableStateFlow<AccessCategory?>(null)
+    private val _selectedIdentifierGroup = MutableStateFlow<String?>(null)
     private val _selectedEvent = MutableStateFlow<CaptureEvent?>(null)
     private val _allEvents = MutableStateFlow<List<CaptureEvent>>(emptyList())
 
     val packageName: StateFlow<String> = _packageName.asStateFlow()
     val selectedCategory: StateFlow<AccessCategory?> = _selectedCategory.asStateFlow()
+    val selectedIdentifierGroup: StateFlow<String?> = _selectedIdentifierGroup.asStateFlow()
     val selectedEvent: StateFlow<CaptureEvent?> = _selectedEvent.asStateFlow()
 
-    val events: StateFlow<List<CaptureEvent>> = combine(_allEvents, _selectedCategory) { all, cat ->
-        if (cat == null) all else all.filter { it.category == cat }
+    val events: StateFlow<List<CaptureEvent>> = combine(
+        _allEvents,
+        _selectedCategory,
+        _selectedIdentifierGroup
+    ) { all, cat, idGroup ->
+        var filtered = all
+        if (cat != null) filtered = filtered.filter { it.category == cat }
+        if (idGroup != null) filtered = filtered.filter { it.identifierGroup == idGroup }
+        filtered
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val eventCount: StateFlow<Int> = _allEvents
@@ -102,6 +111,16 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun setCategoryFilter(category: AccessCategory?) {
         _selectedCategory.value = category
+        if (category != AccessCategory.IDENTIFIER) {
+            _selectedIdentifierGroup.value = null
+        }
+    }
+
+    fun setIdentifierGroupFilter(group: String?) {
+        _selectedIdentifierGroup.value = group
+        if (group != null) {
+            _selectedCategory.value = AccessCategory.IDENTIFIER
+        }
     }
 
     fun selectEvent(event: CaptureEvent?) {

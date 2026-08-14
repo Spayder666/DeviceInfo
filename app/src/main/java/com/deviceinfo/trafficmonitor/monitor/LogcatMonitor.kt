@@ -4,6 +4,8 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierMatcher
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,20 +35,17 @@ class LogcatMonitor(
         PatternRule(Regex("(?i)GnssLocationProvider|FusedLocation"), AccessCategory.LOCATION, "GNSS/Fused Location"),
         PatternRule(Regex("(?i)openCamera|CameraDevice|CameraManager|CameraService"), AccessCategory.CAMERA, "Camera API", "CAMERA"),
         PatternRule(Regex("(?i)AudioRecord|MediaRecorder|RECORD_AUDIO"), AccessCategory.MICROPHONE, "Microphone API", "RECORD_AUDIO"),
-        PatternRule(Regex("(?i)getDeviceId|getImei|getMeid|getSubscriberId|getSimSerialNumber|getLine1Number|TelephonyManager"), AccessCategory.TELEPHONY, "Telephony/SIM API", "READ_PHONE_STATE"),
-        PatternRule(Regex("(?i)getAndroidId|Settings\\.Secure|AdvertisingId|getSerial|getMacAddress|WifiInfo"), AccessCategory.IDENTIFIER, "Device Identifier API"),
         PatternRule(Regex("(?i)ContactsProvider|ContactsContract|query.*contacts"), AccessCategory.CONTACTS, "Contacts API", "READ_CONTACTS"),
         PatternRule(Regex("(?i)SmsManager|Telephony\\.Sms|content://sms"), AccessCategory.SMS, "SMS API", "READ_SMS"),
         PatternRule(Regex("(?i)checkPermission|requestPermissions|PermissionController|grantRuntimePermission"), AccessCategory.PERMISSION, "Permission Check/Request"),
         PatternRule(Regex("(?i)ClipboardManager|getPrimaryClip|setPrimaryClip"), AccessCategory.CLIPBOARD, "Clipboard API"),
-        PatternRule(Regex("(?i)BluetoothAdapter|BluetoothLeScanner|startScan"), AccessCategory.BLUETOOTH, "Bluetooth API", "BLUETOOTH_SCAN"),
+        PatternRule(Regex("(?i)BluetoothLeScanner|startScan"), AccessCategory.BLUETOOTH, "Bluetooth Scan", "BLUETOOTH_SCAN"),
         PatternRule(Regex("(?i)SensorManager|registerListener|TYPE_ACCELEROMETER|TYPE_GYROSCOPE"), AccessCategory.SENSOR, "Sensor API"),
         PatternRule(Regex("(?i)CalendarContract|content://com\\.android\\.calendar"), AccessCategory.CALENDAR, "Calendar API"),
         PatternRule(Regex("(?i)openFile|FileInputStream|content://media|Environment\\.getExternalStorage"), AccessCategory.STORAGE, "Storage/File API"),
         PatternRule(Regex("(?i)HttpURLConnection|OkHttp|Retrofit|Volley|api\\.|/v[0-9]+/"), AccessCategory.NETWORK, "HTTP/API Request"),
         PatternRule(Regex("(?i)connect\\(|Socket\\(|InetAddress|DNS|getaddrinfo"), AccessCategory.NETWORK, "Network Connection"),
         PatternRule(Regex("(?i)getInstalledPackages|getRunningAppProcesses|queryIntentActivities"), AccessCategory.SYSTEM_API, "Package Manager Query"),
-        PatternRule(Regex("(?i)getAccounts|AccountManager"), AccessCategory.IDENTIFIER, "Account/Identifier API"),
         PatternRule(Regex("(?i)BiometricPrompt|FingerprintManager|FaceManager"), AccessCategory.SYSTEM_API, "Biometric API"),
         PatternRule(Regex("(?i)NfcAdapter|NFC"), AccessCategory.SYSTEM_API, "NFC API"),
         PatternRule(Regex("(?i)UsageStatsManager|queryUsageStats"), AccessCategory.SYSTEM_API, "Usage Stats API"),
@@ -58,15 +57,9 @@ class LogcatMonitor(
     fun start() {
         job = scope.launch(Dispatchers.IO) {
             try {
-                val cmd = buildString {
-                    append("logcat -v threadtime --pid=$pid ")
-                    append("-T 1 ")
-                    append("*:V 2>&1")
-                }
+                val cmd = "logcat -v threadtime --pid=$pid -T 1 *:V 2>&1"
                 RootShell.execStreaming(cmd) { line ->
-                    if (isActive) {
-                        scope.launch { parseLine(line) }
-                    }
+                    if (isActive) scope.launch { parseLine(line) }
                 }
             } catch (_: Exception) {
                 // PID may change; service will restart monitor
@@ -82,29 +75,70 @@ class LogcatMonitor(
     private suspend fun parseLine(line: String) {
         if (line.isBlank()) return
 
+        IdentifierMatcher.matchLogcat(line)?.let { def ->
+            recordIdentifier(def, line)
+            return
+        }
+
         for (rule in rules) {
             if (rule.regex.containsMatchIn(line)) {
-                val requestPart = extractRequest(line)
-                val responsePart = extractResponse(line)
-
-                if (repository.isDuplicate(packageName, rule.action, line, sinceMs = 1000)) return
-
-                repository.insert(
-                    CaptureEvent(
-                        targetPackage = packageName,
-                        category = rule.category,
-                        source = EventSource.LOGCAT,
-                        action = rule.action,
-                        permission = rule.permission,
-                        requestDetails = requestPart ?: "Запрос через ${rule.action}",
-                        responseDetails = responsePart,
-                        rawData = line.trim(),
-                        processId = pid
-                    )
-                )
+                recordGeneric(rule.category, rule.action, rule.permission, line)
                 return
             }
         }
+    }
+
+    private suspend fun recordIdentifier(def: IdentifierDefinition, line: String) {
+        val action = def.displayName
+        if (repository.isDuplicate(packageName, action, line, sinceMs = 1000)) return
+
+        repository.insert(
+            CaptureEvent(
+                targetPackage = packageName,
+                category = AccessCategory.IDENTIFIER,
+                source = EventSource.LOGCAT,
+                action = action,
+                permission = def.permission,
+                requestDetails = buildIdentifierRequest(def),
+                responseDetails = extractResponse(line),
+                rawData = line.trim(),
+                processId = pid,
+                identifierName = def.id,
+                identifierGroup = def.group.name
+            )
+        )
+    }
+
+    private suspend fun recordGeneric(
+        category: AccessCategory,
+        action: String,
+        permission: String?,
+        line: String
+    ) {
+        if (repository.isDuplicate(packageName, action, line, sinceMs = 1000)) return
+        repository.insert(
+            CaptureEvent(
+                targetPackage = packageName,
+                category = category,
+                source = EventSource.LOGCAT,
+                action = action,
+                permission = permission,
+                requestDetails = extractRequest(line) ?: "Запрос через $action",
+                responseDetails = extractResponse(line),
+                rawData = line.trim(),
+                processId = pid
+            )
+        )
+    }
+
+    private fun buildIdentifierRequest(def: IdentifierDefinition): String {
+        val parts = buildList {
+            def.api?.let { add("API: $it") }
+            def.systemProperty?.let { add("Property: $it") }
+            def.filePath?.let { add("File: $it") }
+            def.description?.let { add(it) }
+        }
+        return parts.joinToString(" | ").ifEmpty { "Доступ к ${def.displayName}" }
     }
 
     private fun extractRequest(line: String): String? {
@@ -125,7 +159,8 @@ class LogcatMonitor(
             Pattern.compile("result(?:=|:)?\\s*(.+)", Pattern.CASE_INSENSITIVE),
             Pattern.compile("return(?:ed|ing)?:\\s*(.+)", Pattern.CASE_INSENSITIVE),
             Pattern.compile("granted(?:=|:)?\\s*(\\w+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("denied(?:=|:)?\\s*(\\w+)", Pattern.CASE_INSENSITIVE)
+            Pattern.compile("denied(?:=|:)?\\s*(\\w+)", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("value(?:=|:)?\\s*(.+)", Pattern.CASE_INSENSITIVE)
         )
         for (p in patterns) {
             val m = p.matcher(line)

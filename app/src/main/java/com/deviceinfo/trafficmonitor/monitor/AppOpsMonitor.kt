@@ -4,7 +4,7 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
-import com.deviceinfo.trafficmonitor.root.RootShell
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -58,6 +58,16 @@ class AppOpsMonitor(
         "READ_MEDIA_AUDIO" to AccessCategory.STORAGE
     )
 
+    private val opIdentifierMap = mapOf(
+        "READ_DEVICE_IDENTIFIERS" to "build.serial",
+        "READ_PHONE_STATE" to "tel.imei",
+        "READ_PHONE_NUMBERS" to "tel.line1_number",
+        "GET_ACCOUNTS" to "account.list",
+        "WIFI_SCAN" to "wifi.scan_results",
+        "BLUETOOTH_CONNECT" to "bt.local_mac",
+        "BLUETOOTH_SCAN" to "bt.local_mac"
+    )
+
     fun start() {
         job = scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -95,13 +105,15 @@ class AppOpsMonitor(
                 val stateKey = "$currentOp:$accessTime"
                 if (lastState.put(stateKey, accessTime) == null) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
+                    val identifierId = opIdentifierMap[currentOp]
                     record(
                         category = category,
                         action = currentOp,
                         permission = currentOp,
                         requestDetails = "AppOps: доступ к $currentOp",
                         responseDetails = "Статус: разрешено, время=$accessTime",
-                        raw = line.trim()
+                        raw = line.trim(),
+                        identifierId = identifierId
                     )
                 }
             }
@@ -130,19 +142,23 @@ class AppOpsMonitor(
         permission: String?,
         requestDetails: String?,
         responseDetails: String?,
-        raw: String
+        raw: String,
+        identifierId: String? = null
     ) {
         if (repository.isDuplicate(packageName, action, raw)) return
+        val def = identifierId?.let { IdentifierCatalog.findById(it) }
         repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
-                category = category,
+                category = if (def != null) AccessCategory.IDENTIFIER else category,
                 source = EventSource.APPOPS,
-                action = action,
+                action = def?.displayName ?: action,
                 permission = permission,
                 requestDetails = requestDetails,
                 responseDetails = responseDetails,
-                rawData = raw
+                rawData = raw,
+                identifierName = def?.id,
+                identifierGroup = def?.group?.name
             )
         )
     }

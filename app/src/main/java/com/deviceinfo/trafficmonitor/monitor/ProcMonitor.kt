@@ -4,6 +4,7 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierMatcher
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +51,12 @@ class ProcMonitor(
             if (knownFds.put(key, target) != null) continue
 
             val category = classifyPath(target)
-            if (category == AccessCategory.OTHER) continue
+            if (category == AccessCategory.OTHER) {
+                IdentifierMatcher.matchPath(target)?.let { def ->
+                    recordIdentifier(def, line.trim(), target)
+                }
+                continue
+            }
 
             record(
                 category = category,
@@ -127,6 +133,29 @@ class ProcMonitor(
         "09" -> "LISTEN"
         "0A" -> "CLOSING"
         else -> "UNKNOWN($hex)"
+    }
+
+    private suspend fun recordIdentifier(
+        def: com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition,
+        raw: String,
+        path: String
+    ) {
+        if (repository.isDuplicate(packageName, def.displayName, raw)) return
+        repository.insert(
+            CaptureEvent(
+                targetPackage = packageName,
+                category = AccessCategory.IDENTIFIER,
+                source = EventSource.PROC,
+                action = def.displayName,
+                permission = def.permission,
+                requestDetails = "Открытый дескриптор: $path",
+                responseDetails = def.api?.let { "API: $it" },
+                rawData = raw,
+                processId = pid,
+                identifierName = def.id,
+                identifierGroup = def.group.name
+            )
+        )
     }
 
     private suspend fun record(
