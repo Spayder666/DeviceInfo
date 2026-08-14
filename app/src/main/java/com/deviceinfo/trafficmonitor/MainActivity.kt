@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
@@ -31,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -55,6 +58,8 @@ import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.ui.theme.Accent
 import com.deviceinfo.trafficmonitor.ui.theme.Danger
 import com.deviceinfo.trafficmonitor.ui.theme.SurfaceDeep
+import com.deviceinfo.trafficmonitor.ui.theme.SurfaceLift
+import com.deviceinfo.trafficmonitor.ui.theme.TextMuted
 import com.deviceinfo.trafficmonitor.ui.theme.TrafficMonitorTheme
 import com.deviceinfo.trafficmonitor.viewmodel.MainViewModel
 
@@ -97,11 +102,19 @@ fun MainScreen(viewModel: MainViewModel, onAppSelected: (InstalledApp) -> Unit) 
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Radar, null, tint = Accent, modifier = Modifier.size(20.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Accent.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Outlined.Radar, null, tint = Accent, modifier = Modifier.size(16.dp))
+                        }
                         Spacer(Modifier.width(8.dp))
                         Column {
                             Text("Access Monitor", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                            Text("${apps.size} приложений", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${apps.size} приложений", fontSize = 11.sp, color = TextMuted)
                         }
                     }
                 },
@@ -118,24 +131,37 @@ fun MainScreen(viewModel: MainViewModel, onAppSelected: (InstalledApp) -> Unit) 
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 6.dp)
                     .height(48.dp),
-                placeholder = { Text("Поиск", fontSize = 13.sp) },
-                leadingIcon = { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(18.dp)) },
+                placeholder = { Text("Поиск приложения", fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(18.dp), tint = TextMuted) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setSearchQuery("") }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Outlined.Close, "Очистить", modifier = Modifier.size(16.dp), tint = TextMuted)
+                        }
+                    }
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Accent,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    focusedContainerColor = SurfaceLift,
+                    unfocusedContainerColor = SurfaceLift
                 )
             )
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
                 }
+            } else if (apps.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Ничего не найдено", color = TextMuted, fontSize = 13.sp)
+                }
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
                     items(apps, key = { it.packageName }) { app ->
                         AppRow(app, isRootAvailable) { onAppSelected(app) }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
                     }
                 }
             }
@@ -152,18 +178,18 @@ private fun RootChip(ok: Boolean) {
             .padding(horizontal = 12.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             if (ok) Icons.Outlined.Security else Icons.Outlined.WarningAmber,
             null,
             tint = color,
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(15.dp)
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            if (ok) "Root активен · GPS, камера, SIM, HTTPS" else "Нужен root (su)",
+            if (ok) "Root · GPS, камера, SIM, HTTPS" else "Нужен root (su)",
             fontSize = 12.sp,
             color = color,
             fontWeight = FontWeight.Medium
@@ -186,11 +212,12 @@ private fun AppRow(app: InstalledApp, enabled: Boolean, onClick: () -> Unit) {
                 contentDescription = null,
                 modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
             )
-        } ?: Box(Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+        } ?: Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceLift))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(app.appName, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(app.packageName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(app.packageName, fontSize = 11.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        Icon(Icons.Outlined.ChevronRight, null, tint = TextMuted, modifier = Modifier.size(18.dp))
     }
 }

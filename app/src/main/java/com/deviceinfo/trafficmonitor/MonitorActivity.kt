@@ -6,13 +6,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -20,7 +23,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +55,7 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.export.ExportHelper
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.ui.CategoryFilterRow
+import com.deviceinfo.trafficmonitor.ui.EmptyMonitorHint
 import com.deviceinfo.trafficmonitor.ui.EventDetailSheet
 import com.deviceinfo.trafficmonitor.ui.EventRow
 import com.deviceinfo.trafficmonitor.ui.IdentifierGroupFilterRow
@@ -127,6 +131,7 @@ fun MonitorScreen(
     val selectedEvent by viewModel.selectedEvent.collectAsState()
     val eventCount by viewModel.eventCount.collectAsState()
     val categoryCounts by viewModel.categoryCounts.collectAsState()
+    val identifierGroupCounts by viewModel.identifierGroupCounts.collectAsState()
     val probeResult by viewModel.probeResult.collectAsState()
     val isProbing by viewModel.isProbing.collectAsState()
     val exportResult by viewModel.exportResult.collectAsState()
@@ -161,9 +166,24 @@ fun MonitorScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(appName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Accent)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(appName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                         Text(
-                            "$eventCount · ${fridaStatusLabel(fridaStatus)}${if (mitmActive) " · MITM" else ""}",
+                            buildString {
+                                append(eventCount)
+                                append(" соб.")
+                                append(" · ")
+                                append(fridaStatusLabel(fridaStatus))
+                                if (mitmActive) append(" · MITM")
+                            },
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -197,6 +217,7 @@ fun MonitorScreen(
             if (selectedCategory == AccessCategory.IDENTIFIER || selectedIdentifierGroup != null) {
                 IdentifierGroupFilterRow(
                     selected = selectedIdentifierGroup,
+                    counts = identifierGroupCounts,
                     onSelect = viewModel::setIdentifierGroupFilter
                 )
             }
@@ -211,12 +232,7 @@ fun MonitorScreen(
             )
             if (events.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Outlined.Sensors, null, tint = Accent, modifier = Modifier.size(36.dp))
-                        Spacer(Modifier.height(8.dp))
-                        Text("Пока тихо", fontWeight = FontWeight.Medium)
-                        Text("▶ запуск · Frida · MITM", style = MaterialTheme.typography.bodySmall)
-                    }
+                    EmptyMonitorHint()
                 }
             } else {
                 LazyColumn {

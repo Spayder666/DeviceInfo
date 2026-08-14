@@ -103,6 +103,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         .map { list -> list.groupingBy { it.category }.eachCount() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
+    val identifierGroupCounts: StateFlow<Map<String, Int>> = _allEvents
+        .map { list -> list.mapNotNull { it.identifierGroup }.groupingBy { it }.eachCount() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     private var observeJob: Job? = null
 
     fun init(packageName: String) {

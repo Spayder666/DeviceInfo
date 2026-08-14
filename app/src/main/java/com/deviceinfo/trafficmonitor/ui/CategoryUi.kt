@@ -1,17 +1,21 @@
 package com.deviceinfo.trafficmonitor.ui
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Bluetooth
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Contacts
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.InstallMobile
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Memory
@@ -26,6 +30,7 @@ import androidx.compose.material.icons.outlined.SimCard
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.material.icons.outlined.Wifi
@@ -33,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
 
 fun categoryColor(category: AccessCategory): Color = when (category) {
     AccessCategory.LOCATION -> Color(0xFF3DDC97)
@@ -140,6 +146,50 @@ fun sourceIcon(source: EventSource): ImageVector = when (source) {
     EventSource.STATSD -> Icons.Outlined.BarChart
     EventSource.EBPF -> Icons.Outlined.Hub
     EventSource.MITM -> Icons.Outlined.VpnKey
+}
+
+fun identifierGroupIcon(group: IdentifierGroup): ImageVector = when (group) {
+    IdentifierGroup.BUILD -> Icons.Outlined.Build
+    IdentifierGroup.OS_VERSION -> Icons.Outlined.Tune
+    IdentifierGroup.SYSTEM_PROPERTY -> Icons.Outlined.Settings
+    IdentifierGroup.SETTINGS -> Icons.Outlined.Tune
+    IdentifierGroup.TELEPHONY -> Icons.Outlined.SimCard
+    IdentifierGroup.SUBSCRIPTION -> Icons.Outlined.SimCard
+    IdentifierGroup.WIFI -> Icons.Outlined.Wifi
+    IdentifierGroup.BLUETOOTH -> Icons.Outlined.Bluetooth
+    IdentifierGroup.ADVERTISING -> Icons.Outlined.Fingerprint
+    IdentifierGroup.DRM -> Icons.Outlined.Lock
+    IdentifierGroup.INSTALL -> Icons.Outlined.InstallMobile
+    IdentifierGroup.ACCOUNT -> Icons.Outlined.AccountCircle
+    IdentifierGroup.CONTENT_PROVIDER -> Icons.Outlined.Storage
+    IdentifierGroup.PROC_SYS -> Icons.Outlined.Memory
+    IdentifierGroup.NETWORK -> Icons.Outlined.Language
+    IdentifierGroup.ENTERPRISE -> Icons.Outlined.Business
+    IdentifierGroup.OEM -> Icons.Outlined.Build
+    IdentifierGroup.ATTESTATION -> Icons.Outlined.VerifiedUser
+    IdentifierGroup.LOCATION -> Icons.Outlined.MyLocation
+}
+
+fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
+    IdentifierGroup.BUILD -> "Build"
+    IdentifierGroup.OS_VERSION -> "ОС"
+    IdentifierGroup.SYSTEM_PROPERTY -> "prop"
+    IdentifierGroup.SETTINGS -> "Settings"
+    IdentifierGroup.TELEPHONY -> "SIM"
+    IdentifierGroup.SUBSCRIPTION -> "eSIM"
+    IdentifierGroup.WIFI -> "Wi‑Fi"
+    IdentifierGroup.BLUETOOTH -> "BT"
+    IdentifierGroup.ADVERTISING -> "GAID"
+    IdentifierGroup.DRM -> "DRM"
+    IdentifierGroup.INSTALL -> "Пакет"
+    IdentifierGroup.ACCOUNT -> "Акк"
+    IdentifierGroup.CONTENT_PROVIDER -> "CP"
+    IdentifierGroup.PROC_SYS -> "/proc"
+    IdentifierGroup.NETWORK -> "Сеть"
+    IdentifierGroup.ENTERPRISE -> "MDM"
+    IdentifierGroup.OEM -> "OEM"
+    IdentifierGroup.ATTESTATION -> "Attest"
+    IdentifierGroup.LOCATION -> "GPS"
 }
 
 fun allIcon(): ImageVector = Icons.Outlined.Apps
