@@ -46,12 +46,14 @@ class ExtraLogcatMonitor(
         val loc = line.contains("location", ignoreCase = true) || line.contains("gps", ignoreCase = true)
         val security = Regex("(?i)RootBeer|SafetyNet|PlayIntegrity|IntegrityService|StandardIntegrity|MEETS_DEVICE|Magisk|Xposed|LSPosed|LSPatch|isRooted|frida-server|handleHookedMethod|Talsec|Shamiko|JailMonkey|CertificatePinner").containsMatchIn(line)
         val fraud = Regex("(?i)TMXProfiling|TrustDefender|ThreatMetrix|Tongdun|TrustDecision|Fingerprinter|SeonBuilder|ForterMobile|iovation|SmAntiFraud|siftscience|AppsFlyerLib").containsMatchIn(line)
-        if (!mentions && !radio && !loc && !sim && !security && !fraud) return
+        val browser = Regex("(?i)SafeBrowsing|CustomTabs|userAgentData|Sec-CH-UA|GeckoView|AwSettings|addJavascriptInterface|FingerprintJS|creepjs|getHighEntropyValues").containsMatchIn(line)
+        if (!mentions && !radio && !loc && !sim && !security && !fraud && !browser) return
         if (!mentions && radio && !sim && !line.contains("imei", ignoreCase = true) &&
             !line.contains("cell", ignoreCase = true)
         ) return
 
         val category = when {
+            browser -> AccessCategory.IDENTIFIER
             fraud -> AccessCategory.IDENTIFIER
             security -> AccessCategory.SECURITY
             loc -> AccessCategory.LOCATION

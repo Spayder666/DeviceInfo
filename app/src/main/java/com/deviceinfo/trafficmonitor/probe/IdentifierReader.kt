@@ -32,13 +32,15 @@ object IdentifierReader {
             id?.startsWith("sensor.") == true -> readSensors()
             id?.startsWith("clipboard.") == true -> readClipboard()
             id?.startsWith("fcm.") == true || id?.startsWith("cred.") == true ||
-                id?.startsWith("play.") == true || id == "webview.ua" ||
+                id?.startsWith("play.") == true ||
                 id?.startsWith("ad.") == true || id?.startsWith("oem.") == true ||
                 id?.startsWith("fido.") == true || id == "health.connect" ||
                 id?.startsWith("tel.eid") == true || id == "install.source" ||
                 id == "install.referrer" -> readFromCaptured(event)
             id?.startsWith("pkg.") == true || id?.startsWith("perm.") == true ->
                 readSystemApi(event.targetPackage) + readFromCaptured(event)
+            id?.startsWith("browser.") == true || id == "webview.ua" || id == "hw.webview_pkg" ->
+                readBrowser(event) + readFromCaptured(event)
             id?.startsWith("fraud.") == true || id?.startsWith("settings.") == true &&
                 id != "settings.android_id" && id != "settings.device_name" ->
                 readFraudFingerprint(event) + readFromCaptured(event)
@@ -82,6 +84,7 @@ object IdentifierReader {
             IdentifierGroup.PERSONAL -> readContacts() + readSms() + readCalendar()
             IdentifierGroup.HARDWARE -> readCamera() + readMicrophone() + readSensors() + readClipboard()
             IdentifierGroup.FRAUD -> readFraudFingerprint(event)
+            IdentifierGroup.BROWSER -> readBrowser(event)
             else -> emptyList()
         }
         return buildList {
@@ -734,6 +737,42 @@ object IdentifierReader {
                         IdentifierValue("settings.accessibility", "a11y", a11y)
                     )
                 )
+            }
+            addAll(readFromCaptured(event))
+        }.distinctBy { it.id + it.value }
+    }
+
+    private fun readBrowser(event: CaptureEvent): List<IdentifierValue> {
+        val pkg = event.targetPackage
+        val wvPkg = RootShell.execAndRead(
+            "dumpsys webviewupdate 2>/dev/null | head -n 20",
+            timeoutSec = 6
+        ).trim()
+        val ua = RootShell.execAndRead(
+            "dumpsys package com.google.android.webview 2>/dev/null | grep -E 'versionName|versionCode' | head -n 4",
+            timeoutSec = 6
+        ).trim()
+        val impl = firstNonEmpty(
+            getprop("persist.sys.webview.provider"),
+            getprop("ro.webview.provider")
+        )
+        return buildList {
+            IdentifierCatalog.findById(event.identifierName.orEmpty())?.let { def ->
+                readDefinition(def)?.let { add(it) }
+            }
+            addAll(
+                listOfNotEmpty(
+                    IdentifierValue("hw.webview_pkg", "WebView update", wvPkg.take(400)),
+                    IdentifierValue("browser.default_ua", "WebView package", ua.take(200)),
+                    IdentifierValue("browser.feature", "webview provider", impl.orEmpty())
+                )
+            )
+            if (pkg.isNotBlank()) {
+                val js = RootShell.execAndRead(
+                    "dumpsys webviewupdate 2>/dev/null | grep -i -F ${RootShell.shellQuote(pkg)} | head -n 6",
+                    timeoutSec = 6
+                ).trim()
+                if (js.isNotBlank()) add(IdentifierValue("net.webview", "webview mentions", js.take(200)))
             }
             addAll(readFromCaptured(event))
         }.distinctBy { it.id + it.value }

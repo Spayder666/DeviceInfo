@@ -30,7 +30,8 @@ enum class IdentifierGroup(val label: String) {
     PERSONAL("Контакты / SMS / календарь"),
     HARDWARE("Камера / датчики / экран / NFC"),
     IDENTITY("Токены / credentials / FCM"),
-    FRAUD("Антифрод / fingerprint")
+    FRAUD("Антифрод / fingerprint"),
+    BROWSER("Браузер / WebView / JS")
 }
 
 data class IdentifierDefinition(
@@ -75,6 +76,7 @@ object IdentifierCatalog {
         addAll(packageQueryIdentifiers())
         addAll(extraRequestIdentifiers())
         addAll(fraudFingerprintIdentifiers())
+        addAll(browserIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -576,6 +578,76 @@ object IdentifierCatalog {
         id("net.stun", "STUN / WebRTC real IP", IdentifierGroup.NETWORK, "PeerConnection / STUN binding", logcat = listOf("PeerConnection", "stun:", "iceCandidate", "RTCPeerConnection"))
     )
 
+    /**
+     * Что браузер / WebView / JS-fingerprint может запросить.
+     * Источники: AOSP android.webkit.*, androidx.webkit, Chromium AwSettings,
+     * Custom Tabs/TWA, FingerprintJS (browser), CreepJS.
+     */
+    private fun browserIdentifiers() = listOf(
+        id("browser.default_ua", "Default User-Agent", IdentifierGroup.BROWSER, "WebSettings.getDefaultUserAgent", logcat = listOf("getDefaultUserAgent")),
+        id("browser.ua_meta", "UA Client Hints metadata", IdentifierGroup.BROWSER, "WebSettingsCompat.getUserAgentMetadata / AwUserAgentMetadata", logcat = listOf("UserAgentMetadata", "setUserAgentMetadata", "AwUserAgentMetadata")),
+        id("browser.ch_ua", "Sec-CH-UA / userAgentData", IdentifierGroup.BROWSER, "navigator.userAgentData.getHighEntropyValues / Sec-CH-UA", logcat = listOf("Sec-CH-UA", "userAgentData", "getHighEntropyValues")),
+        id("browser.safe_browsing", "Safe Browsing", IdentifierGroup.BROWSER, "WebView.startSafeBrowsing / setSafeBrowsingEnabled", logcat = listOf("startSafeBrowsing", "setSafeBrowsingEnabled", "SafeBrowsing")),
+        id("browser.custom_tabs", "Chrome Custom Tabs", IdentifierGroup.BROWSER, "CustomTabsIntent / CustomTabsClient.bindCustomTabsService", logcat = listOf("CustomTabsIntent", "CustomTabsClient", "CustomTabsSession", "bindCustomTabsService")),
+        id("browser.twa", "Trusted Web Activity", IdentifierGroup.BROWSER, "TrustedWebUtils / TwaLauncher", logcat = listOf("TrustedWebUtils", "TwaLauncher", "TrustedWebActivity")),
+        id("browser.js_interface", "addJavascriptInterface", IdentifierGroup.BROWSER, "WebView.addJavascriptInterface", logcat = listOf("addJavascriptInterface", "removeJavascriptInterface")),
+        id("browser.web_message", "WebMessage / JS bridge", IdentifierGroup.BROWSER, "WebViewCompat.addWebMessageListener / postWebMessage", logcat = listOf("addWebMessageListener", "postWebMessage", "createWebMessageChannel")),
+        id("browser.geolocation_js", "WebView geolocation", IdentifierGroup.BROWSER, "WebChromeClient.onGeolocationPermissionsShowPrompt / setGeolocationEnabled", logcat = listOf("onGeolocationPermissionsShowPrompt", "setGeolocationEnabled")),
+        id("browser.permission_req", "WebView PermissionRequest", IdentifierGroup.BROWSER, "WebChromeClient.onPermissionRequest", logcat = listOf("onPermissionRequest", "RESOURCE_VIDEO_CAPTURE", "RESOURCE_AUDIO_CAPTURE")),
+        id("browser.eme", "EME / protected media ID", IdentifierGroup.BROWSER, "PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID / requestMediaKeySystemAccess", logcat = listOf("RESOURCE_PROTECTED_MEDIA_ID", "requestMediaKeySystemAccess", "MediaKeys")),
+        id("browser.file_chooser", "WebView file chooser", IdentifierGroup.BROWSER, "WebChromeClient.onShowFileChooser", logcat = listOf("onShowFileChooser", "FileChooserParams")),
+        id("browser.ssl_error", "WebView SSL error", IdentifierGroup.BROWSER, "WebViewClient.onReceivedSslError", logcat = listOf("onReceivedSslError", "SslErrorHandler")),
+        id("browser.client_cert", "WebView client cert", IdentifierGroup.BROWSER, "WebViewClient.onReceivedClientCertRequest", logcat = listOf("onReceivedClientCertRequest", "ClientCertRequest")),
+        id("browser.http_auth", "WebView HTTP auth", IdentifierGroup.BROWSER, "WebViewClient.onReceivedHttpAuthRequest", logcat = listOf("onReceivedHttpAuthRequest", "HttpAuthHandler")),
+        id("browser.intercept", "shouldInterceptRequest", IdentifierGroup.BROWSER, "WebViewClient.shouldInterceptRequest", logcat = listOf("shouldInterceptRequest")),
+        id("browser.web_storage", "WebStorage / origins", IdentifierGroup.BROWSER, "WebStorage.getOrigins / deleteAllData", logcat = listOf("WebStorage", "getOrigins")),
+        id("browser.web_db", "WebViewDatabase", IdentifierGroup.BROWSER, "WebViewDatabase.getInstance", logcat = listOf("WebViewDatabase")),
+        id("browser.service_worker", "ServiceWorkerController", IdentifierGroup.BROWSER, "ServiceWorkerController.getInstance", logcat = listOf("ServiceWorkerController", "ServiceWorkerClient")),
+        id("browser.cookie_3p", "Third-party cookies", IdentifierGroup.BROWSER, "CookieManager.setAcceptThirdPartyCookies", logcat = listOf("setAcceptThirdPartyCookies", "acceptThirdPartyCookies")),
+        id("browser.debug", "WebView remote debug", IdentifierGroup.BROWSER, "WebView.setWebContentsDebuggingEnabled", logcat = listOf("setWebContentsDebuggingEnabled", "webContentsDebugging")),
+        id("browser.proxy", "WebView proxy override", IdentifierGroup.BROWSER, "ProxyController.setProxyOverride", logcat = listOf("ProxyController", "setProxyOverride")),
+        id("browser.profile", "WebView Profile", IdentifierGroup.BROWSER, "androidx.webkit.Profile / ProfileStore", logcat = listOf("ProfileStore", "webkit.Profile")),
+        id("browser.variations", "Chrome Variations header", IdentifierGroup.BROWSER, "WebViewCompat.getVariationsHeader", logcat = listOf("getVariationsHeader", "X-Client-Data")),
+        id("browser.xrw", "X-Requested-With (package)", IdentifierGroup.BROWSER, "X-Requested-With header", logcat = listOf("X-Requested-With", "RequestedWithHeader")),
+        id("browser.multiprocess", "WebView multiprocess", IdentifierGroup.BROWSER, "WebView.isMultiProcessEnabled / getWebViewClassLoader", logcat = listOf("isMultiProcessEnabled", "getWebViewClassLoader")),
+        id("browser.feature", "WebViewFeature", IdentifierGroup.BROWSER, "WebViewFeature.isFeatureSupported", logcat = listOf("WebViewFeature", "isFeatureSupported")),
+        id("browser.dark", "WebView force dark", IdentifierGroup.BROWSER, "WebSettingsCompat.setForceDark / setAlgorithmicDarkeningAllowed", logcat = listOf("setForceDark", "setAlgorithmicDarkeningAllowed")),
+        id("browser.dom_storage", "DOM storage enabled", IdentifierGroup.BROWSER, "WebSettings.setDomStorageEnabled", logcat = listOf("setDomStorageEnabled", "getDomStorageEnabled")),
+        id("browser.fonts_css", "WebSettings font families", IdentifierGroup.BROWSER, "WebSettings.getStandardFontFamily / getSansSerifFontFamily", logcat = listOf("getStandardFontFamily", "getFixedFontFamily", "getSansSerifFontFamily")),
+        id("browser.intent", "ACTION_VIEW http(s)", IdentifierGroup.BROWSER, "Intent.ACTION_VIEW browser resolve", logcat = listOf("CustomTabsIntent", "startActivity.*https")),
+        id("browser.geckoview", "GeckoView / Firefox", IdentifierGroup.BROWSER, "org.mozilla.geckoview.GeckoRuntime", logcat = listOf("GeckoRuntime", "GeckoSession", "geckoview")),
+        id("browser.chromium_aw", "Chromium AwSettings", IdentifierGroup.BROWSER, "org.chromium.android_webview.AwSettings", logcat = listOf("AwSettings", "AwContents", "AwCookieManager")),
+        id("browser.fp_lib", "FingerprintJS / CreepJS / ClientJS", IdentifierGroup.BROWSER, "FingerprintJS / creepjs / ClientJS / Thumbmark", logcat = listOf("FingerprintJS", "fingerprintjs", "creepjs", "ClientJS", "ThumbmarkJS")),
+        id("browser.canvas", "Canvas 2D fingerprint", IdentifierGroup.BROWSER, "canvas.toDataURL / getImageData / OffscreenCanvas", logcat = listOf("toDataURL", "OffscreenCanvas")),
+        id("browser.webgl", "WebGL / GPU params", IdentifierGroup.BROWSER, "WEBGL_debug_renderer_info / getSupportedExtensions", logcat = listOf("WEBGL_debug_renderer_info", "getSupportedExtensions")),
+        id("browser.audio", "Web Audio fingerprint", IdentifierGroup.BROWSER, "AudioContext / OfflineAudioContext", logcat = listOf("OfflineAudioContext", "createDynamicsCompressor")),
+        id("browser.fonts", "JS font enumeration", IdentifierGroup.BROWSER, "queryLocalFonts / measureText / offsetWidth", logcat = listOf("queryLocalFonts", "document.fonts")),
+        id("browser.speech", "speechSynthesis voices", IdentifierGroup.BROWSER, "speechSynthesis.getVoices", logcat = listOf("speechSynthesis", "getVoices")),
+        id("browser.math", "Math fingerprint", IdentifierGroup.BROWSER, "Math.tan/sinh/expm1", logcat = listOf("Math.sinh", "math fingerprint")),
+        id("browser.navigator", "navigator platform/vendor/plugins", IdentifierGroup.BROWSER, "navigator.platform / vendor / plugins / mimeTypes", logcat = listOf("navigator.platform", "navigator.plugins", "pdfViewerEnabled")),
+        id("browser.ua_data", "navigator.userAgentData", IdentifierGroup.BROWSER, "navigator.userAgentData.brands / mobile / platform", logcat = listOf("userAgentData")),
+        id("browser.hardware_concurrency", "navigator.hardwareConcurrency", IdentifierGroup.BROWSER, "navigator.hardwareConcurrency", logcat = listOf("hardwareConcurrency")),
+        id("browser.device_memory", "navigator.deviceMemory", IdentifierGroup.BROWSER, "navigator.deviceMemory", logcat = listOf("deviceMemory")),
+        id("browser.media_devices", "enumerateDevices / getUserMedia", IdentifierGroup.BROWSER, "navigator.mediaDevices.enumerateDevices", logcat = listOf("enumerateDevices", "getUserMedia", "mediaDevices")),
+        id("browser.connection", "Network Information API", IdentifierGroup.BROWSER, "navigator.connection.effectiveType / downlink / rtt", logcat = listOf("navigator.connection")),
+        id("browser.battery_js", "Battery Status API", IdentifierGroup.BROWSER, "navigator.getBattery", logcat = listOf("navigator.getBattery")),
+        id("browser.screen_js", "screen / devicePixelRatio", IdentifierGroup.BROWSER, "screen.width / colorDepth / devicePixelRatio", logcat = listOf("devicePixelRatio", "colorDepth", "pixelDepth")),
+        id("browser.css_media", "CSS media queries", IdentifierGroup.BROWSER, "matchMedia prefers-color-scheme / reduced-motion / hdr / gamut", logcat = listOf("prefers-color-scheme", "prefers-reduced-motion", "color-gamut", "dynamic-range")),
+        id("browser.intl", "Intl / timezone JS", IdentifierGroup.BROWSER, "Intl.DateTimeFormat.resolvedOptions", logcat = listOf("resolvedOptions", "DateTimeFormat")),
+        id("browser.languages", "navigator.languages", IdentifierGroup.BROWSER, "navigator.languages / language", logcat = listOf("navigator.languages")),
+        id("browser.webdriver", "navigator.webdriver / headless", IdentifierGroup.BROWSER, "navigator.webdriver / HeadlessChrome / domAutomation", logcat = listOf("navigator.webdriver", "HeadlessChrome", "domAutomation")),
+        id("browser.permissions_js", "Permissions API", IdentifierGroup.BROWSER, "navigator.permissions.query", logcat = listOf("permissions.query")),
+        id("browser.storage_js", "localStorage / indexedDB / sessionStorage", IdentifierGroup.BROWSER, "indexedDB.open / localStorage / openDatabase", logcat = listOf("indexedDB", "localStorage", "sessionStorage", "openDatabase")),
+        id("browser.storage_est", "StorageManager.estimate", IdentifierGroup.BROWSER, "navigator.storage.estimate / persist", logcat = listOf("storage.estimate", "navigator.storage")),
+        id("browser.webgpu", "WebGPU adapter", IdentifierGroup.BROWSER, "navigator.gpu.requestAdapter", logcat = listOf("navigator.gpu", "requestAdapter", "WebGPU")),
+        id("browser.worker", "Worker / ServiceWorker JS", IdentifierGroup.BROWSER, "Worker / SharedWorker / serviceWorker.register", logcat = listOf("serviceWorker.register", "SharedWorker")),
+        id("browser.domrect", "DOMRect / getClientRects", IdentifierGroup.BROWSER, "getClientRects / getBoundingClientRect", logcat = listOf("getClientRects")),
+        id("browser.notification_js", "Notification.permission", IdentifierGroup.BROWSER, "Notification.requestPermission", logcat = listOf("Notification.requestPermission")),
+        id("browser.webauthn_js", "WebAuthn in page", IdentifierGroup.BROWSER, "navigator.credentials.create / get", logcat = listOf("navigator.credentials", "PublicKeyCredential")),
+        id("browser.topics_js", "Topics / Privacy Sandbox JS", IdentifierGroup.BROWSER, "document.browsingTopics / sharedStorage", logcat = listOf("browsingTopics", "sharedStorage", "privateAggregation")),
+        id("browser.performance", "performance.memory / now", IdentifierGroup.BROWSER, "performance.memory / performance.now", logcat = listOf("performance.memory", "jsHeapSizeLimit"))
+    )
+
     // --- helpers ---
 
     private fun id(
@@ -620,7 +692,7 @@ fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {
         id.startsWith("storage.") -> AccessCategory.STORAGE
         else -> AccessCategory.IDENTIFIER
     }
-    IdentifierGroup.ACCOUNT, IdentifierGroup.IDENTITY -> AccessCategory.IDENTIFIER
+    IdentifierGroup.ACCOUNT, IdentifierGroup.IDENTITY, IdentifierGroup.BROWSER -> AccessCategory.IDENTIFIER
     IdentifierGroup.PERSONAL -> when {
         id.startsWith("sms.") || id.startsWith("mms.") -> AccessCategory.SMS
         id.startsWith("calendar.") -> AccessCategory.CALENDAR
@@ -662,6 +734,7 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id.startsWith("hw.") || id.startsWith("oem.") || id.startsWith("dpm.") ||
                 id.startsWith("user.") || id.startsWith("role.") || id.startsWith("notify.") ->
                 AccessCategory.SYSTEM_API
+            id.startsWith("browser.") -> AccessCategory.IDENTIFIER
             id.startsWith("fraud.") -> when {
                 id.contains("clone") || id.contains("dual") || id.contains("mock") ||
                     id.contains("vpn_apps") || id.contains("auto_click") || id.contains("work_profile") ->

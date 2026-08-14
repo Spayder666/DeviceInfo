@@ -72,6 +72,44 @@ function writeOnce(identifierId, action, request, response, permission) {
   writeEvent(identifierId, action, request, response, permission);
 }
 
+function classifyBrowserJs(script) {
+  var s = String(script || '');
+  if (!s) return '';
+  if (/FingerprintJS|fingerprintjs|creepjs|ClientJS|ThumbmarkJS|getFingerprint\(/i.test(s)) return 'browser.fp_lib';
+  if (/toDataURL|getImageData|OffscreenCanvas/i.test(s)) return 'browser.canvas';
+  if (/WEBGL_debug_renderer_info|UNMASKED_VENDOR|UNMASKED_RENDERER|getSupportedExtensions|webgl/i.test(s)) return 'browser.webgl';
+  if (/OfflineAudioContext|AudioContext|createOscillator|createDynamicsCompressor/i.test(s)) return 'browser.audio';
+  if (/queryLocalFonts|document\.fonts|offsetWidth.{0,40}font|measureText/i.test(s)) return 'browser.fonts';
+  if (/speechSynthesis|getVoices/i.test(s)) return 'browser.speech';
+  if (/userAgentData|getHighEntropyValues|Sec-CH-UA/i.test(s)) return 'browser.ch_ua';
+  if (/hardwareConcurrency/i.test(s)) return 'browser.hardware_concurrency';
+  if (/deviceMemory/i.test(s)) return 'browser.device_memory';
+  if (/enumerateDevices|getUserMedia|mediaDevices/i.test(s)) return 'browser.media_devices';
+  if (/RTCPeerConnection|iceCandidate|stun:/i.test(s)) return 'net.stun';
+  if (/indexedDB|localStorage|sessionStorage|openDatabase/i.test(s)) return 'browser.storage_js';
+  if (/storage\.estimate|navigator\.storage/i.test(s)) return 'browser.storage_est';
+  if (/matchMedia|prefers-color-scheme|prefers-reduced-motion|color-gamut|dynamic-range/i.test(s)) return 'browser.css_media';
+  if (/Intl\.DateTimeFormat|resolvedOptions/i.test(s)) return 'browser.intl';
+  if (/navigator\.languages/i.test(s)) return 'browser.languages';
+  if (/webdriver|HeadlessChrome|domAutomation/i.test(s)) return 'browser.webdriver';
+  if (/permissions\.query/i.test(s)) return 'browser.permissions_js';
+  if (/navigator\.connection|effectiveType/i.test(s)) return 'browser.connection';
+  if (/getBattery/i.test(s)) return 'browser.battery_js';
+  if (/navigator\.gpu|requestAdapter|WebGPU/i.test(s)) return 'browser.webgpu';
+  if (/devicePixelRatio|colorDepth|pixelDepth|screen\.(width|height)/i.test(s)) return 'browser.screen_js';
+  if (/navigator\.(platform|vendor|plugins|mimeTypes|pdfViewerEnabled)/i.test(s)) return 'browser.navigator';
+  if (/Math\.(tan|sinh|cosh|expm1)/i.test(s)) return 'browser.math';
+  if (/getClientRects/i.test(s)) return 'browser.domrect';
+  if (/Worker\(|SharedWorker|serviceWorker\.register/i.test(s)) return 'browser.worker';
+  if (/Notification\.requestPermission/i.test(s)) return 'browser.notification_js';
+  if (/requestMediaKeySystemAccess|MediaKeys|PROTECTED_MEDIA/i.test(s)) return 'browser.eme';
+  if (/navigator\.credentials|PublicKeyCredential/i.test(s)) return 'browser.webauthn_js';
+  if (/browsingTopics|sharedStorage|privateAggregation/i.test(s)) return 'browser.topics_js';
+  if (/performance\.memory|jsHeapSizeLimit/i.test(s)) return 'browser.performance';
+  if (/addJavascriptInterface|evaluateJavascript/i.test(s)) return 'browser.js_interface';
+  return '';
+}
+
 function classifyUri(uri) {
   var u = String(uri || '').toLowerCase();
   if (u.indexOf('contacts') >= 0) return 'cp.contacts';
@@ -1017,10 +1055,14 @@ function hookWebView() {
       };
     });
     try {
-      WV.evaluateJavascript.implementation = function (script, cb) {
-        writeEvent('net.webview', 'WebView.evaluateJavascript', safeStr(script).substring(0, 200), '', null);
-        return this.evaluateJavascript(script, cb);
-      };
+      WV.evaluateJavascript.overloads.forEach(function (overload) {
+        overload.implementation = function () {
+          var script = safeStr(arguments[0]);
+          var id = classifyBrowserJs(script) || 'net.webview';
+          writeReq(id, 'WebView.evaluateJavascript', script.substring(0, 180), '', null);
+          return overload.apply(this, arguments);
+        };
+      });
     } catch (e) {}
     try {
       WV.loadDataWithBaseURL.overloads.forEach(function (overload) {
@@ -2557,20 +2599,6 @@ function hookFraudFingerprint() {
     };
   } catch (e) {}
   try {
-    var WV = Java.use('android.webkit.WebView');
-    WV.evaluateJavascript.overloads.forEach(function (overload) {
-      overload.implementation = function () {
-        var script = safeStr(arguments[0]);
-        var id = 'net.webview';
-        if (/toDataURL|getImageData|canvas/i.test(script)) id = 'fraud.canvas';
-        else if (/UNMASKED|webgl|getParameter/i.test(script)) id = 'fraud.webgl';
-        else if (/AudioContext|createOscillator/i.test(script)) id = 'fraud.audio_fp';
-        writeReq(id, 'WebView.evaluateJavascript', script.substring(0, 180), '', null);
-        return overload.apply(this, arguments);
-      };
-    });
-  } catch (e) {}
-  try {
     var AM2 = Java.use('android.app.ActivityManager');
     AM2.getDeviceConfigurationInfo.implementation = function () {
       var r = this.getDeviceConfigurationInfo();
@@ -2602,6 +2630,85 @@ function hookFraudSdks() {
   hookAny('com.incognia.Incognia', 'fraud.incognia', ['init', 'setAccountId'], null);
   hookAny('com.biocatch.client.android.sdk.BioCatch', 'fraud.biocatch', ['start', 'changeContext'], null);
   hookAny('com.sumsub.sns.core.SNSMobileSDK', 'fraud.sumsub', ['init', 'launch'], null);
+}
+
+function hookBrowserApis() {
+  hookAny('android.webkit.WebView', 'browser.js_interface', ['addJavascriptInterface', 'removeJavascriptInterface'], null);
+  hookAny('android.webkit.WebView', 'browser.debug', ['setWebContentsDebuggingEnabled'], null);
+  hookAny('android.webkit.WebView', 'browser.safe_browsing', ['startSafeBrowsing', 'setSafeBrowsingWhitelist'], null);
+  hookAny('android.webkit.WebView', 'browser.multiprocess', ['isMultiProcessEnabled', 'getWebViewClassLoader'], null);
+  hookAny('android.webkit.WebView', 'hw.webview_pkg', ['getCurrentWebViewPackage'], null);
+  hookAny('android.webkit.WebView', 'browser.web_message', ['postWebMessage', 'createWebMessageChannel'], null);
+  hookAny('android.webkit.WebSettings', 'browser.default_ua', ['getDefaultUserAgent', 'setUserAgentString'], null);
+  hookAny('android.webkit.WebSettings', 'browser.dom_storage', ['setDomStorageEnabled', 'getDomStorageEnabled', 'setDatabaseEnabled'], null);
+  hookAny('android.webkit.WebSettings', 'browser.geolocation_js', ['setGeolocationEnabled', 'getGeolocationEnabled'], null);
+  hookAny('android.webkit.WebSettings', 'browser.fonts_css', ['getStandardFontFamily', 'getFixedFontFamily', 'getSansSerifFontFamily', 'getSerifFontFamily', 'getCursiveFontFamily'], null);
+  hookAny('android.webkit.CookieManager', 'browser.cookie_3p', ['setAcceptThirdPartyCookies', 'acceptThirdPartyCookies', 'setAcceptCookie'], null);
+  hookAny('android.webkit.WebStorage', 'browser.web_storage', ['getOrigins', 'deleteAllData', 'deleteOrigin'], null);
+  hookAny('android.webkit.WebViewDatabase', 'browser.web_db', ['getInstance', 'clearHttpAuthUsernamePassword', 'clearFormData'], null);
+  hookAny('android.webkit.ServiceWorkerController', 'browser.service_worker', ['getInstance', 'setServiceWorkerClient'], null);
+  hookAny('android.webkit.PermissionRequest', 'browser.permission_req', ['grant', 'deny', 'getResources'], null);
+  hookAny('android.webkit.WebChromeClient', 'browser.permission_req', ['onPermissionRequest', 'onGeolocationPermissionsShowPrompt', 'onShowFileChooser'], null);
+  hookAny('android.webkit.WebViewClient', 'browser.intercept', ['shouldInterceptRequest', 'onReceivedSslError', 'onReceivedClientCertRequest', 'onReceivedHttpAuthRequest'], null);
+  hookAny('androidx.webkit.WebSettingsCompat', 'browser.ua_meta', ['setUserAgentMetadata', 'getUserAgentMetadata'], null);
+  hookAny('androidx.webkit.WebSettingsCompat', 'browser.safe_browsing', ['setSafeBrowsingEnabled', 'getSafeBrowsingEnabled'], null);
+  hookAny('androidx.webkit.WebSettingsCompat', 'browser.dark', ['setForceDark', 'setAlgorithmicDarkeningAllowed'], null);
+  hookAny('androidx.webkit.WebViewCompat', 'browser.web_message', ['addWebMessageListener', 'postWebMessage', 'createWebMessageChannel'], null);
+  hookAny('androidx.webkit.WebViewCompat', 'browser.variations', ['getVariationsHeader'], null);
+  hookAny('androidx.webkit.WebViewCompat', 'browser.safe_browsing', ['startSafeBrowsing', 'getSafeBrowsingPrivacyPolicyUrl', 'setSafeBrowsingAllowlist'], null);
+  hookAny('androidx.webkit.WebViewFeature', 'browser.feature', ['isFeatureSupported'], null);
+  hookAny('androidx.webkit.ProxyController', 'browser.proxy', ['setProxyOverride', 'clearProxyOverride'], null);
+  hookAny('androidx.webkit.ProfileStore', 'browser.profile', ['getOrCreateProfile', 'getProfile'], null);
+  hookAny('androidx.browser.customtabs.CustomTabsClient', 'browser.custom_tabs', ['bindCustomTabsService', 'newSession', 'connectAndInitialize'], null);
+  hookAny('androidx.browser.customtabs.CustomTabsIntent$Builder', 'browser.custom_tabs', ['build', 'setSession'], null);
+  hookAny('androidx.browser.trusted.TrustedWebUtils', 'browser.twa', ['launchAsTrustedWebActivity'], null);
+  hookAny('androidx.browser.trusted.TwaLauncher', 'browser.twa', ['launch'], null);
+  hookAny('org.mozilla.geckoview.GeckoRuntime', 'browser.geckoview', ['create', 'getDefault'], null);
+  hookAny('org.mozilla.geckoview.GeckoSession', 'browser.geckoview', ['loadUri', 'open'], null);
+  hookAny('org.chromium.android_webview.AwSettings', 'browser.chromium_aw', ['setUserAgentString', 'getUserAgentMetadata', 'setSafeBrowsingEnabled'], null);
+  try {
+    var PR = Java.use('android.webkit.PermissionRequest');
+    PR.grant.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var res = safeStr(arguments[0]);
+        var id = /PROTECTED_MEDIA|MEDIA_ID/i.test(res) ? 'browser.eme' : 'browser.permission_req';
+        writeReq(id, 'PermissionRequest.grant', res, 'granted', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Ctx = Java.use('android.app.ContextImpl');
+    Ctx.startActivity.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        try {
+          var intent = arguments[0];
+          var action = intent.getAction();
+          var data = '';
+          try { data = safeStr(intent.getDataString()); } catch (e2) {}
+          if (action === 'android.intent.action.VIEW' && /^https?:/i.test(data)) {
+            writeReq('browser.intent', 'Context.startActivity(VIEW)', data.substring(0, 180), '', null);
+          }
+          if ('' + intent.getComponent() && /customtabs|trustedweb/i.test('' + intent.getComponent())) {
+            writeReq('browser.custom_tabs', 'startActivity', safeStr(intent.getComponent()), data.substring(0, 120), null);
+          }
+        } catch (e) {}
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Headers = Java.use('okhttp3.Headers');
+    var origGet = Headers.get;
+    origGet.implementation = function (name) {
+      var r = origGet.call(this, name);
+      var n = safeStr(name);
+      if (/^sec-ch-ua/i.test(n)) writeOnce('browser.ch_ua', 'OkHttp Headers.get', n, safeStr(r), null);
+      if (/^x-requested-with$/i.test(n)) writeOnce('browser.xrw', 'OkHttp Headers.get', n, safeStr(r), null);
+      if (/^x-client-data$/i.test(n)) writeOnce('browser.variations', 'OkHttp Headers.get', n, safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
 }
 
 function installJavaHooks() {
@@ -2641,6 +2748,7 @@ function installJavaHooks() {
   hookMissedRequestApis();
   hookFraudFingerprint();
   hookFraudSdks();
+  hookBrowserApis();
   hookRootDetection();
 }
 

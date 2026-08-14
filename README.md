@@ -117,15 +117,15 @@ AccessMonitorService  → foreground-сервис
 
 **Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Хуки — **запросы целевого приложения**: Location, Telephony (в т.ч. EID/MSISDN/ISIM/CarrierConfig), Privacy Sandbox AdId/Topics, OAID OEM, InstallSource/Referrer, FID/InstanceID, Health Connect, FIDO2, KeyStore/KeyChain, контакты/SMS, пакеты/UsageStats, камера/NFC/USB, FCM/credentials, Play Integrity, VPN/pin, **антифрод-сигналы** (Matrix/ThreatMetrix, TrustDecision, FingerprintJS, SEON, Settings fingerprint, clone/dual-app, STUN/WebRTC).
+Хуки — **запросы целевого приложения**: Location, Telephony, Privacy Sandbox, OAID, InstallSource, Health Connect, FIDO2, KeyStore, контакты/SMS, пакеты, FCM, Play Integrity, VPN/pin, антифрод SDK, **браузер/WebView/JS** (Client Hints, Custom Tabs, EME, canvas/WebGL/fonts/audio, FingerprintJS/CreepJS).
 
 События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог запросов (412 типов)
+## Каталог запросов (474 типа)
 
-Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP плюс сигналы antifraud SDK (Matrix/ThreatMetrix, TrustDecision, FingerprintJS, SEON, Sift, Forter, iovation, Tongdun, Group-IB, KFP).
+Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP, antifraud SDK и браузерных API (android.webkit / androidx.webkit / Chromium AwSettings / FingerprintJS / CreepJS).
 
 | Группа | Кол-во | Что входит |
 |--------|--------|------------|
@@ -153,6 +153,7 @@ AccessMonitorService  → foreground-сервис
 | **HARDWARE** | 29 | камера, сенсоры, батарея, GLES, кодеки, PIN/lock, uptime, ядра, ringtone, WebView pkg |
 | **IDENTITY** | 7 | FCM token, Credential Manager, phone hint, SMS Retriever, LVL, reCAPTCHA, UA |
 | **FRAUD** | 35 | Matrix/TMX, TrustDecision, FingerprintJS, SEON, Sift, Forter, clone/dual-app, canvas/WebGL, behavioral touch |
+| **BROWSER** | 63 | WebView Java/SDK, Custom Tabs/TWA, Client Hints, EME, Safe Browsing, JS fingerprint (canvas/WebGL/fonts/audio/UA-CH) |
 
 Каждый идентификатор содержит: API, system property, file path, regex для logcat/strace, требуемое разрешение.
 
