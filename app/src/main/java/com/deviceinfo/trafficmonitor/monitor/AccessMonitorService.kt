@@ -44,6 +44,12 @@ class AccessMonitorService : Service() {
     private var kernelAuditMonitor: KernelAuditMonitor? = null
     private var cmdApiMonitor: CmdApiMonitor? = null
     private var inotifyDataMonitor: InotifyDataMonitor? = null
+    private var perfettoMonitor: PerfettoMonitor? = null
+    private var tcpdumpMonitor: TcpdumpMonitor? = null
+    private var statsdMonitor: StatsdMonitor? = null
+    private var ebpfMonitor: EbpfMonitor? = null
+    private var gmsInternalsMonitor: GmsInternalsMonitor? = null
+    private var workManagerMonitor: WorkManagerMonitor? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -88,6 +94,12 @@ class AccessMonitorService : Service() {
             kernelAuditMonitor = KernelAuditMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
             cmdApiMonitor = CmdApiMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
             inotifyDataMonitor = InotifyDataMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            perfettoMonitor = PerfettoMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            tcpdumpMonitor = TcpdumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            statsdMonitor = StatsdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            ebpfMonitor = EbpfMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            gmsInternalsMonitor = GmsInternalsMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            workManagerMonitor = WorkManagerMonitor(targetPackage, repository, serviceScope).also { it.start() }
             appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
             if (targetPid > 0) {
@@ -144,6 +156,12 @@ class AccessMonitorService : Service() {
         kernelAuditMonitor?.stop()
         cmdApiMonitor?.stop()
         inotifyDataMonitor?.stop()
+        perfettoMonitor?.stop()
+        tcpdumpMonitor?.stop()
+        statsdMonitor?.stop()
+        ebpfMonitor?.stop()
+        gmsInternalsMonitor?.stop()
+        workManagerMonitor?.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }

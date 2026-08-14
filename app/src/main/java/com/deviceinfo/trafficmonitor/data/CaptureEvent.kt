@@ -29,7 +29,11 @@ enum class EventSource {
     STRACE,
     PROC,
     DUMPSYS,
-    FRIDA
+    FRIDA,
+    PERFETTO,
+    TCPDUMP,
+    STATSD,
+    EBPF
 }
 
 @Entity(tableName = "capture_events")

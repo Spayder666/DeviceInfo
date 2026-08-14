@@ -5,6 +5,7 @@ import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierDefinition
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
+import com.deviceinfo.trafficmonitor.monitor.MonitorPaths
 import com.deviceinfo.trafficmonitor.root.RootShell
 
 data class IdentifierValue(
@@ -403,8 +404,23 @@ object IdentifierReader {
                 it.contains("CONNECTED", ignoreCase = true) ||
                 it.contains("extra:", ignoreCase = true)
         }.take(6).joinToString(" | ")
+        val pcap = RootShell.execAndRead(
+            "ls -l ${MonitorPaths.PCAP}* 2>/dev/null | head -n 6",
+            timeoutSec = 5
+        ).trim()
+        val dns = RootShell.execAndRead(
+            "tcpdump -nn -r ${MonitorPaths.PCAP} -c 12 port 53 2>/dev/null | tail -n 12",
+            timeoutSec = 8
+        ).trim()
+        val ct = RootShell.execAndRead(
+            "cat /proc/net/nf_conntrack 2>/dev/null | grep -F '$packageName' | head -n 8",
+            timeoutSec = 5
+        ).trim()
         return wifi + listOfNotEmpty(
-            IdentifierValue("net.active", "Активная сеть", active)
+            IdentifierValue("net.active", "Активная сеть", active),
+            IdentifierValue("net.pcap", "pcap (заголовки)", pcap.ifBlank { MonitorPaths.PCAP }),
+            IdentifierValue("net.dns", "DNS из pcap", dns),
+            IdentifierValue("net.conntrack", "conntrack", ct)
         )
     }
 

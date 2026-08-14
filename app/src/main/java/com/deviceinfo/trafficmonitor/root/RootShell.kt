@@ -91,17 +91,18 @@ object RootShell {
         return "'" + value.replace("'", "'\\''") + "'"
     }
 
-    fun resolveStracePath(): String? {
-        val candidates = listOf(
-            "/system/bin/strace",
-            "/system/xbin/strace",
-            "/vendor/bin/strace"
-        )
-        for (path in candidates) {
-            val check = execAndRead("test -x $path && echo ok")
-            if (check.trim() == "ok") return path
+    fun resolveStracePath(): String? = resolveBinary("strace")
+
+    fun resolveBinary(vararg names: String): String? {
+        val prefixes = listOf("/system/bin/", "/system/xbin/", "/vendor/bin/", "/data/local/tmp/")
+        for (name in names) {
+            for (prefix in prefixes) {
+                val path = "$prefix$name"
+                if (execAndRead("test -x $path && echo ok").trim() == "ok") return path
+            }
+            val which = execAndRead("command -v $name 2>/dev/null").trim()
+            if (which.startsWith("/") && !which.contains("not found")) return which
         }
-        val which = execAndRead("which strace 2>/dev/null").trim()
-        return which.takeIf { it.isNotEmpty() && !it.contains("not found") }
+        return null
     }
 }

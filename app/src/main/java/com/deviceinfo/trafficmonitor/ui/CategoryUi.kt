@@ -53,4 +53,8 @@ fun sourceLabel(source: EventSource): String = when (source) {
     EventSource.PROC -> "/proc"
     EventSource.DUMPSYS -> "dumpsys"
     EventSource.FRIDA -> "Frida"
+    EventSource.PERFETTO -> "Perfetto"
+    EventSource.TCPDUMP -> "tcpdump"
+    EventSource.STATSD -> "statsd"
+    EventSource.EBPF -> "eBPF"
 }

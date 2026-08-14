@@ -14,7 +14,7 @@ Android-приложение для мониторинга **системных 
 | Камера | Camera API, open(/dev/camera) |
 | Микрофон | AudioRecord, MediaRecorder |
 | Телефон / SIM | IMEI, IMSI, номер SIM, TelephonyManager |
-| Идентификаторы (**159 типов**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP URL… |
+| Идентификаторы (**161 тип**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP URL, DNS… |
 | Контакты / SMS | ContactsProvider, SmsManager |
 | Сеть / API | HTTP-запросы (метаданные), connect(), сокеты |
 | Разрешения | AppOps, checkPermission, requestPermissions |
@@ -31,6 +31,11 @@ Android-приложение для мониторинга **системных 
 6. **Binder / iptables UID LOG / ss** — IPC и сеть без VPN/MITM
 7. **inotify / sqlite** — запись в `/data/data/<pkg>` (кэш GPS, prefs, БД)
 8. **Frida** (вручную) — Java API: Location, OkHttp, WebView, SQLite, SharedPreferences
+9. **Perfetto / atrace** — короткие трейсы AM/WM/camera/audio/binder
+10. **tcpdump / pcap** — заголовки пакетов (snaplen 96) и DNS QNAME, без расшифровки HTTPS
+11. **statsd atoms** — системные счётчики location/camera/appops
+12. **eBPF / qtaguid** — карты netd, xt_qtaguid, cgroup UID
+13. **GMS internals / WorkManager** — Fused/NLP/Geofence и фоновые job'ы
 
 ## Требования
 
@@ -76,6 +81,12 @@ AccessMonitorService  → foreground-сервис
   ├── KernelAuditMonitor    → SELinux AVC, kernel/binder
   ├── CmdApiMonitor         → cmd location/wifi/phone/…
   ├── InotifyDataMonitor    → /data/data/<pkg>
+  ├── PerfettoMonitor       → perfetto / atrace
+  ├── TcpdumpMonitor        → pcap + DNS
+  ├── StatsdMonitor         → atoms
+  ├── EbpfMonitor           → bpf maps / qtaguid
+  ├── GmsInternalsMonitor   → Fused / NLP / Geofence
+  ├── WorkManagerMonitor    → jobs / WorkSpec
   └── FridaMonitor          → ручной frida-inject + Java hooks
 ```
 
@@ -91,7 +102,7 @@ AccessMonitorService  → foreground-сервис
 
 Данные хранятся локально в Room Database.
 
-## Каталог идентификаторов (159 типов)
+## Каталог идентификаторов (161 тип)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 
@@ -111,7 +122,7 @@ AccessMonitorService  → foreground-сервис
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
 | **CONTENT_PROVIDER** | 6 | telephony/siminfo, GSF, settings, ICC, SQLite, SharedPreferences |
 | **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
-| **NETWORK** | 6 | IP, MAC, hostname, IPv6, HTTP URL, WebView |
+| **NETWORK** | 8 | IP, MAC, hostname, IPv6, HTTP URL, WebView, DNS, pcap |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 5 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
 | **ATTESTATION** | 5 | Key attestation, StrongBox, Play Integrity, SafetyNet, verified boot |

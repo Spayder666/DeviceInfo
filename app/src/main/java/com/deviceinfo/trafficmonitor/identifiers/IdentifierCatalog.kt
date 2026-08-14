@@ -255,6 +255,8 @@ object IdentifierCatalog {
         id("net.inet6", "IPv6 address", IdentifierGroup.NETWORK, logcat = listOf("inet6", "Inet6Address")),
         id("net.http", "HTTP URL (OkHttp / HttpURLConnection)", IdentifierGroup.NETWORK, "OkHttp / HttpURLConnection", logcat = listOf("OkHttp", "HttpURLConnection", "okhttp3")),
         id("net.webview", "WebView URL", IdentifierGroup.NETWORK, "WebView.loadUrl", logcat = listOf("WebView.loadUrl", "chromium")),
+        id("net.dns", "DNS QNAME (tcpdump)", IdentifierGroup.NETWORK, "tcpdump port 53", logcat = listOf("A?", "AAAA?")),
+        id("net.pcap", "pcap заголовки", IdentifierGroup.NETWORK, "tcpdump -s 96"),
         id("storage.sqlite", "SQLite query", IdentifierGroup.CONTENT_PROVIDER, "SQLiteDatabase.rawQuery", logcat = listOf("SQLiteDatabase", "SQLiteLog")),
         id("storage.prefs", "SharedPreferences", IdentifierGroup.CONTENT_PROVIDER, "SharedPreferences.getString", logcat = listOf("SharedPreferences")),
         id("storage.file", "Файлы приложения", IdentifierGroup.PROC_SYS, "FileInputStream / FileOutputStream", strace = listOf("/data/data/"))
