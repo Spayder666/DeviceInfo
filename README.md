@@ -14,7 +14,7 @@ Android-приложение для мониторинга **системных 
 | Камера | Camera API, open(/dev/camera) |
 | Микрофон | AudioRecord, MediaRecorder |
 | Телефон / SIM | IMEI, IMSI, номер SIM, TelephonyManager |
-| Идентификаторы (**161 тип**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP URL, DNS… |
+| Идентификаторы (**164 типа**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP, DNS, SNI, RTT… |
 | Контакты / SMS | ContactsProvider, SmsManager |
 | Сеть / API | HTTP-запросы (метаданные), connect(), сокеты |
 | Разрешения | AppOps, checkPermission, requestPermissions |
@@ -36,6 +36,13 @@ Android-приложение для мониторинга **системных 
 11. **statsd atoms** — системные счётчики location/camera/appops
 12. **eBPF / qtaguid** — карты netd, xt_qtaguid, cgroup UID
 13. **GMS internals / WorkManager** — Fused/NLP/Geofence и фоновые job'ы
+14. **GNSS HAL / vendor** — lshal, `/dev/gnss*`, `/data/vendor/gps`
+15. **am trace-ipc** — Binder IPC к LMS/camera/telephony
+16. **unix / DnsResolver / ip6tables / nft** — локальные сокеты и IPv6 UID
+17. **FGS / privacy / overlay** — типы foreground service и индикаторы камеры/GPS
+18. **FCM / Sync / wakelock** — пуши и синк, которые будят локацию
+19. **security / keystore / ANR** — буфер security, attestation, tombstones
+20. **OEM + indoor** — IZat/HMS/SEM, Wi‑Fi RTT, UWB
 
 ## Требования
 
@@ -87,6 +94,13 @@ AccessMonitorService  → foreground-сервис
   ├── EbpfMonitor           → bpf maps / qtaguid
   ├── GmsInternalsMonitor   → Fused / NLP / Geofence
   ├── WorkManagerMonitor    → jobs / WorkSpec
+  ├── HalGnssMonitor        → GNSS HAL / vendor
+  ├── BinderIpcMonitor      → am trace-ipc
+  ├── UnixNetdMonitor       → unix / DNS / ip6 / nft
+  ├── PrivacyFgsMonitor     → FGS / privacy / overlay
+  ├── SyncPushMonitor       → FCM / sync / wake
+  ├── SecurityKeystoreMonitor
+  ├── OemIndoorMonitor      → IZat / RTT / UWB
   └── FridaMonitor          → ручной frida-inject + Java hooks
 ```
 
@@ -102,7 +116,7 @@ AccessMonitorService  → foreground-сервис
 
 Данные хранятся локально в Room Database.
 
-## Каталог идентификаторов (161 тип)
+## Каталог идентификаторов (164 типа)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 

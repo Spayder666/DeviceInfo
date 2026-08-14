@@ -257,6 +257,7 @@ object IdentifierCatalog {
         id("net.webview", "WebView URL", IdentifierGroup.NETWORK, "WebView.loadUrl", logcat = listOf("WebView.loadUrl", "chromium")),
         id("net.dns", "DNS QNAME (tcpdump)", IdentifierGroup.NETWORK, "tcpdump port 53", logcat = listOf("A?", "AAAA?")),
         id("net.pcap", "pcap заголовки", IdentifierGroup.NETWORK, "tcpdump -s 96"),
+        id("net.sni", "TLS SNI (имя хоста)", IdentifierGroup.NETWORK, "SSL_get_servername / SSLSocket.getPeerHost"),
         id("storage.sqlite", "SQLite query", IdentifierGroup.CONTENT_PROVIDER, "SQLiteDatabase.rawQuery", logcat = listOf("SQLiteDatabase", "SQLiteLog")),
         id("storage.prefs", "SharedPreferences", IdentifierGroup.CONTENT_PROVIDER, "SharedPreferences.getString", logcat = listOf("SharedPreferences")),
         id("storage.file", "Файлы приложения", IdentifierGroup.PROC_SYS, "FileInputStream / FileOutputStream", strace = listOf("/data/data/"))
@@ -289,7 +290,9 @@ object IdentifierCatalog {
         id("location.gms", "GMS LocationServices", IdentifierGroup.LOCATION, "LocationServices.getFusedLocationProviderClient", logcat = listOf("LocationServices", "GoogleLocationManager", "GmsLocation")),
         id("location.hal", "GNSS HAL /dev", IdentifierGroup.LOCATION, file = "/dev/gnss0", strace = listOf("/dev/gnss", "/dev/gps", "/dev/ttyGPS", "/vendor/etc/gps", "/data/vendor/gps")),
         id("location.supl", "SUPL / AGPS", IdentifierGroup.LOCATION, logcat = listOf("SUPL", "AGps", "agps", "supl.google")),
-        id("location.activity", "Activity Recognition", IdentifierGroup.LOCATION, "ActivityRecognitionClient", logcat = listOf("ActivityRecognition", "DetectedActivity"))
+        id("location.activity", "Activity Recognition", IdentifierGroup.LOCATION, "ActivityRecognitionClient", logcat = listOf("ActivityRecognition", "DetectedActivity")),
+        id("location.wifi_rtt", "Wi‑Fi RTT / ranging", IdentifierGroup.LOCATION, "WifiRttManager.startRanging", logcat = listOf("WifiRtt", "startRanging"), perm = "NEARBY_WIFI_DEVICES"),
+        id("location.uwb", "UWB ranging", IdentifierGroup.LOCATION, "UwbManager", logcat = listOf("UwbManager", "uwb"))
     )
 
     private fun attestationIdentifiers() = listOf(

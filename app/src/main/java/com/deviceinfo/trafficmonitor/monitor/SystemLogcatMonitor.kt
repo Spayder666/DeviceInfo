@@ -141,7 +141,11 @@ class SystemLogcatMonitor(
             "OkHttp:V", "OkHttpClient:V", "Cronet:V", "chromium:V",
             "WebView:V", "cr_AwContents:V",
             "SQLiteLog:V", "SQLiteDatabase:V",
-            "auditd:V", "SELinux:V", "binder:V"
+            "auditd:V", "SELinux:V", "binder:V",
+            "IZat:V", "QLocation:V", "HwLocation:V", "HmsLocation:V",
+            "WifiRtt:V", "UwbService:V", "WifiAware:V",
+            "FirebaseMessaging:V", "GCM:V",
+            "PrivacyIndicator:V", "SensorPrivacyService:V"
         )
 
         private val RULES = listOf(

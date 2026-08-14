@@ -50,6 +50,13 @@ class AccessMonitorService : Service() {
     private var ebpfMonitor: EbpfMonitor? = null
     private var gmsInternalsMonitor: GmsInternalsMonitor? = null
     private var workManagerMonitor: WorkManagerMonitor? = null
+    private var halGnssMonitor: HalGnssMonitor? = null
+    private var binderIpcMonitor: BinderIpcMonitor? = null
+    private var unixNetdMonitor: UnixNetdMonitor? = null
+    private var privacyFgsMonitor: PrivacyFgsMonitor? = null
+    private var syncPushMonitor: SyncPushMonitor? = null
+    private var securityKeystoreMonitor: SecurityKeystoreMonitor? = null
+    private var oemIndoorMonitor: OemIndoorMonitor? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -100,6 +107,13 @@ class AccessMonitorService : Service() {
             ebpfMonitor = EbpfMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
             gmsInternalsMonitor = GmsInternalsMonitor(targetPackage, repository, serviceScope).also { it.start() }
             workManagerMonitor = WorkManagerMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            halGnssMonitor = HalGnssMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            binderIpcMonitor = BinderIpcMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            unixNetdMonitor = UnixNetdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            privacyFgsMonitor = PrivacyFgsMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            syncPushMonitor = SyncPushMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            securityKeystoreMonitor = SecurityKeystoreMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            oemIndoorMonitor = OemIndoorMonitor(targetPackage, repository, serviceScope).also { it.start() }
             appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
             if (targetPid > 0) {
@@ -162,6 +176,13 @@ class AccessMonitorService : Service() {
         ebpfMonitor?.stop()
         gmsInternalsMonitor?.stop()
         workManagerMonitor?.stop()
+        halGnssMonitor?.stop()
+        binderIpcMonitor?.stop()
+        unixNetdMonitor?.stop()
+        privacyFgsMonitor?.stop()
+        syncPushMonitor?.stop()
+        securityKeystoreMonitor?.stop()
+        oemIndoorMonitor?.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }

@@ -865,6 +865,156 @@ function hookWorkAndGeofence() {
   } catch (e) {}
 }
 
+function hookCronetVolleyRetrofit() {
+  try {
+    var Engine = Java.use('org.chromium.net.CronetEngine');
+    Engine.newUrlRequestBuilder.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('net.http', 'Cronet.newUrlRequestBuilder', safeStr(arguments[0]), '', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var Req = Java.use('com.android.volley.Request');
+    Req.getUrl.implementation = function () {
+      var url = this.getUrl();
+      writeEvent('net.http', 'Volley.Request.getUrl', url, '', null);
+      return url;
+    };
+  } catch (e) {}
+  try {
+    var Service = Java.use('retrofit2.OkHttpCall');
+    Service.request.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var req = overload.apply(this, arguments);
+        try { writeEvent('net.http', 'Retrofit.request', req.url().toString(), req.method(), null); } catch (e) {}
+        return req;
+      };
+    });
+  } catch (e) {}
+}
+
+function hookHmsAndFlutter() {
+  try {
+    var HMS = Java.use('com.huawei.hms.location.FusedLocationProviderClient');
+    ['getLastLocation', 'getCurrentLocation', 'requestLocationUpdates'].forEach(function (m) {
+      try {
+        HMS[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            writeEvent('location.gms', 'HmsFusedLocation.' + m, safeStr(arguments[0]), 'Task', 'ACCESS_FINE_LOCATION');
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var CH = Java.use('io.flutter.plugin.common.MethodChannel');
+    CH.invokeMethod.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var name = safeStr(arguments[0]);
+        if (looksSensitive(name) || looksSensitive(arguments[1])) {
+          writeEvent('location.gps', 'Flutter.MethodChannel', name, safeStr(arguments[1]), null);
+        }
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookSniAndIntent() {
+  try {
+    var Sock = Java.use('javax.net.ssl.SSLSocket');
+    Sock.getSession.implementation = function () {
+      var session = this.getSession();
+      try {
+        var host = session.getPeerHost();
+        if (host) writeEvent('net.sni', 'SSLSocket.getPeerHost', host, '', null);
+      } catch (e) {}
+      return session;
+    };
+  } catch (e) {}
+  try {
+    var Https = Java.use('javax.net.ssl.HttpsURLConnection');
+    Https.getURL.implementation = function () {
+      var url = this.getURL();
+      writeEvent('net.sni', 'HttpsURLConnection.getURL', safeStr(url), '', null);
+      return url;
+    };
+  } catch (e) {}
+  try {
+    var Intent = Java.use('android.content.Intent');
+    Intent.getParcelableExtra.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var result = overload.apply(this, arguments);
+        try {
+          if (result && result.getClass && ('' + result.getClass().getName()).indexOf('Location') >= 0) {
+            writeEvent('location.gps', 'Intent.getParcelableExtra(Location)', safeStr(arguments[0]), formatLocation(result), 'ACCESS_FINE_LOCATION');
+          }
+        } catch (e) {}
+        return result;
+      };
+    });
+  } catch (e) {}
+  try {
+    var WR = Java.use('android.net.wifi.rtt.WifiRttManager');
+    WR.startRanging.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('location.wifi_rtt', 'WifiRttManager.startRanging', safeStr(arguments[0]), 'ranging', 'NEARBY_WIFI_DEVICES');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookNativeNetMeta() {
+  try {
+    var getaddr = Module.findExportByName('libc.so', 'getaddrinfo');
+    if (getaddr) {
+      Interceptor.attach(getaddr, {
+        onEnter: function (args) {
+          try { this.host = Memory.readUtf8String(args[0]); } catch (e) { this.host = ''; }
+        },
+        onLeave: function () {
+          if (this.host && looksSensitive(this.host)) {
+            writeEvent('net.dns', 'getaddrinfo', this.host, '', null);
+          }
+        }
+      });
+    }
+  } catch (e) {}
+  try {
+    var sni = Module.findExportByName('libssl.so', 'SSL_get_servername') ||
+      Module.findExportByName('libssl.so', 'SSL_get_servername');
+    if (sni) {
+      Interceptor.attach(sni, {
+        onLeave: function (retval) {
+          try {
+            var name = Memory.readUtf8String(retval);
+            if (name) writeEvent('net.sni', 'SSL_get_servername', name, '', null);
+          } catch (e) {}
+        }
+      });
+    }
+  } catch (e) {}
+  try {
+    var dlopen = Module.findExportByName(null, 'android_dlopen_ext') || Module.findExportByName('libdl.so', 'dlopen');
+    if (dlopen) {
+      Interceptor.attach(dlopen, {
+        onEnter: function (args) {
+          try { this.path = Memory.readUtf8String(args[0]); } catch (e) { this.path = ''; }
+        },
+        onLeave: function () {
+          if (this.path && /loc|gps|gnss|map|cronet|okhttp|mqtt/i.test(this.path)) {
+            writeEvent('location.hal', 'dlopen', this.path, 'loaded', null);
+          }
+        }
+      });
+    }
+  } catch (e) {}
+}
+
 function installJavaHooks() {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
   hookBuild();
@@ -895,6 +1045,9 @@ function installJavaHooks() {
   hookSharedPrefs();
   hookSensitiveFiles();
   hookWorkAndGeofence();
+  hookCronetVolleyRetrofit();
+  hookHmsAndFlutter();
+  hookSniAndIntent();
 }
 
 // Хуки ставим после старта приложения, чтобы не блокировать запуск.
@@ -905,4 +1058,5 @@ setTimeout(function () {
     });
   }
   try { hookNativeProperties(); } catch (e) {}
+  try { hookNativeNetMeta(); } catch (e) {}
 }, 1500);

@@ -107,7 +107,8 @@ class FridaEventPoller(
             "sensor" in text -> AccessCategory.SENSOR
             "bluetooth" in text || "bt." in text -> AccessCategory.BLUETOOTH
             "wifi" in text || "http" in text || "url." in text || "okhttp" in text ||
-                "webview" in text || "cronet" in text || "connectivity" in text || "socket" in text ->
+                "webview" in text || "cronet" in text || "volley" in text || "retrofit" in text ||
+                "sni" in text || "getaddrinfo" in text || "connectivity" in text || "socket" in text ->
                 AccessCategory.NETWORK
             "telephony" in text || "imei" in text || "sim" in text || "phone" in text -> AccessCategory.TELEPHONY
             "storage" in text || "file" in text || "sqlite" in text || "sharedpref" in text ||
