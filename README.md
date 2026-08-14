@@ -14,7 +14,7 @@ Android-приложение для мониторинга **системных 
 | Камера | Camera API, open(/dev/camera) |
 | Микрофон | AudioRecord, MediaRecorder |
 | Телефон / SIM | IMEI, IMSI, номер SIM, TelephonyManager |
-| Идентификаторы (**154 типа**) | Build, IMEI, Android ID, GAID, Widevine, MAC, getprop… |
+| Идентификаторы (**159 типов**) | Build, IMEI, Android ID, GAID, Widevine, MAC, HTTP URL… |
 | Контакты / SMS | ContactsProvider, SmsManager |
 | Сеть / API | HTTP-запросы (метаданные), connect(), сокеты |
 | Разрешения | AppOps, checkPermission, requestPermissions |
@@ -23,10 +23,14 @@ Android-приложение для мониторинга **системных 
 
 ## Источники данных (root)
 
-1. **AppOps** (`dumpsys appops`) — фиксация фактического использования разрешений
-2. **Logcat** (`logcat --pid=`) — системные логи API-вызовов
+1. **AppOps** (`dumpsys appops`) — фактическое использование разрешений
+2. **Logcat** (`logcat --uid=` + системные теги + буферы events/radio/crash/kernel)
 3. **strace** — системные вызовы: open, connect, ioctl, read/write
-4. **/proc** — открытые файловые дескрипторы и TCP-соединения
+4. **/proc** — дескрипторы, TCP/UDP, `/proc/maps` (нативные SDK)
+5. **dumpsys / cmd** — LMS, GNSS, камера, RIL, Health Connect, Nearby, `cmd location`…
+6. **Binder / iptables UID LOG / ss** — IPC и сеть без VPN/MITM
+7. **inotify / sqlite** — запись в `/data/data/<pkg>` (кэш GPS, prefs, БД)
+8. **Frida** (вручную) — Java API: Location, OkHttp, WebView, SQLite, SharedPreferences
 
 ## Требования
 
@@ -62,30 +66,32 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`
 
 ```
 MainActivity          → выбор приложения
-MonitorActivity       → список событий + фильтры
-AccessMonitorService  → foreground-сервис, оркестрация мониторов
-  ├── AppOpsMonitor   → dumpsys appops
-  ├── LogcatMonitor   → logcat --pid
-  ├── StraceMonitor   → strace -p PID
-  └── ProcMonitor       → /proc/PID/fd, /proc/PID/net
-  └── FridaMonitor      → frida-gadget (wrap.+LD_PRELOAD) + Java hooks
+MonitorActivity       → список событий + фильтры + проба ответа
+AccessMonitorService  → foreground-сервис
+  ├── AppOpsMonitor
+  ├── LogcatMonitor / SystemLogcatMonitor / ExtraLogcatMonitor
+  ├── StraceMonitor / ProcMonitor
+  ├── LocationDumpMonitor / ComprehensiveDumpMonitor
+  ├── ExtraChannelMonitor   → binder, maps, ss, iptables, sqlite, intents
+  ├── KernelAuditMonitor    → SELinux AVC, kernel/binder
+  ├── CmdApiMonitor         → cmd location/wifi/phone/…
+  ├── InotifyDataMonitor    → /data/data/<pkg>
+  └── FridaMonitor          → ручной frida-inject + Java hooks
 ```
 
 ### Frida-хуки (release-сборки)
 
-На release-сборках logcat часто молчит — Frida перехватывает Java API напрямую:
+На release-сборках logcat часто молчит — Frida перехватывает Java API напрямую.
 
-1. При первом запуске скачивается **frida-gadget** 16.5.9 с GitHub (arm64/arm/x86)
-2. Через root: `setprop wrap.<package> LD_PRELOAD=libfrida-gadget.so`
-3. Целевое приложение перезапускается — gadget загружает `identifier_hooks.js`
-4. Хуки: `Build`, `SystemProperties`, `TelephonyManager`, `Settings`, `WifiInfo`, `BluetoothAdapter`, `MediaDrm`, GAID, `AccountManager`, `LocationManager`, `ContentResolver`
-5. События пишутся в `/data/local/tmp/access_monitor/events.jsonl` → отображаются с источником **Frida**
+**Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Опционально: если установлен `frida` CLI (Termux: `pkg install frida`), выполняется attach к уже запущенному процессу.
+Хуки: Location/GNSS/Fused, Telephony, Camera, Audio, OkHttp, HttpURLConnection, WebView, SQLite, SharedPreferences, файлы с lat/lon, Geofence, ActivityRecognition, WorkManager, ContentResolver, Build/getprop/Settings.
+
+События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог идентификаторов (154 типа)
+## Каталог идентификаторов (159 типов)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 
@@ -103,9 +109,9 @@ AccessMonitorService  → foreground-сервис, оркестрация мон
 | **DRM** | 6 | Widevine deviceUniqueId, PlayReady, security level L1/L3 |
 | **INSTALL** | 5 | Install referrer, installer package, signing cert, install times |
 | **ACCOUNT** | 5 | AccountManager, email, auth token, Google Sign-In |
-| **CONTENT_PROVIDER** | 4 | telephony/siminfo, GSF, settings, ICC |
-| **PROC_SYS** | 8 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology |
-| **NETWORK** | 4 | IP addresses, NetworkInterface MAC, hostname, IPv6 |
+| **CONTENT_PROVIDER** | 6 | telephony/siminfo, GSF, settings, ICC, SQLite, SharedPreferences |
+| **PROC_SYS** | 9 | /proc/cpuinfo, meminfo, version, boot_id, auxv, __properties__, CPU topology, файлы приложения |
+| **NETWORK** | 6 | IP, MAC, hostname, IPv6, HTTP URL, WebView |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 5 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
 | **ATTESTATION** | 5 | Key attestation, StrongBox, Play Integrity, SafetyNet, verified boot |

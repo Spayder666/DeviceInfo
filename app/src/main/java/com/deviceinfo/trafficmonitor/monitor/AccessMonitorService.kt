@@ -39,6 +39,11 @@ class AccessMonitorService : Service() {
     private var locationDumpMonitor: LocationDumpMonitor? = null
     private var systemLogcatMonitor: SystemLogcatMonitor? = null
     private var comprehensiveDumpMonitor: ComprehensiveDumpMonitor? = null
+    private var extraChannelMonitor: ExtraChannelMonitor? = null
+    private var extraLogcatMonitor: ExtraLogcatMonitor? = null
+    private var kernelAuditMonitor: KernelAuditMonitor? = null
+    private var cmdApiMonitor: CmdApiMonitor? = null
+    private var inotifyDataMonitor: InotifyDataMonitor? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -78,6 +83,11 @@ class AccessMonitorService : Service() {
             locationDumpMonitor = LocationDumpMonitor(targetPackage, repository, serviceScope).also { it.start() }
             systemLogcatMonitor = SystemLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
             comprehensiveDumpMonitor = ComprehensiveDumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            extraChannelMonitor = ExtraChannelMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            extraLogcatMonitor = ExtraLogcatMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            kernelAuditMonitor = KernelAuditMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            cmdApiMonitor = CmdApiMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            inotifyDataMonitor = InotifyDataMonitor(targetPackage, repository, serviceScope).also { it.start() }
             appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
             if (targetPid > 0) {
@@ -129,6 +139,11 @@ class AccessMonitorService : Service() {
         locationDumpMonitor?.stop()
         systemLogcatMonitor?.stop()
         comprehensiveDumpMonitor?.stop()
+        extraChannelMonitor?.stop()
+        extraLogcatMonitor?.stop()
+        kernelAuditMonitor?.stop()
+        cmdApiMonitor?.stop()
+        inotifyDataMonitor?.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }

@@ -135,7 +135,13 @@ class SystemLogcatMonitor(
             "AutofillManagerService:V", "AccessibilityManager:V",
             "InputMethodManagerService:V",
             "JobScheduler:V", "AlarmManager:V",
-            "UsageStatsService:V", "PowerManagerService:V"
+            "UsageStatsService:V", "PowerManagerService:V",
+            "HealthConnect:V", "NearbyConnections:V", "NearbyMediums:V",
+            "ActivityRecognition:V", "Geofence:V", "WorkManager:V",
+            "OkHttp:V", "OkHttpClient:V", "Cronet:V", "chromium:V",
+            "WebView:V", "cr_AwContents:V",
+            "SQLiteLog:V", "SQLiteDatabase:V",
+            "auditd:V", "SELinux:V", "binder:V"
         )
 
         private val RULES = listOf(
@@ -162,7 +168,14 @@ class SystemLogcatMonitor(
             Rule(Regex("(?i)AppOps|checkPermission|grantRuntimePermission"), AccessCategory.PERMISSION, "Permission / AppOps"),
             Rule(Regex("(?i)MediaProvider|DownloadManager|StorageManager|openFile"), AccessCategory.STORAGE, "Storage / media"),
             Rule(Regex("(?i)Autofill|Accessibility|InputMethod"), AccessCategory.SYSTEM_API, "IME / Autofill / A11y"),
-            Rule(Regex("(?i)JobScheduler|AlarmManager|UsageStats|PowerManager"), AccessCategory.SYSTEM_API, "Jobs / alarms / power")
+            Rule(Regex("(?i)JobScheduler|AlarmManager|UsageStats|PowerManager"), AccessCategory.SYSTEM_API, "Jobs / alarms / power"),
+            Rule(Regex("(?i)HealthConnect|HealthConnectService"), AccessCategory.SENSOR, "Health Connect"),
+            Rule(Regex("(?i)NearbyConnections|NearbyMediums|FastShare"), AccessCategory.BLUETOOTH, "Nearby"),
+            Rule(Regex("(?i)ActivityRecognition|DetectedActivity"), AccessCategory.LOCATION, "Activity Recognition", identifierId = "location.activity", group = "LOCATION"),
+            Rule(Regex("(?i)WorkManager|WorkerWrapper"), AccessCategory.SYSTEM_API, "WorkManager"),
+            Rule(Regex("(?i)OkHttp|Cronet|WebView|chromium"), AccessCategory.NETWORK, "HTTP / WebView"),
+            Rule(Regex("(?i)SQLiteLog|SQLiteDatabase"), AccessCategory.STORAGE, "SQLite"),
+            Rule(Regex("(?i)avc:|SELinux|auditd"), AccessCategory.SYSTEM_API, "SELinux / audit")
         )
     }
 }

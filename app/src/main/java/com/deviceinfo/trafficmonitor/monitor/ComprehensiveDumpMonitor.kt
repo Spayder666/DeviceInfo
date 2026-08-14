@@ -88,7 +88,22 @@ class ComprehensiveDumpMonitor(
         DumpTarget("procstats", AccessCategory.SYSTEM_API, "Procstats"),
         DumpTarget("gfxinfo", AccessCategory.SYSTEM_API, "Gfx", extraArgs = packageName),
         DumpTarget("dbinfo", AccessCategory.STORAGE, "Databases", extraArgs = packageName),
-        DumpTarget("settings", AccessCategory.IDENTIFIER, "Settings provider")
+        DumpTarget("settings", AccessCategory.IDENTIFIER, "Settings provider"),
+        DumpTarget("healthconnect", AccessCategory.SENSOR, "Health Connect"),
+        DumpTarget("nearby", AccessCategory.BLUETOOTH, "Nearby"),
+        DumpTarget("companiondevice", AccessCategory.BLUETOOTH, "Companion device"),
+        DumpTarget("voiceinteraction", AccessCategory.MICROPHONE, "Voice interaction / hotword"),
+        DumpTarget("search", AccessCategory.SYSTEM_API, "Search / global query"),
+        DumpTarget("dropbox", AccessCategory.SYSTEM_API, "DropBox"),
+        DumpTarget("backup", AccessCategory.STORAGE, "Backup"),
+        DumpTarget("stats", AccessCategory.SYSTEM_API, "statsd"),
+        DumpTarget("overlay", AccessCategory.SYSTEM_API, "Overlay / SYSTEM_ALERT"),
+        DumpTarget("print", AccessCategory.SYSTEM_API, "Print"),
+        DumpTarget("credstore", AccessCategory.IDENTIFIER, "Credential store"),
+        DumpTarget("android.security.identity", AccessCategory.IDENTIFIER, "Identity credential"),
+        DumpTarget("slice", AccessCategory.SYSTEM_API, "Slices"),
+        DumpTarget("wallpaper", AccessCategory.SYSTEM_API, "Wallpaper"),
+        DumpTarget("textservices", AccessCategory.SYSTEM_API, "Spell checker / text")
     )
 
     fun start() {

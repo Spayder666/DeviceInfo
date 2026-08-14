@@ -252,7 +252,12 @@ object IdentifierCatalog {
         id("net.link_addresses", "IP адреса", IdentifierGroup.NETWORK, "LinkProperties.getLinkAddresses()", logcat = listOf("LinkProperties", "getLinkAddresses")),
         id("net.hardware_address", "NetworkInterface MAC", IdentifierGroup.NETWORK, "NetworkInterface.getHardwareAddress()", logcat = listOf("getHardwareAddress", "NetworkInterface")),
         id("net.hostname", "Hostname", IdentifierGroup.NETWORK, "InetAddress.getHostName()", logcat = listOf("getHostName")),
-        id("net.inet6", "IPv6 address", IdentifierGroup.NETWORK, logcat = listOf("inet6", "Inet6Address"))
+        id("net.inet6", "IPv6 address", IdentifierGroup.NETWORK, logcat = listOf("inet6", "Inet6Address")),
+        id("net.http", "HTTP URL (OkHttp / HttpURLConnection)", IdentifierGroup.NETWORK, "OkHttp / HttpURLConnection", logcat = listOf("OkHttp", "HttpURLConnection", "okhttp3")),
+        id("net.webview", "WebView URL", IdentifierGroup.NETWORK, "WebView.loadUrl", logcat = listOf("WebView.loadUrl", "chromium")),
+        id("storage.sqlite", "SQLite query", IdentifierGroup.CONTENT_PROVIDER, "SQLiteDatabase.rawQuery", logcat = listOf("SQLiteDatabase", "SQLiteLog")),
+        id("storage.prefs", "SharedPreferences", IdentifierGroup.CONTENT_PROVIDER, "SharedPreferences.getString", logcat = listOf("SharedPreferences")),
+        id("storage.file", "Файлы приложения", IdentifierGroup.PROC_SYS, "FileInputStream / FileOutputStream", strace = listOf("/data/data/"))
     )
 
     private fun enterpriseIdentifiers() = listOf(

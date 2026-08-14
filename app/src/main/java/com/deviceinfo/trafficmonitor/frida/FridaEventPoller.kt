@@ -106,9 +106,12 @@ class FridaEventPoller(
             "clipboard" in text -> AccessCategory.CLIPBOARD
             "sensor" in text -> AccessCategory.SENSOR
             "bluetooth" in text || "bt." in text -> AccessCategory.BLUETOOTH
-            "wifi" in text || "http" in text || "url." in text || "connectivity" in text || "socket" in text -> AccessCategory.NETWORK
+            "wifi" in text || "http" in text || "url." in text || "okhttp" in text ||
+                "webview" in text || "cronet" in text || "connectivity" in text || "socket" in text ->
+                AccessCategory.NETWORK
             "telephony" in text || "imei" in text || "sim" in text || "phone" in text -> AccessCategory.TELEPHONY
-            "storage" in text || "file" in text || "media/" in text -> AccessCategory.STORAGE
+            "storage" in text || "file" in text || "sqlite" in text || "sharedpref" in text ||
+                "media/" in text -> AccessCategory.STORAGE
             "biometric" in text || "fingerprint" in text || "projection" in text -> AccessCategory.SYSTEM_API
             group == "LOCATION" -> AccessCategory.LOCATION
             else -> AccessCategory.IDENTIFIER

@@ -664,6 +664,207 @@ function hookMediaProjection() {
   } catch (e) {}
 }
 
+function looksSensitive(text) {
+  var s = String(text || '').toLowerCase();
+  return /lat|lon|gps|location|imei|android_id|ssid|bssid|token|device|track|coord|http/.test(s);
+}
+
+function hookOkHttp() {
+  try {
+    var RealCall = Java.use('okhttp3.RealCall');
+    RealCall.execute.implementation = function () {
+      var req = this.request();
+      var url = '';
+      var method = '';
+      try { url = req.url().toString(); method = req.method(); } catch (e) {}
+      var resp = this.execute();
+      var code = '';
+      try { code = '' + resp.code(); } catch (e) {}
+      writeEvent('net.http', 'OkHttp.execute', method + ' ' + url, 'HTTP ' + code, null);
+      return resp;
+    };
+    RealCall.enqueue.implementation = function (cb) {
+      var req = this.request();
+      try {
+        writeEvent('net.http', 'OkHttp.enqueue', req.method() + ' ' + req.url().toString(), 'async', null);
+      } catch (e) {}
+      return this.enqueue(cb);
+    };
+  } catch (e) {}
+  try {
+    var Client = Java.use('okhttp3.OkHttpClient');
+    Client.newCall.implementation = function (request) {
+      try {
+        writeEvent('net.http', 'OkHttp.newCall', request.method() + ' ' + request.url().toString(), '', null);
+      } catch (e) {}
+      return this.newCall(request);
+    };
+  } catch (e) {}
+}
+
+function hookHttpUrlConnection() {
+  try {
+    var Http = Java.use('java.net.HttpURLConnection');
+    Http.connect.implementation = function () {
+      writeEvent('net.http', 'HttpURLConnection.connect', safeStr(this.getURL()), '', null);
+      return this.connect();
+    };
+    Http.getResponseCode.implementation = function () {
+      var code = this.getResponseCode();
+      writeEvent('net.http', 'HttpURLConnection.getResponseCode', safeStr(this.getURL()), '' + code, null);
+      return code;
+    };
+  } catch (e) {}
+}
+
+function hookWebView() {
+  try {
+    var WV = Java.use('android.webkit.WebView');
+    WV.loadUrl.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('net.webview', 'WebView.loadUrl', safeStr(arguments[0]), '', null);
+        return overload.apply(this, arguments);
+      };
+    });
+    try {
+      WV.evaluateJavascript.implementation = function (script, cb) {
+        writeEvent('net.webview', 'WebView.evaluateJavascript', safeStr(script).substring(0, 200), '', null);
+        return this.evaluateJavascript(script, cb);
+      };
+    } catch (e) {}
+    try {
+      WV.loadDataWithBaseURL.overloads.forEach(function (overload) {
+        overload.implementation = function () {
+          writeEvent('net.webview', 'WebView.loadDataWithBaseURL', safeStr(arguments[0]), '', null);
+          return overload.apply(this, arguments);
+        };
+      });
+    } catch (e) {}
+  } catch (e) {}
+}
+
+function hookSqlite() {
+  try {
+    var DB = Java.use('android.database.sqlite.SQLiteDatabase');
+    DB.rawQuery.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var sql = safeStr(arguments[0]);
+        var result = overload.apply(this, arguments);
+        if (looksSensitive(sql)) {
+          var rows = 0;
+          try { rows = result ? result.getCount() : 0; } catch (e) {}
+          writeEvent('storage.sqlite', 'SQLiteDatabase.rawQuery', sql, 'rows=' + rows, null);
+        }
+        return result;
+      };
+    });
+    ['insert', 'update', 'delete', 'execSQL'].forEach(function (m) {
+      try {
+        DB[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var args = [];
+            for (var i = 0; i < Math.min(arguments.length, 2); i++) args.push(safeStr(arguments[i]));
+            var joined = args.join(' ');
+            var result = overload.apply(this, arguments);
+            if (looksSensitive(joined)) {
+              writeEvent('storage.sqlite', 'SQLiteDatabase.' + m, joined, safeStr(result), null);
+            }
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookSharedPrefs() {
+  try {
+    var SP = Java.use('android.app.SharedPreferencesImpl');
+    ['getString', 'getLong', 'getInt', 'getBoolean', 'getFloat'].forEach(function (m) {
+      try {
+        SP[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var key = safeStr(arguments[0]);
+            var result = overload.apply(this, arguments);
+            if (looksSensitive(key) || looksSensitive(result)) {
+              writeEvent('storage.prefs', 'SharedPreferences.' + m, key, safeStr(result), null);
+            }
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Editor = Java.use('android.app.SharedPreferencesImpl$EditorImpl');
+    ['putString', 'putLong', 'putInt'].forEach(function (m) {
+      try {
+        Editor[m].implementation = function (key, value) {
+          if (looksSensitive(key) || looksSensitive(value)) {
+            writeEvent('storage.prefs', 'SharedPreferences.Editor.' + m, safeStr(key), safeStr(value), null);
+          }
+          return this[m](key, value);
+        };
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookSensitiveFiles() {
+  try {
+    var FIS = Java.use('java.io.FileInputStream');
+    FIS.$init.overload('java.io.File').implementation = function (file) {
+      var path = '';
+      try { path = file.getAbsolutePath(); } catch (e) {}
+      if (looksSensitive(path)) {
+        writeEvent('storage.file', 'FileInputStream', path, '', null);
+      }
+      return this.$init(file);
+    };
+  } catch (e) {}
+  try {
+    var FOS = Java.use('java.io.FileOutputStream');
+    FOS.$init.overload('java.io.File').implementation = function (file) {
+      var path = '';
+      try { path = file.getAbsolutePath(); } catch (e) {}
+      if (looksSensitive(path)) {
+        writeEvent('storage.file', 'FileOutputStream', path, '', null);
+      }
+      return this.$init(file);
+    };
+  } catch (e) {}
+}
+
+function hookWorkAndGeofence() {
+  try {
+    var WM = Java.use('androidx.work.WorkManager');
+    WM.enqueue.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('location.activity', 'WorkManager.enqueue', safeStr(arguments[0]), 'enqueued', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var GF = Java.use('com.google.android.gms.location.GeofencingClient');
+    GF.addGeofences.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('location.geofence', 'GeofencingClient.addGeofences', safeStr(arguments[0]), 'added', 'ACCESS_FINE_LOCATION');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var AR = Java.use('com.google.android.gms.location.ActivityRecognitionClient');
+    AR.requestActivityUpdates.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('location.activity', 'ActivityRecognitionClient.requestActivityUpdates', safeStr(arguments[0]), 'requested', 'ACTIVITY_RECOGNITION');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
 function installJavaHooks() {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
   hookBuild();
@@ -687,6 +888,13 @@ function installJavaHooks() {
   hookNetworkDeep();
   hookBiometric();
   hookMediaProjection();
+  hookOkHttp();
+  hookHttpUrlConnection();
+  hookWebView();
+  hookSqlite();
+  hookSharedPrefs();
+  hookSensitiveFiles();
+  hookWorkAndGeofence();
 }
 
 // Хуки ставим после старта приложения, чтобы не блокировать запуск.
