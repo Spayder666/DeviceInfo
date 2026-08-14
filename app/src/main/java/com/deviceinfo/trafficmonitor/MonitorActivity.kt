@@ -1,0 +1,374 @@
+package com.deviceinfo.trafficmonitor
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Launch
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.deviceinfo.trafficmonitor.data.AccessCategory
+import com.deviceinfo.trafficmonitor.data.CaptureEvent
+import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
+import com.deviceinfo.trafficmonitor.ui.categoryColor
+import com.deviceinfo.trafficmonitor.ui.categoryLabel
+import com.deviceinfo.trafficmonitor.ui.sourceLabel
+import com.deviceinfo.trafficmonitor.ui.theme.TrafficMonitorTheme
+import com.deviceinfo.trafficmonitor.viewmodel.MonitorViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+class MonitorActivity : ComponentActivity() {
+
+    private val viewModel: MonitorViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val packageName = intent.getStringExtra(EXTRA_PACKAGE) ?: finish().let { return }
+        val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: packageName
+
+        viewModel.init(packageName)
+
+        setContent {
+            TrafficMonitorTheme {
+                MonitorScreen(
+                    appName = appName,
+                    viewModel = viewModel,
+                    onBack = { finish() },
+                    onStop = {
+                        AccessMonitorService.stop(this)
+                        finish()
+                    },
+                    onLaunchApp = { viewModel.launchTargetApp() },
+                    onClear = { viewModel.clearEvents() }
+                )
+            }
+        }
+    }
+
+    companion object {
+        private const val EXTRA_PACKAGE = "extra_package"
+        private const val EXTRA_APP_NAME = "extra_app_name"
+
+        fun createIntent(context: Context, packageName: String, appName: String): Intent {
+            return Intent(context, MonitorActivity::class.java).apply {
+                putExtra(EXTRA_PACKAGE, packageName)
+                putExtra(EXTRA_APP_NAME, appName)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MonitorScreen(
+    appName: String,
+    viewModel: MonitorViewModel,
+    onBack: () -> Unit,
+    onStop: () -> Unit,
+    onLaunchApp: () -> Unit,
+    onClear: () -> Unit
+) {
+    val events by viewModel.events.collectAsState()
+    val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val selectedEvent by viewModel.selectedEvent.collectAsState()
+    val eventCount by viewModel.eventCount.collectAsState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(appName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            "Зафиксировано: $eventCount",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = Color.White)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onLaunchApp) {
+                        Icon(Icons.Default.Launch, contentDescription = "Запустить", tint = Color.White)
+                    }
+                    IconButton(onClick = onClear) {
+                        Icon(Icons.Default.Clear, contentDescription = "Очистить", tint = Color.White)
+                    }
+                    IconButton(onClick = onStop) {
+                        Icon(Icons.Default.Stop, contentDescription = "Стоп", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = Color.White
+                )
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            CategoryFilterRow(
+                selected = selectedCategory,
+                onSelect = viewModel::setCategoryFilter
+            )
+
+            if (events.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Запросы пока не зафиксированы", style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Запустите приложение и выполните действия",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(events, key = { it.id }) { event ->
+                        EventCard(event = event, onClick = { viewModel.selectEvent(event) })
+                    }
+                }
+            }
+        }
+    }
+
+    if (selectedEvent != null) {
+        ModalBottomSheet(
+            onDismissRequest = { viewModel.selectEvent(null) },
+            sheetState = sheetState
+        ) {
+            EventDetailSheet(event = selectedEvent!!)
+        }
+    }
+}
+
+@Composable
+fun CategoryFilterRow(selected: AccessCategory?, onSelect: (AccessCategory?) -> Unit) {
+    val categories = listOf(
+        null to "Все",
+        AccessCategory.LOCATION to "GPS",
+        AccessCategory.CAMERA to "Камера",
+        AccessCategory.TELEPHONY to "SIM",
+        AccessCategory.IDENTIFIER to "ID",
+        AccessCategory.NETWORK to "API",
+        AccessCategory.PERMISSION to "Права",
+        AccessCategory.MICROPHONE to "Мик",
+        AccessCategory.STORAGE to "Файлы",
+        AccessCategory.SENSOR to "Датчики"
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        categories.forEach { (cat, label) ->
+            FilterChip(
+                selected = selected == cat,
+                onClick = { onSelect(cat) },
+                label = { Text(label, fontSize = 12.sp) }
+            )
+        }
+    }
+}
+
+@Composable
+fun EventCard(event: CaptureEvent, onClick: () -> Unit) {
+    val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    val color = categoryColor(event.category)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(modifier = Modifier.padding(12.dp)) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(56.dp)
+                    .background(color, RoundedCornerShape(2.dp))
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(categoryLabel(event.category), fontSize = 10.sp) },
+                        modifier = Modifier.height(24.dp)
+                    )
+                    Text(
+                        text = timeFormat.format(Date(event.timestamp)),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = event.action,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                event.requestDetails?.let {
+                    Text(
+                        text = it,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2
+                    )
+                }
+                Text(
+                    text = sourceLabel(event.source),
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EventDetailSheet(event: CaptureEvent) {
+    val timeFormat = SimpleDateFormat("dd.MM.yyyy HH:mm:ss.SSS", Locale.getDefault())
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+    ) {
+        Text("Детали запроса", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(16.dp))
+
+        DetailRow("Категория", categoryLabel(event.category))
+        DetailRow("Действие", event.action)
+        DetailRow("Источник", sourceLabel(event.source))
+        DetailRow("Время", timeFormat.format(Date(event.timestamp)))
+        event.permission?.let { DetailRow("Разрешение", it) }
+        event.processId?.let { DetailRow("PID", it.toString()) }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+        event.requestDetails?.let {
+            Text("Запрос", fontWeight = FontWeight.Bold)
+            Text(it, modifier = Modifier.padding(vertical = 4.dp))
+        }
+
+        event.responseDetails?.let {
+            Spacer(Modifier.height(8.dp))
+            Text("Ответ / результат", fontWeight = FontWeight.Bold)
+            Text(it, modifier = Modifier.padding(vertical = 4.dp))
+        }
+
+        event.rawData?.let {
+            Spacer(Modifier.height(12.dp))
+            Text("Полные данные", fontWeight = FontWeight.Bold)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+            ) {
+                Text(
+                    text = it,
+                    modifier = Modifier.padding(12.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+    ) {
+        Text(
+            text = "$label:",
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(120.dp),
+            fontSize = 13.sp
+        )
+        Text(text = value, fontSize = 13.sp)
+    }
+}

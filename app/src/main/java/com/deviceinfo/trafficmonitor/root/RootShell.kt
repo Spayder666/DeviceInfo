@@ -1,0 +1,75 @@
+package com.deviceinfo.trafficmonitor.root
+
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
+
+object RootShell {
+
+    fun isRootAvailable(): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(5, TimeUnit.SECONDS)
+            output.contains("uid=0")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun exec(command: String): Process {
+        return Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+    }
+
+    fun execAndRead(command: String, timeoutSec: Long = 10): String {
+        val process = exec(command)
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        process.waitFor(timeoutSec, TimeUnit.SECONDS)
+        return output
+    }
+
+    fun execStreaming(command: String, onLine: (String) -> Unit) {
+        val process = exec(command)
+        BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                onLine(line!!)
+            }
+        }
+    }
+
+    fun findPid(packageName: String): Int? {
+        val output = execAndRead("pidof $packageName")
+        return output.trim().split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()
+    }
+
+    fun getUid(packageName: String): Int? {
+        val output = execAndRead("dumpsys package $packageName | grep userId=")
+        val match = Regex("userId=(\\d+)").find(output)
+        return match?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    fun launchApp(packageName: String): Boolean {
+        return try {
+            val process = exec("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
+            process.waitFor(5, TimeUnit.SECONDS)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun resolveStracePath(): String? {
+        val candidates = listOf(
+            "/system/bin/strace",
+            "/system/xbin/strace",
+            "/vendor/bin/strace"
+        )
+        for (path in candidates) {
+            val check = execAndRead("test -x $path && echo ok")
+            if (check.trim() == "ok") return path
+        }
+        val which = execAndRead("which strace 2>/dev/null").trim()
+        return which.takeIf { it.isNotEmpty() && !it.contains("not found") }
+    }
+}
