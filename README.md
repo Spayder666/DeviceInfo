@@ -117,13 +117,13 @@ AccessMonitorService  → foreground-сервис
 
 **Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Хуки — **запросы целевого приложения**: Location, Telephony, Camera, Audio, контакты/SMS/календарь/call log, PackageManager (пакеты, подписи, queryIntent), UsageStats, AppOps/permissions, Display/locale/battery/GPU, NFC/USB, FCM/credentials/SMS Retriever/LVL, OkHttp/WebView, Build/getprop/Settings, Play Integrity, VPN/proxy/pin.
+Хуки — **запросы целевого приложения**: Location, Telephony (в т.ч. EID/MSISDN/ISIM/CarrierConfig), Privacy Sandbox AdId/Topics, OAID OEM, InstallSource/Referrer, FID/InstanceID, Health Connect, FIDO2, KeyStore/KeyChain, контакты/SMS, пакеты/UsageStats, камера/NFC/USB, FCM/credentials, Play Integrity, VPN/pin.
 
 События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог запросов (276 типов)
+## Каталог запросов (336 типов)
 
 Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP (`Build.java`, `TelephonyManager`, `SettingsProvider`, `MediaDrm`).
 
