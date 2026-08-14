@@ -28,12 +28,6 @@ class LocationDumpMonitor(
 
     fun start() {
         job = scope.launch(Dispatchers.IO) {
-            record(
-                action = "Монитор локации запущен",
-                request = "Пути: LocationManager, Fused/GMS, GNSS HAL, NLP (Wi‑Fi/Cell), Geofence, SUPL, AppOps, сеть",
-                response = "Координаты читаются из dumpsys location (system_server), не из PID приложения",
-                raw = "location-monitor-init"
-            )
             while (isActive) {
                 pollLocationService()
                 pollGnss()

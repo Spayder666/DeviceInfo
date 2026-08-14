@@ -40,10 +40,13 @@ object IdentifierProbe {
             return ProbeResult(
                 requestLabel = def?.displayName ?: event.action,
                 valueAsRoot = IdentifierReader.format(values),
-                valueInTargetContext = event.responseDetails?.takeIf {
-                    it.isNotBlank() && !it.startsWith("/") && !it.startsWith("FD=")
-                },
-                note = "Значения прочитаны от root (то, что вернут системные API). Frida фиксирует точный ответ внутри приложения в момент вызова."
+                valueInTargetContext = event.responseDetails?.takeIf { looksLikeCapturedValue(it) },
+                note = when {
+                    event.category.name == "LOCATION" || event.identifierGroup == "LOCATION" ->
+                        "Координаты из LocationManagerService (gps / fused / network). Это ответ на запрос локации, не идентификаторы устройства."
+                    else ->
+                        "Значения того же типа, что и запрос. Frida фиксирует точный ответ внутри приложения в момент вызова."
+                }
             )
         }
 
@@ -64,6 +67,15 @@ object IdentifierProbe {
             valueInTargetContext = null,
             note = "Для этого типа события нет системного API. Нажмите «Запустить + Frida», чтобы перехватывать ответы внутри приложения."
         )
+    }
+
+    private fun looksLikeCapturedValue(text: String): Boolean {
+        if (text.isBlank() || text.startsWith("/") || text.startsWith("FD=")) return false
+        if (text.contains("читаются из dumpsys", ignoreCase = true)) return false
+        if (text.contains("Монитор локации", ignoreCase = true)) return false
+        return text.contains("lat=") ||
+            text.contains("Location[") ||
+            Regex("-?\\d+\\.\\d+\\s*,\\s*-?\\d+\\.\\d+").containsMatchIn(text)
     }
 
     private fun probeFdEvent(event: CaptureEvent): ProbeResult? {

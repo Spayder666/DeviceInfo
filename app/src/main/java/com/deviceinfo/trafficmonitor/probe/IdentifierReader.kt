@@ -26,23 +26,28 @@ object IdentifierReader {
 
         def?.let { addAll(listOfNotNull(readDefinition(it))) }
 
-        when (def?.group ?: inferGroup(event)) {
+        val group = def?.group ?: inferGroup(event) ?: inferFromCategory(event)
+        when (group) {
+            IdentifierGroup.LOCATION -> addAll(readLocation())
             IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> addAll(readTelephony())
             IdentifierGroup.SETTINGS -> addAll(readSettings())
             IdentifierGroup.BUILD, IdentifierGroup.OS_VERSION, IdentifierGroup.SYSTEM_PROPERTY -> addAll(readBuild())
             IdentifierGroup.WIFI -> addAll(readWifi())
             IdentifierGroup.BLUETOOTH -> addAll(readBluetooth())
             else -> {
-                if (event.category == AccessCategory.TELEPHONY || looksLikeTelephony(event)) {
+                if (event.category == AccessCategory.LOCATION || looksLikeLocation(event)) {
+                    addAll(readLocation())
+                } else if (event.category == AccessCategory.TELEPHONY || looksLikeTelephony(event)) {
                     addAll(readTelephony())
-                }
-                if (event.category == AccessCategory.IDENTIFIER) {
+                } else if (event.category == AccessCategory.IDENTIFIER) {
                     addAll(readCommon())
                 }
             }
         }
 
-        if (values.isEmpty()) addAll(readCommon())
+        if (values.isEmpty() && (event.category == AccessCategory.LOCATION || looksLikeLocation(event))) {
+            addAll(readLocation())
+        }
         return values.values.filter { it.value.isNotBlank() && it.value != "(пусто)" }
     }
 
@@ -59,6 +64,10 @@ object IdentifierReader {
             def.id == "settings.device_name" -> settingsGet("global", "device_name")
             def.id == "settings.bluetooth_address" -> settingsGet("secure", "bluetooth_address")
             def.id == "settings.bluetooth_name" -> settingsGet("secure", "bluetooth_name")
+            def.id.startsWith("location.") -> readLocation().let { list ->
+                list.firstOrNull { it.id == def.id || it.id.endsWith(def.id.substringAfter("location.")) }?.value
+                    ?: IdentifierReader.format(list)
+            }
             def.id.startsWith("tel.") || def.id.startsWith("sub.") -> readTelephony().firstOrNull { it.id == def.id }?.value
             def.filePath != null -> RootShell.execAndRead("cat ${def.filePath} 2>/dev/null | head -c 300").trim()
             else -> null
@@ -76,6 +85,21 @@ object IdentifierReader {
             return IdentifierGroup.entries.firstOrNull { it.name == name }
         }
         return null
+    }
+
+    private fun inferFromCategory(event: CaptureEvent): IdentifierGroup? = when (event.category) {
+        AccessCategory.LOCATION -> IdentifierGroup.LOCATION
+        AccessCategory.TELEPHONY -> IdentifierGroup.TELEPHONY
+        AccessCategory.BLUETOOTH -> IdentifierGroup.BLUETOOTH
+        AccessCategory.NETWORK -> IdentifierGroup.WIFI
+        else -> null
+    }
+
+    private fun looksLikeLocation(event: CaptureEvent): Boolean {
+        val text = listOfNotNull(event.action, event.requestDetails, event.rawData, event.identifierName)
+            .joinToString(" ").lowercase()
+        return listOf("location", "gps", "gnss", "fused", "geofence", "supl", "nmea", "lat=", "longitude")
+            .any { it in text }
     }
 
     private fun looksLikeTelephony(event: CaptureEvent): Boolean {
@@ -181,6 +205,61 @@ object IdentifierReader {
             IdentifierValue("tel.sim_country", "Страна SIM", country ?: ""),
             IdentifierValue("prop.gsm.sim.state", "SIM state", simState)
         )
+    }
+
+    fun readLocation(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys location 2>/dev/null", timeoutSec = 12)
+        val gnss = RootShell.execAndRead("dumpsys gnss 2>/dev/null | head -c 4000", timeoutSec = 8)
+        val values = linkedMapOf<String, IdentifierValue>()
+
+        val regex = Regex(
+            """(?i)last (?:coarse )?location=Location\[(\w+)\s+(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)([^\]]*)]"""
+        )
+        for (match in regex.findAll(dump)) {
+            val provider = match.groupValues[1]
+            val lat = match.groupValues[2]
+            val lon = match.groupValues[3]
+            val extra = match.groupValues[4]
+            val acc = Regex("hAcc=([^\\s\\]]+)").find(extra)?.groupValues?.get(1)
+            val key = "location.$provider"
+            if (values.containsKey(key)) continue
+            values[key] = IdentifierValue(
+                key,
+                "Координаты ($provider)",
+                buildString {
+                    append("lat=$lat lon=$lon")
+                    if (acc != null) append(" accuracy=$acc")
+                }
+            )
+        }
+
+        if (values.isEmpty()) {
+            Regex("""Location\[(\w+)\s+(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)""")
+                .findAll(dump)
+                .forEach { match ->
+                    val key = "location.${match.groupValues[1]}"
+                    values.putIfAbsent(
+                        key,
+                        IdentifierValue(
+                            key,
+                            "Координаты (${match.groupValues[1]})",
+                            "lat=${match.groupValues[2]} lon=${match.groupValues[3]}"
+                        )
+                    )
+                }
+        }
+
+        val started = Regex("(?i)mStarted\\s*=\\s*(true|false)").find(gnss)?.groupValues?.get(1)
+        val interval = Regex("(?i)(?:mFixInterval|interval)\\s*=\\s*(\\d+)").find(gnss)?.groupValues?.get(1)
+        if (started != null || interval != null) {
+            values["location.hal"] = IdentifierValue(
+                "location.hal",
+                "GNSS HAL",
+                listOfNotNull(started?.let { "started=$it" }, interval?.let { "interval=${it}ms" }).joinToString(" ")
+            )
+        }
+
+        return values.values.toList()
     }
 
     private fun readWifi(): List<IdentifierValue> {
