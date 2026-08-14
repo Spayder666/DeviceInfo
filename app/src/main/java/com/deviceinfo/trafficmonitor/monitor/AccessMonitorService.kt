@@ -74,7 +74,10 @@ class AccessMonitorService : Service() {
             }
             ACTION_START -> {
                 targetPackage = intent.getStringExtra(EXTRA_PACKAGE) ?: return START_NOT_STICKY
-                startForeground(NOTIFICATION_ID, buildNotification(targetPackage))
+                val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: targetPackage
+                currentPackage = targetPackage
+                currentAppName = appName
+                startForeground(NOTIFICATION_ID, buildNotification(targetPackage, appName))
                 startMonitoring()
                 return START_STICKY
             }
@@ -187,6 +190,8 @@ class AccessMonitorService : Service() {
         HttpsMitmController.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
+        currentPackage = null
+        currentAppName = null
     }
 
     override fun onDestroy() {
@@ -195,12 +200,12 @@ class AccessMonitorService : Service() {
         super.onDestroy()
     }
 
-    private fun buildNotification(packageName: String): Notification {
+    private fun buildNotification(packageName: String, appName: String): Notification {
         createChannel()
 
         val openIntent = PendingIntent.getActivity(
             this, 0,
-            MonitorActivity.createIntent(this, packageName, packageName),
+            MonitorActivity.createIntent(this, packageName, appName),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -211,7 +216,7 @@ class AccessMonitorService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.monitor_notification_title, packageName))
+            .setContentTitle(getString(R.string.monitor_notification_title, appName))
             .setContentText(getString(R.string.monitor_notification_text))
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentIntent(openIntent)
@@ -245,11 +250,20 @@ class AccessMonitorService : Service() {
         @Volatile
         var isRunning = false
 
-        fun start(context: Context, packageName: String) {
+        @Volatile
+        var currentPackage: String? = null
+
+        @Volatile
+        var currentAppName: String? = null
+
+        fun start(context: Context, packageName: String, appName: String = packageName) {
             isRunning = true
+            currentPackage = packageName
+            currentAppName = appName
             val intent = Intent(context, AccessMonitorService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_PACKAGE, packageName)
+                putExtra(EXTRA_APP_NAME, appName)
             }
             context.startForegroundService(intent)
         }

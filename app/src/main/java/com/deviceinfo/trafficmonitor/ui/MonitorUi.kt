@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Science
@@ -329,14 +331,17 @@ private fun ToolPill(
 }
 
 @Composable
-fun EventRow(event: CaptureEvent, onClick: () -> Unit) {
+fun EventRow(item: DisplayEvent, onClick: () -> Unit) {
+    val event = item.event
     val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(event.timestamp))
     val color = categoryColor(event.category)
     val preview = event.responseDetails ?: event.requestDetails ?: event.action
+    val risk = isHighRisk(event.category)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .background(if (risk) color.copy(alpha = 0.05f) else Color.Transparent)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -360,6 +365,15 @@ fun EventRow(event: CaptureEvent, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                if (item.repeats > 1) {
+                    Text(
+                        "×${item.repeats}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = color,
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
+                }
                 Text(time, fontSize = 10.sp, color = TextMuted)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -420,6 +434,10 @@ fun EventDetailSheet(
     event: CaptureEvent,
     probeResult: ProbeResult?,
     isProbing: Boolean,
+    canPrev: Boolean,
+    canNext: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
     onProbe: () -> Unit
 ) {
     val timeFormat = SimpleDateFormat("dd.MM.yyyy HH:mm:ss.SSS", Locale.getDefault())
@@ -444,6 +462,19 @@ fun EventDetailSheet(
             Column(Modifier.weight(1f)) {
                 Text(event.action, style = MaterialTheme.typography.titleMedium, maxLines = 2)
                 Text(categoryFullLabel(event.category), style = MaterialTheme.typography.bodySmall)
+            }
+            IconButton(onClick = onPrev, enabled = canPrev, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Outlined.KeyboardArrowUp, "Новее", modifier = Modifier.size(20.dp), tint = if (canPrev) Accent else TextMuted)
+            }
+            IconButton(onClick = onNext, enabled = canNext, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Outlined.KeyboardArrowDown, "Старее", modifier = Modifier.size(20.dp), tint = if (canNext) Accent else TextMuted)
+            }
+            val clipboard = LocalClipboardManager.current
+            IconButton(
+                onClick = { clipboard.setText(AnnotatedString(eventAsText(event))) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(Icons.Outlined.ContentCopy, "Копировать всё", modifier = Modifier.size(16.dp), tint = TextMuted)
             }
         }
         Spacer(Modifier.height(12.dp))

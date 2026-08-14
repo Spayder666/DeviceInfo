@@ -7,6 +7,8 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,11 +22,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
@@ -48,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +66,8 @@ import com.deviceinfo.trafficmonitor.ui.theme.SurfaceDeep
 import com.deviceinfo.trafficmonitor.ui.theme.SurfaceLift
 import com.deviceinfo.trafficmonitor.ui.theme.TextMuted
 import com.deviceinfo.trafficmonitor.ui.theme.TrafficMonitorTheme
+import com.deviceinfo.trafficmonitor.util.AppListLoader
+import com.deviceinfo.trafficmonitor.util.RecentApp
 import com.deviceinfo.trafficmonitor.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
@@ -73,9 +80,9 @@ class MainActivity : ComponentActivity() {
             TrafficMonitorTheme {
                 MainScreen(
                     viewModel = viewModel,
-                    onAppSelected = { app ->
-                        AccessMonitorService.start(this, app.packageName)
-                        startActivity(MonitorActivity.createIntent(this, app.packageName, app.appName))
+                    onAppSelected = { packageName, appName ->
+                        AccessMonitorService.start(this, packageName, appName)
+                        startActivity(MonitorActivity.createIntent(this, packageName, appName))
                     }
                 )
             }
@@ -85,16 +92,20 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.checkRoot()
+        viewModel.refreshRecents()
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: MainViewModel, onAppSelected: (InstalledApp) -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onAppSelected: (String, String) -> Unit) {
     val apps by viewModel.filteredApps.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isRootAvailable by viewModel.isRootAvailable.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val showSystem by viewModel.showSystem.collectAsState()
+    val recents by viewModel.recents.collectAsState()
+    val activePackage by viewModel.activePackage.collectAsState()
 
     Scaffold(
         containerColor = SurfaceDeep,
@@ -149,23 +160,104 @@ fun MainScreen(viewModel: MainViewModel, onAppSelected: (InstalledApp) -> Unit) 
                     unfocusedContainerColor = SurfaceLift
                 )
             )
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ScopeChip("Пользовательские", !showSystem) { if (showSystem) viewModel.toggleSystemApps() }
+                ScopeChip("Системные", showSystem) { if (!showSystem) viewModel.toggleSystemApps() }
+            }
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
                 }
-            } else if (apps.isEmpty()) {
+            } else if (apps.isEmpty() && recents.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Ничего не найдено", color = TextMuted, fontSize = 13.sp)
                 }
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+                    if (recents.isNotEmpty() && searchQuery.isBlank()) {
+                        item {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Outlined.History, null, tint = TextMuted, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Недавние", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                recents.forEach { recent ->
+                                    RecentCard(recent, activePackage == recent.packageName) {
+                                        onAppSelected(recent.packageName, recent.appName)
+                                    }
+                                }
+                            }
+                        }
+                        item { Spacer(Modifier.height(6.dp)) }
+                    }
                     items(apps, key = { it.packageName }) { app ->
-                        AppRow(app, isRootAvailable) { onAppSelected(app) }
+                        AppRow(app, isRootAvailable, activePackage == app.packageName) {
+                            onAppSelected(app.packageName, app.appName)
+                        }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ScopeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        fontSize = 11.sp,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (selected) Accent else TextMuted,
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) Accent.copy(alpha = 0.14f) else SurfaceLift)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    )
+}
+
+@Composable
+private fun RecentCard(recent: RecentApp, live: Boolean, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val icon = AppListLoader.getAppIcon(context, recent.packageName)
+    Column(
+        modifier = Modifier
+            .width(88.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceLift)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        icon?.let {
+            Image(
+                bitmap = it.toBitmap(36, 36).asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
+            )
+        } ?: Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDeep))
+        Spacer(Modifier.height(6.dp))
+        Text(recent.appName, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            if (live) "идёт" else "${recent.eventCount} соб.",
+            fontSize = 9.sp,
+            color = if (live) Accent else TextMuted
+        )
     }
 }
 
@@ -198,7 +290,7 @@ private fun RootChip(ok: Boolean) {
 }
 
 @Composable
-private fun AppRow(app: InstalledApp, enabled: Boolean, onClick: () -> Unit) {
+private fun AppRow(app: InstalledApp, enabled: Boolean, live: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -215,7 +307,13 @@ private fun AppRow(app: InstalledApp, enabled: Boolean, onClick: () -> Unit) {
         } ?: Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceLift))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(app.appName, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(app.appName, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (live) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("идёт", fontSize = 10.sp, color = Accent, fontWeight = FontWeight.SemiBold)
+                }
+            }
             Text(app.packageName, fontSize = 11.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Icon(Icons.Outlined.ChevronRight, null, tint = TextMuted, modifier = Modifier.size(18.dp))

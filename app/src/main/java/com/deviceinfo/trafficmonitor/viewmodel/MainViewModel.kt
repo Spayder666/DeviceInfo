@@ -6,14 +6,24 @@ import androidx.lifecycle.viewModelScope
 import com.deviceinfo.trafficmonitor.TrafficMonitorApp
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
+import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.mitm.HttpsMitmController
 import com.deviceinfo.trafficmonitor.model.InstalledApp
+import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
+import com.deviceinfo.trafficmonitor.ui.DisplayEvent
+import com.deviceinfo.trafficmonitor.ui.SessionStats
+import com.deviceinfo.trafficmonitor.ui.buildSessionStats
+import com.deviceinfo.trafficmonitor.ui.collapseRepeats
+import com.deviceinfo.trafficmonitor.ui.eventMatchesQuery
 import com.deviceinfo.trafficmonitor.util.AppListLoader
+import com.deviceinfo.trafficmonitor.util.RecentApp
+import com.deviceinfo.trafficmonitor.util.SessionPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -37,17 +48,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    val filteredApps: StateFlow<List<InstalledApp>> = combine(_apps, _searchQuery) { apps, query ->
-        if (query.isBlank()) apps
-        else apps.filter {
-            it.appName.contains(query, ignoreCase = true) ||
-                it.packageName.contains(query, ignoreCase = true)
+    private val _showSystem = MutableStateFlow(false)
+    val showSystem: StateFlow<Boolean> = _showSystem.asStateFlow()
+
+    private val _recents = MutableStateFlow<List<RecentApp>>(emptyList())
+    val recents: StateFlow<List<RecentApp>> = _recents.asStateFlow()
+
+    private val _activePackage = MutableStateFlow<String?>(null)
+    val activePackage: StateFlow<String?> = _activePackage.asStateFlow()
+
+    val filteredApps: StateFlow<List<InstalledApp>> = combine(_apps, _searchQuery, _showSystem) { apps, query, system ->
+        apps.filter { app ->
+            (system || !app.isSystem) &&
+                (query.isBlank() ||
+                    app.appName.contains(query, ignoreCase = true) ||
+                    app.packageName.contains(query, ignoreCase = true))
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         checkRoot()
         loadApps()
+        refreshRecents()
+    }
+
+    fun toggleSystemApps() {
+        _showSystem.value = !_showSystem.value
+    }
+
+    fun refreshRecents() {
+        _recents.value = SessionPrefs.recents(getApplication())
+        _activePackage.value = AccessMonitorService.currentPackage
     }
 
     fun checkRoot() {
@@ -76,24 +107,64 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val _packageName = MutableStateFlow("")
     private val _selectedCategory = MutableStateFlow<AccessCategory?>(null)
     private val _selectedIdentifierGroup = MutableStateFlow<String?>(null)
+    private val _selectedSource = MutableStateFlow<EventSource?>(null)
+    private val _searchQuery = MutableStateFlow("")
+    private val _dedupEnabled = MutableStateFlow(true)
+    private val _paused = MutableStateFlow(false)
+    private val _frozenEvents = MutableStateFlow<List<DisplayEvent>>(emptyList())
+    private val _frozenRawCount = MutableStateFlow(0)
     private val _selectedEvent = MutableStateFlow<CaptureEvent?>(null)
     private val _allEvents = MutableStateFlow<List<CaptureEvent>>(emptyList())
+    private val _targetRunning = MutableStateFlow(false)
+    private val _showStats = MutableStateFlow(false)
+    private val _showSearch = MutableStateFlow(false)
 
     val packageName: StateFlow<String> = _packageName.asStateFlow()
     val selectedCategory: StateFlow<AccessCategory?> = _selectedCategory.asStateFlow()
     val selectedIdentifierGroup: StateFlow<String?> = _selectedIdentifierGroup.asStateFlow()
+    val selectedSource: StateFlow<EventSource?> = _selectedSource.asStateFlow()
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    val dedupEnabled: StateFlow<Boolean> = _dedupEnabled.asStateFlow()
+    val paused: StateFlow<Boolean> = _paused.asStateFlow()
     val selectedEvent: StateFlow<CaptureEvent?> = _selectedEvent.asStateFlow()
+    val targetRunning: StateFlow<Boolean> = _targetRunning.asStateFlow()
+    val showStats: StateFlow<Boolean> = _showStats.asStateFlow()
+    val showSearch: StateFlow<Boolean> = _showSearch.asStateFlow()
 
-    val events: StateFlow<List<CaptureEvent>> = combine(
+    private val filteredRaw: StateFlow<List<CaptureEvent>> = combine(
         _allEvents,
         _selectedCategory,
-        _selectedIdentifierGroup
-    ) { all, cat, idGroup ->
-        var filtered = all
-        if (cat != null) filtered = filtered.filter { it.category == cat }
-        if (idGroup != null) filtered = filtered.filter { it.identifierGroup == idGroup }
-        filtered
+        _selectedIdentifierGroup,
+        _selectedSource,
+        _searchQuery
+    ) { all, cat, idGroup, source, query ->
+        all.filter { event ->
+            (cat == null || event.category == cat) &&
+                (idGroup == null || event.identifierGroup == idGroup) &&
+                (source == null || event.source == source) &&
+                eventMatchesQuery(event, query)
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val liveDisplay: StateFlow<List<DisplayEvent>> = combine(filteredRaw, _dedupEnabled) { list, dedup ->
+        if (dedup) collapseRepeats(list) else list.map { DisplayEvent(it) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val events: StateFlow<List<DisplayEvent>> = combine(liveDisplay, _paused, _frozenEvents) { live, paused, frozen ->
+        if (paused) frozen else live
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val missedWhilePaused: StateFlow<Int> = combine(_allEvents, _paused, _frozenRawCount) { all, paused, frozen ->
+        if (paused) (all.size - frozen).coerceAtLeast(0) else 0
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val sessionStats: StateFlow<SessionStats> = _allEvents
+        .map { buildSessionStats(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SessionStats())
+
+    val sourceCounts: StateFlow<Map<EventSource, Int>> = _allEvents
+        .map { list -> list.groupingBy { it.source }.eachCount() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     val eventCount: StateFlow<Int> = _allEvents
         .map { it.size }
@@ -118,6 +189,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 _allEvents.value = list
             }
         }
+        viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                _targetRunning.value = RootShell.isAppRunning(_packageName.value)
+                delay(3000)
+            }
+        }
     }
 
     fun setCategoryFilter(category: AccessCategory?) {
@@ -134,12 +211,51 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setSourceFilter(source: EventSource?) {
+        _selectedSource.value = if (_selectedSource.value == source) null else source
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun toggleSearch() {
+        _showSearch.value = !_showSearch.value
+        if (!_showSearch.value) _searchQuery.value = ""
+    }
+
+    fun toggleDedup() {
+        _dedupEnabled.value = !_dedupEnabled.value
+    }
+
+    fun togglePause() {
+        if (!_paused.value) {
+            _frozenEvents.value = liveDisplay.value
+            _frozenRawCount.value = _allEvents.value.size
+            _paused.value = true
+        } else {
+            _paused.value = false
+        }
+    }
+
+    fun toggleStats() {
+        _showStats.value = !_showStats.value
+    }
+
     fun selectEvent(event: CaptureEvent?) {
         _selectedEvent.value = event
         _probeResult.value = null
         if (event != null) {
             probeEvent(event)
         }
+    }
+
+    fun selectAdjacent(delta: Int) {
+        val list = events.value
+        val currentId = _selectedEvent.value?.id ?: return
+        val index = list.indexOfFirst { it.event.id == currentId }
+        val next = list.getOrNull(index + delta) ?: return
+        selectEvent(next.event)
     }
 
     fun clearEvents() {
@@ -151,7 +267,20 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun launchTargetApp() {
         viewModelScope.launch(Dispatchers.IO) {
             RootShell.launchApp(_packageName.value)
+            _targetRunning.value = true
         }
+    }
+
+    fun forceStopTarget() {
+        viewModelScope.launch(Dispatchers.IO) {
+            RootShell.forceStop(_packageName.value)
+            _targetRunning.value = false
+            _fridaMessage.value = "Приложение остановлено"
+        }
+    }
+
+    fun rememberSession(appName: String) {
+        SessionPrefs.remember(getApplication(), _packageName.value, appName, _allEvents.value.size)
     }
 
     private val _probeResult = MutableStateFlow<com.deviceinfo.trafficmonitor.probe.ProbeResult?>(null)
@@ -180,16 +309,25 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun exportAll(appName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            _isExporting.value = true
-            val events = repository.getAllEvents(_packageName.value)
-            _exportResult.value = com.deviceinfo.trafficmonitor.export.ExportHelper.exportEvents(
-                context = getApplication(),
-                packageName = _packageName.value,
-                appName = appName,
-                events = events
-            )
-            _isExporting.value = false
+            doExport(appName, repository.getAllEvents(_packageName.value))
         }
+    }
+
+    fun exportVisible(appName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            doExport(appName, filteredRaw.value)
+        }
+    }
+
+    private fun doExport(appName: String, events: List<CaptureEvent>) {
+        _isExporting.value = true
+        _exportResult.value = com.deviceinfo.trafficmonitor.export.ExportHelper.exportEvents(
+            context = getApplication(),
+            packageName = _packageName.value,
+            appName = appName,
+            events = events
+        )
+        _isExporting.value = false
     }
 
     fun clearExportResult() {

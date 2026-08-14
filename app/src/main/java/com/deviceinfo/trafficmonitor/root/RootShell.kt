@@ -62,6 +62,17 @@ object RootShell {
         return match?.groupValues?.get(1)?.toIntOrNull()
     }
 
+    fun forceStop(packageName: String): Boolean {
+        return try {
+            execAndRead("am force-stop $packageName", timeoutSec = 8)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun isAppRunning(packageName: String): Boolean = findPid(packageName) != null
+
     fun launchApp(packageName: String): Boolean {
         return try {
             val component = execAndRead(

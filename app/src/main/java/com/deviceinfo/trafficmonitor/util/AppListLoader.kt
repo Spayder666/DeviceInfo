@@ -9,22 +9,17 @@ object AppListLoader {
 
     fun loadInstalledApps(context: Context): List<InstalledApp> {
         val pm = context.packageManager
-        val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 || isUpdatedSystemApp(it) }
+        return pm.getInstalledApplications(PackageManager.GET_META_DATA)
             .filter { it.packageName != context.packageName }
             .map { info ->
                 InstalledApp(
                     packageName = info.packageName,
                     appName = pm.getApplicationLabel(info).toString(),
-                    icon = runCatching { pm.getApplicationIcon(info) }.getOrNull()
+                    icon = runCatching { pm.getApplicationIcon(info) }.getOrNull(),
+                    isSystem = info.flags and ApplicationInfo.FLAG_SYSTEM != 0
                 )
             }
             .sortedBy { it.appName.lowercase() }
-        return apps
-    }
-
-    private fun isUpdatedSystemApp(info: ApplicationInfo): Boolean {
-        return info.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
     }
 
     fun getAppName(context: Context, packageName: String): String {
@@ -34,5 +29,9 @@ object AppListLoader {
         } catch (_: Exception) {
             packageName
         }
+    }
+
+    fun getAppIcon(context: Context, packageName: String): android.graphics.drawable.Drawable? {
+        return runCatching { context.packageManager.getApplicationIcon(packageName) }.getOrNull()
     }
 }
