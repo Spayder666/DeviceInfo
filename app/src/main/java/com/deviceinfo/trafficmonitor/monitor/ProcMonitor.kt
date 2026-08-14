@@ -101,7 +101,7 @@ class ProcMonitor(
             "radio" in lower || "telephony" in lower -> AccessCategory.TELEPHONY
             "contacts" in lower -> AccessCategory.CONTACTS
             "sms" in lower -> AccessCategory.SMS
-            "socket:" -> AccessCategory.NETWORK
+            "socket:" in lower -> AccessCategory.NETWORK
             "anon_inode" in lower && "sync" in lower -> AccessCategory.SYSTEM_API
             "/dev/" in lower -> AccessCategory.SYSTEM_API
             "/data/" in lower || "/storage/" in lower -> AccessCategory.STORAGE

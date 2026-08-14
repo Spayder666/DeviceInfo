@@ -3,6 +3,7 @@ package com.deviceinfo.trafficmonitor.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.deviceinfo.trafficmonitor.data.AccessCategory
+import com.deviceinfo.trafficmonitor.data.EventSource
 
 @Composable
 fun categoryColor(category: AccessCategory): Color = when (category) {
@@ -45,11 +46,11 @@ fun categoryLabel(category: AccessCategory): String = when (category) {
     AccessCategory.OTHER -> "Прочее"
 }
 
-fun sourceLabel(source: com.deviceinfo.trafficmonitor.data.EventSource): String = when (source) {
-    com.deviceinfo.trafficmonitor.data.EventSource.APPOPS -> "AppOps"
-    com.deviceinfo.trafficmonitor.data.EventSource.LOGCAT -> "Logcat"
-    com.deviceinfo.trafficmonitor.data.EventSource.STRACE -> "strace"
-    com.deviceinfo.trafficmonitor.data.EventSource.PROC -> "/proc"
-    com.deviceinfo.trafficmonitor.data.    EventSource.DUMPSYS -> "dumpsys"
+fun sourceLabel(source: EventSource): String = when (source) {
+    EventSource.APPOPS -> "AppOps"
+    EventSource.LOGCAT -> "Logcat"
+    EventSource.STRACE -> "strace"
+    EventSource.PROC -> "/proc"
+    EventSource.DUMPSYS -> "dumpsys"
     EventSource.FRIDA -> "Frida"
 }
