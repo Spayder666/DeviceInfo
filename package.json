@@ -1,0 +1,25 @@
+{
+  "name": "deviceinfo",
+  "version": "1.0.0",
+  "description": "DeviceInfo — a small web app that reports live system and device information.",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "device",
+    "system",
+    "info",
+    "express"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
