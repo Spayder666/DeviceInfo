@@ -319,7 +319,13 @@ fun CategoryFilterRow(selected: AccessCategory?, onSelect: (AccessCategory?) -> 
         AccessCategory.PERMISSION to "Права",
         AccessCategory.MICROPHONE to "Мик",
         AccessCategory.STORAGE to "Файлы",
-        AccessCategory.SENSOR to "Датчики"
+        AccessCategory.SENSOR to "Датчики",
+        AccessCategory.BLUETOOTH to "BT",
+        AccessCategory.CONTACTS to "Контакты",
+        AccessCategory.SMS to "SMS",
+        AccessCategory.CLIPBOARD to "Буфер",
+        AccessCategory.CALENDAR to "Календарь",
+        AccessCategory.SYSTEM_API to "Система"
     )
 
     Row(

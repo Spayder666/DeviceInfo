@@ -61,7 +61,27 @@ class AppOpsMonitor(
         "READ_DEVICE_IDENTIFIERS" to AccessCategory.IDENTIFIER,
         "READ_MEDIA_IMAGES" to AccessCategory.STORAGE,
         "READ_MEDIA_VIDEO" to AccessCategory.STORAGE,
-        "READ_MEDIA_AUDIO" to AccessCategory.STORAGE
+        "READ_MEDIA_AUDIO" to AccessCategory.STORAGE,
+        "READ_MEDIA_VISUAL_USER_SELECTED" to AccessCategory.STORAGE,
+        "ACCESS_MEDIA_LOCATION" to AccessCategory.LOCATION,
+        "PHONE_CALL_CAMERA" to AccessCategory.CAMERA,
+        "PHONE_CALL_MICROPHONE" to AccessCategory.MICROPHONE,
+        "RECORD_AUDIO_HOTWORD" to AccessCategory.MICROPHONE,
+        "PROJECT_MEDIA" to AccessCategory.SYSTEM_API,
+        "SYSTEM_ALERT_WINDOW" to AccessCategory.SYSTEM_API,
+        "START_FOREGROUND" to AccessCategory.SYSTEM_API,
+        "WAKE_LOCK" to AccessCategory.SYSTEM_API,
+        "VIBRATE" to AccessCategory.SENSOR,
+        "BLUETOOTH_ADVERTISE" to AccessCategory.BLUETOOTH,
+        "USE_BIOMETRIC" to AccessCategory.SYSTEM_API,
+        "GET_USAGE_STATS" to AccessCategory.SYSTEM_API,
+        "POST_NOTIFICATION" to AccessCategory.SYSTEM_API,
+        "ACTIVATE_VPN" to AccessCategory.NETWORK,
+        "CHANGE_WIFI_STATE" to AccessCategory.NETWORK,
+        "RECEIVE_MMS" to AccessCategory.SMS,
+        "PROCESS_OUTGOING_CALLS" to AccessCategory.TELEPHONY,
+        "ANSWER_PHONE_CALLS" to AccessCategory.TELEPHONY,
+        "MOCK_LOCATION" to AccessCategory.LOCATION
     )
 
     private val opIdentifierMap = mapOf(

@@ -350,7 +350,10 @@ function hookContentResolver() {
       overload.implementation = function () {
         var uri = arguments[0] ? safeStr(arguments[0].toString()) : '';
         var result = overload.apply(this, arguments);
-        if (uri.indexOf('settings') >= 0 || uri.indexOf('telephony') >= 0 || uri.indexOf('gsf') >= 0) {
+        if (uri.indexOf('settings') >= 0 || uri.indexOf('telephony') >= 0 || uri.indexOf('gsf') >= 0 ||
+            uri.indexOf('contacts') >= 0 || uri.indexOf('sms') >= 0 || uri.indexOf('mms') >= 0 ||
+            uri.indexOf('call_log') >= 0 || uri.indexOf('calendar') >= 0 || uri.indexOf('media') >= 0 ||
+            uri.indexOf('browser') >= 0 || uri.indexOf('voicemail') >= 0 || uri.indexOf('blocked') >= 0) {
           var rows = 0;
           try { rows = result ? result.getCount() : 0; } catch (e) {}
           writeEvent('cp.settings_secure', 'ContentResolver.query', uri, 'rows=' + rows, null);
@@ -503,6 +506,164 @@ function hookNativeProperties() {
   } catch (e) {}
 }
 
+function hookCamera() {
+  try {
+    var CM = Java.use('android.hardware.camera2.CameraManager');
+    ['openCamera', 'openCameraForUid', 'getCameraIdList'].forEach(function (m) {
+      try {
+        CM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeEvent('location.gps', 'CameraManager.' + m, safeStr(arguments[0]), safeStr(result), 'CAMERA');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Cam = Java.use('android.hardware.Camera');
+    Cam.open.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('location.gps', 'Camera.open', safeStr(arguments[0]), 'opened', 'CAMERA');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookAudio() {
+  try {
+    var AR = Java.use('android.media.AudioRecord');
+    AR.startRecording.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('location.gps', 'AudioRecord.startRecording', '', 'recording', 'RECORD_AUDIO');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var MR = Java.use('android.media.MediaRecorder');
+    MR.start.implementation = function () {
+      writeEvent('location.gps', 'MediaRecorder.start', '', 'recording', 'RECORD_AUDIO');
+      return this.start();
+    };
+  } catch (e) {}
+  try {
+    var AM = Java.use('android.media.AudioManager');
+    ['getMode', 'setMode', 'isMicrophoneMute'].forEach(function (m) {
+      try {
+        AM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeEvent('location.gps', 'AudioManager.' + m, '', safeStr(result), 'RECORD_AUDIO');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookSensors() {
+  try {
+    var SM = Java.use('android.hardware.SensorManager');
+    SM.registerListener.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var sensor = '';
+        try { sensor = safeStr(arguments[1]); } catch (e) {}
+        writeEvent('location.gps', 'SensorManager.registerListener', sensor, 'registered', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookClipboard() {
+  try {
+    var CL = Java.use('android.content.ClipboardManager');
+    ['getPrimaryClip', 'setPrimaryClip', 'getText', 'hasPrimaryClip'].forEach(function (m) {
+      try {
+        CL[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeEvent('location.gps', 'ClipboardManager.' + m, '', safeStr(result), 'READ_CLIPBOARD');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookSms() {
+  try {
+    var SM = Java.use('android.telephony.SmsManager');
+    ['sendTextMessage', 'sendMultipartTextMessage', 'sendDataMessage', 'getDefault'].forEach(function (m) {
+      try {
+        SM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var args = [];
+            for (var i = 0; i < Math.min(arguments.length, 3); i++) args.push(safeStr(arguments[i]));
+            var result = overload.apply(this, arguments);
+            writeEvent('location.gps', 'SmsManager.' + m, args.join(', '), safeStr(result), 'SEND_SMS');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookNetworkDeep() {
+  try {
+    var URL = Java.use('java.net.URL');
+    URL.openConnection.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var result = overload.apply(this, arguments);
+        writeEvent('net.hostname', 'URL.openConnection', safeStr(this.toString()), safeStr(result), null);
+        return result;
+      };
+    });
+  } catch (e) {}
+  try {
+    var CM = Java.use('android.net.ConnectivityManager');
+    ['getActiveNetworkInfo', 'getActiveNetwork', 'requestNetwork', 'registerDefaultNetworkCallback'].forEach(function (m) {
+      try {
+        CM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeEvent('net.link_addresses', 'ConnectivityManager.' + m, '', safeStr(result), null);
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookBiometric() {
+  try {
+    var BP = Java.use('android.hardware.biometrics.BiometricPrompt');
+    BP.authenticate.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeEvent('attest.key', 'BiometricPrompt.authenticate', '', 'prompt', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+}
+
+function hookMediaProjection() {
+  try {
+    var MPM = Java.use('android.media.projection.MediaProjectionManager');
+    MPM.createScreenCaptureIntent.implementation = function () {
+      writeEvent('location.gps', 'MediaProjectionManager.createScreenCaptureIntent', '', 'screen capture', null);
+      return this.createScreenCaptureIntent();
+    };
+  } catch (e) {}
+}
+
 function installJavaHooks() {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
   hookBuild();
@@ -518,6 +679,14 @@ function installJavaHooks() {
   hookPackageManager();
   hookContentResolver();
   hookLocation();
+  hookCamera();
+  hookAudio();
+  hookSensors();
+  hookClipboard();
+  hookSms();
+  hookNetworkDeep();
+  hookBiometric();
+  hookMediaProjection();
 }
 
 // Хуки ставим после старта приложения, чтобы не блокировать запуск.

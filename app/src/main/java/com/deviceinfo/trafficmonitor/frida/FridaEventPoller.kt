@@ -74,7 +74,7 @@ class FridaEventPoller(
                 CaptureEvent(
                     timestamp = timestamp,
                     targetPackage = packageName,
-                    category = AccessCategory.IDENTIFIER,
+                    category = categoryFor(action, permission, def?.group?.name),
                     source = EventSource.FRIDA,
                     action = def?.displayName ?: action,
                     permission = permission ?: def?.permission,
@@ -92,5 +92,26 @@ class FridaEventPoller(
 
     fun resetOffset() {
         lastSize = 0L
+    }
+
+    private fun categoryFor(action: String, permission: String?, group: String?): AccessCategory {
+        val text = "$action ${permission.orEmpty()} ${group.orEmpty()}".lowercase()
+        return when {
+            "camera" in text -> AccessCategory.CAMERA
+            "audio" in text || "record" in text || "microphone" in text || "mediarecorder" in text -> AccessCategory.MICROPHONE
+            "location" in text || "gnss" in text || "gps" in text || "fused" in text || "geofence" in text -> AccessCategory.LOCATION
+            "sms" in text || "mms" in text -> AccessCategory.SMS
+            "contact" in text -> AccessCategory.CONTACTS
+            "calendar" in text -> AccessCategory.CALENDAR
+            "clipboard" in text -> AccessCategory.CLIPBOARD
+            "sensor" in text -> AccessCategory.SENSOR
+            "bluetooth" in text || "bt." in text -> AccessCategory.BLUETOOTH
+            "wifi" in text || "http" in text || "url." in text || "connectivity" in text || "socket" in text -> AccessCategory.NETWORK
+            "telephony" in text || "imei" in text || "sim" in text || "phone" in text -> AccessCategory.TELEPHONY
+            "storage" in text || "file" in text || "media/" in text -> AccessCategory.STORAGE
+            "biometric" in text || "fingerprint" in text || "projection" in text -> AccessCategory.SYSTEM_API
+            group == "LOCATION" -> AccessCategory.LOCATION
+            else -> AccessCategory.IDENTIFIER
+        }
     }
 }

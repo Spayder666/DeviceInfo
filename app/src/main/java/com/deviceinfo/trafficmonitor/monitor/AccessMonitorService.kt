@@ -37,7 +37,8 @@ class AccessMonitorService : Service() {
     private var procMonitor: ProcMonitor? = null
     private var fridaMonitor: FridaMonitor? = null
     private var locationDumpMonitor: LocationDumpMonitor? = null
-    private var systemLocationLogcat: SystemLocationLogcatMonitor? = null
+    private var systemLogcatMonitor: SystemLogcatMonitor? = null
+    private var comprehensiveDumpMonitor: ComprehensiveDumpMonitor? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -75,10 +76,11 @@ class AccessMonitorService : Service() {
             IdentifierSnapshot.record(targetPackage, targetPid, repository)
 
             locationDumpMonitor = LocationDumpMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            systemLocationLogcat = SystemLocationLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            systemLogcatMonitor = SystemLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            comprehensiveDumpMonitor = ComprehensiveDumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
             if (targetPid > 0) {
-                appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
                 logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
                 straceMonitor = StraceMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
                 procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
@@ -125,7 +127,8 @@ class AccessMonitorService : Service() {
         procMonitor?.stop()
         fridaMonitor?.stop()
         locationDumpMonitor?.stop()
-        systemLocationLogcat?.stop()
+        systemLogcatMonitor?.stop()
+        comprehensiveDumpMonitor?.stop()
         FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }
