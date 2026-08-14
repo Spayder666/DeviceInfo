@@ -13,8 +13,8 @@ android {
         applicationId = "com.deviceinfo.trafficmonitor"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,3 +75,13 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+val fridaGadgetArm64 = file("src/main/assets/frida/arm64-v8a/libfrida-gadget.so")
+val downloadFridaGadgets by tasks.registering(Exec::class) {
+    workingDir = rootProject.projectDir
+    commandLine("bash", "scripts/download_frida_gadgets.sh")
+    onlyIf { !fridaGadgetArm64.exists() || fridaGadgetArm64.length() == 0L }
+    doFirst { file("src/main/assets/frida/arm64-v8a").mkdirs() }
+}
+
+tasks.named("preBuild").configure { dependsOn(downloadFridaGadgets) }

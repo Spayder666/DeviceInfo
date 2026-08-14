@@ -22,6 +22,9 @@ interface CaptureEventDao {
     @Query("DELETE FROM capture_events WHERE targetPackage = :packageName")
     suspend fun clearForPackage(packageName: String)
 
+    @Query("SELECT * FROM capture_events WHERE targetPackage = :packageName ORDER BY timestamp ASC")
+    suspend fun getAllForPackage(packageName: String): List<CaptureEvent>
+
     @Query("SELECT COUNT(*) FROM capture_events WHERE targetPackage = :packageName")
     fun observeCount(packageName: String): Flow<Int>
 

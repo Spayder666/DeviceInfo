@@ -157,4 +157,28 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun clearProbeResult() {
         _probeResult.value = null
     }
+
+    private val _exportResult = MutableStateFlow<com.deviceinfo.trafficmonitor.export.ExportHelper.ExportResult?>(null)
+    val exportResult = _exportResult.asStateFlow()
+
+    private val _isExporting = MutableStateFlow(false)
+    val isExporting = _isExporting.asStateFlow()
+
+    fun exportAll(appName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isExporting.value = true
+            val events = repository.getAllEvents(_packageName.value)
+            _exportResult.value = com.deviceinfo.trafficmonitor.export.ExportHelper.exportEvents(
+                context = getApplication(),
+                packageName = _packageName.value,
+                appName = appName,
+                events = events
+            )
+            _isExporting.value = false
+        }
+    }
+
+    fun clearExportResult() {
+        _exportResult.value = null
+    }
 }

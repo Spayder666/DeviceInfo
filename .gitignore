@@ -6,6 +6,7 @@
 .DS_Store
 **/build/
 /release/
+/app/src/main/assets/frida/*/libfrida-gadget.so
 /captures/
 .externalNativeBuild/
 .cxx/

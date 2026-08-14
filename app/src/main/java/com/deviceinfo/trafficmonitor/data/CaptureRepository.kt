@@ -14,6 +14,9 @@ class CaptureRepository(private val dao: CaptureEventDao) {
 
     suspend fun getById(id: Long): CaptureEvent? = dao.getById(id)
 
+    suspend fun getAllEvents(packageName: String): List<CaptureEvent> =
+        dao.getAllForPackage(packageName)
+
     suspend fun clear(packageName: String) = dao.clearForPackage(packageName)
 
     suspend fun isDuplicate(pkg: String, action: String, raw: String?, sinceMs: Long = 2000): Boolean =

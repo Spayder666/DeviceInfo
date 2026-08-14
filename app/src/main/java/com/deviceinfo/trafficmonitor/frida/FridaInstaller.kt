@@ -27,10 +27,16 @@ object FridaInstaller {
 
     enum class FridaStatus {
         NOT_INSTALLED,
+        EXTRACTING,
         DOWNLOADING,
         READY,
         INJECTED,
         ERROR
+    }
+
+    /** Вызывается при старте приложения — подготавливает Frida заранее. */
+    suspend fun prepareOnAppStart(context: Context) {
+        ensureReady(context)
     }
 
     suspend fun ensureReady(context: Context): Boolean = withContext(Dispatchers.IO) {
@@ -45,11 +51,14 @@ object FridaInstaller {
         copyAssetToDevice(context, "frida/identifier_hooks.js", HOOKS_PATH)
 
         if (!isGadgetPresent()) {
-            status = FridaStatus.DOWNLOADING
-            if (!downloadGadget()) {
-                status = FridaStatus.ERROR
-                lastError = "Не удалось скачать frida-gadget $FRIDA_VERSION"
-                return@withContext false
+            status = FridaStatus.EXTRACTING
+            if (!deployGadgetFromApp(context)) {
+                status = FridaStatus.DOWNLOADING
+                if (!downloadGadget(context)) {
+                    status = FridaStatus.ERROR
+                    lastError = lastError ?: "Frida gadget недоступен"
+                    return@withContext false
+                }
             }
         }
 
@@ -84,27 +93,65 @@ object FridaInstaller {
         return RootShell.execAndRead("test -f $GADGET_PATH && echo ok").trim() == "ok"
     }
 
-    private fun downloadGadget(): Boolean {
-        val abi = resolveDeviceAbi()
-        val url = "https://github.com/frida/frida/releases/download/$FRIDA_VERSION/" +
-            "frida-gadget-$FRIDA_VERSION-android-$abi.so.xz"
-        val xzPath = "$BASE_DIR/gadget.so.xz"
-        val extracted = "$BASE_DIR/frida-gadget-$FRIDA_VERSION-android-$abi.so"
+    /** Извлекает встроенный в APK frida-gadget для текущего ABI. */
+    private fun deployGadgetFromApp(context: Context): Boolean {
+        val abiFolder = resolveAssetAbiFolder()
+        val assetPath = "frida/$abiFolder/libfrida-gadget.so"
+        val cacheFile = File(context.filesDir, "frida-gadget-$abiFolder.so")
 
         return try {
-            downloadFile(url, xzPath)
-            val decompress = RootShell.execAndRead(
-                "which xz >/dev/null 2>&1 && xz -d -f $xzPath || unxz -f $xzPath; " +
-                    "test -f $extracted && mv $extracted $GADGET_PATH && chmod 755 $GADGET_PATH && echo ok"
+            if (!cacheFile.exists() || cacheFile.length() == 0L) {
+                context.assets.open(assetPath).use { input ->
+                    cacheFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+            RootShell.execAndRead(
+                "cp ${cacheFile.absolutePath} $GADGET_PATH && chmod 755 $GADGET_PATH && echo ok"
+            ).trim() == "ok"
+        } catch (e: Exception) {
+            lastError = "Встроенный gadget ($assetPath): ${e.message}"
+            false
+        }
+    }
+
+    private fun resolveAssetAbiFolder(): String {
+        val primary = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        return when {
+            primary.contains("arm64") -> "arm64-v8a"
+            primary.contains("armeabi") || primary == "arm" -> "armeabi-v7a"
+            primary.contains("x86_64") -> "x86_64"
+            primary.contains("x86") -> "x86"
+            else -> "arm64-v8a"
+        }
+    }
+
+    /** Запасной вариант — скачать с GitHub, если ABI не встроен в APK. */
+    private fun downloadGadget(context: Context): Boolean {
+        val abi = resolveDownloadAbi()
+        val url = "https://github.com/frida/frida/releases/download/$FRIDA_VERSION/" +
+            "frida-gadget-$FRIDA_VERSION-android-$abi.so.xz"
+        val cacheXz = File(context.cacheDir, "frida-gadget-$abi.so.xz")
+        val cacheSo = File(cacheXz.parent, cacheXz.name.removeSuffix(".xz"))
+
+        return try {
+            downloadFile(url, cacheXz)
+            RootShell.execAndRead(
+                "which xz >/dev/null 2>&1 && xz -d -f ${cacheXz.absolutePath} || unxz -f ${cacheXz.absolutePath}"
             )
-            decompress.trim() == "ok"
+            if (!cacheSo.exists()) {
+                lastError = "Не удалось распаковать frida-gadget"
+                return false
+            }
+            RootShell.execAndRead(
+                "cp ${cacheSo.absolutePath} $GADGET_PATH && chmod 755 $GADGET_PATH && echo ok"
+            ).trim() == "ok"
         } catch (e: Exception) {
             lastError = e.message
             false
         }
     }
 
-    private fun resolveDeviceAbi(): String {
+    private fun resolveDownloadAbi(): String {
         val primary = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64"
         return when {
             primary.contains("arm64") -> "arm64"
@@ -115,19 +162,15 @@ object FridaInstaller {
         }
     }
 
-    private fun downloadFile(urlString: String, destPath: String) {
+    private fun downloadFile(urlString: String, destFile: File) {
         val url = URL(urlString)
         val connection = url.openConnection() as HttpURLConnection
         connection.connectTimeout = 30_000
         connection.readTimeout = 120_000
         connection.connect()
-
-        val localTemp = File.createTempFile("gadget_", ".xz")
         connection.inputStream.use { input ->
-            localTemp.outputStream().use { output -> input.copyTo(output) }
+            destFile.outputStream().use { output -> input.copyTo(output) }
         }
-        RootShell.execAndRead("cp ${localTemp.absolutePath} $destPath && chmod 644 $destPath")
-        localTemp.delete()
     }
 
     suspend fun injectViaWrap(packageName: String): Boolean = withContext(Dispatchers.IO) {
@@ -157,24 +200,11 @@ object FridaInstaller {
         RootShell.execAndRead("truncate -s 0 $EVENTS_PATH 2>/dev/null || echo -n > $EVENTS_PATH")
     }
 
-    fun resolveFridaCli(): String? {
-        val candidates = listOf(
-            "/data/local/tmp/frida",
-            "/data/local/tmp/access_monitor/frida",
-            "/data/data/com.termux/files/usr/bin/frida",
-            "/data/adb/modules/frida/frida"
-        )
-        for (path in candidates) {
-            if (RootShell.execAndRead("test -x $path && echo ok").trim() == "ok") return path
-        }
-        return RootShell.execAndRead("which frida 2>/dev/null").trim()
-            .takeIf { it.isNotEmpty() && !it.contains("not found") }
-    }
-
     fun statusLabel(): String = when (status) {
         FridaStatus.NOT_INSTALLED -> "Frida: не установлен"
-        FridaStatus.DOWNLOADING -> "Frida: загрузка gadget…"
-        FridaStatus.READY -> "Frida: готов"
+        FridaStatus.EXTRACTING -> "Frida: установка из APK…"
+        FridaStatus.DOWNLOADING -> "Frida: загрузка…"
+        FridaStatus.READY -> "Frida: встроен, готов"
         FridaStatus.INJECTED -> "Frida: хуки активны"
         FridaStatus.ERROR -> "Frida: ошибка (${lastError ?: "unknown"})"
     }

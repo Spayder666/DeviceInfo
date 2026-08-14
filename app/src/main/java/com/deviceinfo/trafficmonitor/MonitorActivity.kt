@@ -1,7 +1,7 @@
 package com.deviceinfo.trafficmonitor
 
-import android.content.Context
 import android.content.Intent
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,7 +29,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Launch
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +63,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.deviceinfo.trafficmonitor.export.ExportHelper
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.probe.ProbeResult
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
@@ -89,6 +96,7 @@ class MonitorActivity : ComponentActivity() {
             TrafficMonitorTheme {
                 MonitorScreen(
                     appName = appName,
+                    packageName = packageName,
                     viewModel = viewModel,
                     onBack = { finish() },
                     onStop = {
@@ -96,7 +104,11 @@ class MonitorActivity : ComponentActivity() {
                         finish()
                     },
                     onLaunchApp = { viewModel.launchTargetApp() },
-                    onClear = { viewModel.clearEvents() }
+                    onClear = { viewModel.clearEvents() },
+                    onShareExport = { file ->
+                        val intent = ExportHelper.createShareIntent(this, file, "application/json")
+                        startActivity(Intent.createChooser(intent, "Поделиться отчётом"))
+                    }
                 )
             }
         }
@@ -119,11 +131,13 @@ class MonitorActivity : ComponentActivity() {
 @Composable
 fun MonitorScreen(
     appName: String,
+    packageName: String,
     viewModel: MonitorViewModel,
     onBack: () -> Unit,
     onStop: () -> Unit,
     onLaunchApp: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onShareExport: (java.io.File) -> Unit
 ) {
     val events by viewModel.events.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
@@ -132,9 +146,27 @@ fun MonitorScreen(
     val eventCount by viewModel.eventCount.collectAsState()
     val probeResult by viewModel.probeResult.collectAsState()
     val isProbing by viewModel.isProbing.collectAsState()
+    val exportResult by viewModel.exportResult.collectAsState()
+    val isExporting by viewModel.isExporting.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(exportResult) {
+        exportResult?.let { result ->
+            snackbarHostState.showSnackbar(
+                message = "Сохранено ${result.eventCount} событий (JSON + CSV)",
+                actionLabel = "Открыть"
+            ).let { action ->
+                if (action == SnackbarResult.ActionPerformed) {
+                    onShareExport(result.jsonFile)
+                }
+            }
+            viewModel.clearExportResult()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -153,6 +185,20 @@ fun MonitorScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.exportAll(appName) },
+                        enabled = !isExporting && eventCount > 0
+                    ) {
+                        if (isExporting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.height(20.dp).width(20.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(Icons.Default.Save, contentDescription = "Сохранить", tint = Color.White)
+                        }
+                    }
                     IconButton(onClick = onLaunchApp) {
                         Icon(Icons.Default.Launch, contentDescription = "Запустить", tint = Color.White)
                     }
