@@ -311,9 +311,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun selectEvent(event: CaptureEvent?) {
         _selectedEvent.value = event
         _probeResult.value = null
-        if (event != null) {
-            probeEvent(event)
-        }
     }
 
     fun selectAdjacent(delta: Int) {
