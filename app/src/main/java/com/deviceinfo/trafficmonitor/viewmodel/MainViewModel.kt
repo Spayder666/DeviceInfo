@@ -99,6 +99,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    val categoryCounts: StateFlow<Map<AccessCategory, Int>> = _allEvents
+        .map { list -> list.groupingBy { it.category }.eachCount() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     private var observeJob: Job? = null
 
     fun init(packageName: String) {

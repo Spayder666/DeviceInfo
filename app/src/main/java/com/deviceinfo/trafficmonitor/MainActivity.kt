@@ -5,8 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,17 +20,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.outlined.Radar
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -40,13 +43,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.deviceinfo.trafficmonitor.model.InstalledApp
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
+import com.deviceinfo.trafficmonitor.ui.theme.Accent
+import com.deviceinfo.trafficmonitor.ui.theme.Danger
+import com.deviceinfo.trafficmonitor.ui.theme.SurfaceDeep
 import com.deviceinfo.trafficmonitor.ui.theme.TrafficMonitorTheme
 import com.deviceinfo.trafficmonitor.viewmodel.MainViewModel
 
@@ -62,9 +70,7 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     onAppSelected = { app ->
                         AccessMonitorService.start(this, app.packageName)
-                        startActivity(
-                            MonitorActivity.createIntent(this, app.packageName, app.appName)
-                        )
+                        startActivity(MonitorActivity.createIntent(this, app.packageName, app.appName))
                     }
                 )
             }
@@ -79,66 +85,57 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(
-    viewModel: MainViewModel,
-    onAppSelected: (InstalledApp) -> Unit
-) {
+fun MainScreen(viewModel: MainViewModel, onAppSelected: (InstalledApp) -> Unit) {
     val apps by viewModel.filteredApps.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isRootAvailable by viewModel.isRootAvailable.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
     Scaffold(
+        containerColor = SurfaceDeep,
         topBar = {
             TopAppBar(
-                title = { Text("Access Monitor") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
-                )
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Radar, null, tint = Accent, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Access Monitor", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                            Text("${apps.size} приложений", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceDeep)
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            RootStatusBanner(isRootAvailable)
-
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            RootChip(isRootAvailable)
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = viewModel::setSearchQuery,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("Поиск приложений…") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .height(48.dp),
+                placeholder = { Text("Поиск", fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(18.dp)) },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Accent,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                )
             )
-
-            Text(
-                text = "Выберите приложение для мониторинга",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
                 }
             } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
                     items(apps, key = { it.packageName }) { app ->
-                        AppListItem(
-                            app = app,
-                            enabled = isRootAvailable,
-                            onClick = { onAppSelected(app) }
-                        )
+                        AppRow(app, isRootAvailable) { onAppSelected(app) }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
                     }
                 }
             }
@@ -147,73 +144,53 @@ fun MainScreen(
 }
 
 @Composable
-fun RootStatusBanner(isRootAvailable: Boolean) {
-    Card(
+private fun RootChip(ok: Boolean) {
+    val color = if (ok) Accent else Danger
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isRootAvailable) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-        )
+            .padding(horizontal = 12.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.12f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = if (isRootAvailable) Icons.Default.Security else Icons.Default.Warning,
-                contentDescription = null,
-                tint = if (isRootAvailable) Color(0xFF2E7D32) else Color(0xFFC62828)
-            )
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = if (isRootAvailable) "Root-доступ: активен" else "Root-доступ: не обнаружен",
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = if (isRootAvailable) {
-                        "Мониторинг GPS, камеры, SIM, идентификаторов и системных API"
-                    } else {
-                        "Для мониторинга требуется root-доступ (su)"
-                    },
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
+        Icon(
+            if (ok) Icons.Outlined.Security else Icons.Outlined.WarningAmber,
+            null,
+            tint = color,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (ok) "Root активен · GPS, камера, SIM, HTTPS" else "Нужен root (su)",
+            fontSize = 12.sp,
+            color = color,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 
 @Composable
-fun AppListItem(app: InstalledApp, enabled: Boolean, onClick: () -> Unit) {
-    Card(
+private fun AppRow(app: InstalledApp, enabled: Boolean, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            app.icon?.let { drawable ->
-                Image(
-                    bitmap = drawable.toBitmap(48, 48).asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp)
-                )
-            } ?: Spacer(Modifier.size(48.dp))
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = app.appName, fontWeight = FontWeight.Medium)
-                Text(
-                    text = app.packageName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+        app.icon?.let { drawable ->
+            Image(
+                bitmap = drawable.toBitmap(36, 36).asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
+            )
+        } ?: Box(Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(app.appName, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(app.packageName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
