@@ -48,6 +48,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +107,12 @@ fun MainScreen(viewModel: MainViewModel, onAppSelected: (String, String) -> Unit
     val showSystem by viewModel.showSystem.collectAsState()
     val recents by viewModel.recents.collectAsState()
     val activePackage by viewModel.activePackage.collectAsState()
+    val context = LocalContext.current
+    val versionName = remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+            .getOrNull()
+            .orEmpty()
+    }
 
     Scaffold(
         containerColor = SurfaceDeep,
@@ -127,6 +134,17 @@ fun MainScreen(viewModel: MainViewModel, onAppSelected: (String, String) -> Unit
                             Text("Access Monitor", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                             Text("${apps.size} приложений", fontSize = 11.sp, color = TextMuted)
                         }
+                    }
+                },
+                actions = {
+                    if (versionName.isNotBlank()) {
+                        Text(
+                            text = "v$versionName",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextMuted,
+                            modifier = Modifier.padding(end = 12.dp)
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceDeep)
