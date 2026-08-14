@@ -17,38 +17,46 @@ data class IdentifierValue(
 object IdentifierReader {
 
     fun readForEvent(event: CaptureEvent): List<IdentifierValue> {
+        val values = when (event.category) {
+            AccessCategory.LOCATION -> readLocation()
+            AccessCategory.TELEPHONY -> readTelephony()
+            AccessCategory.CAMERA -> readCamera()
+            AccessCategory.MICROPHONE -> readMicrophone()
+            AccessCategory.CONTACTS -> readContacts()
+            AccessCategory.SMS -> readSms()
+            AccessCategory.CALENDAR -> readCalendar()
+            AccessCategory.CLIPBOARD -> readClipboard()
+            AccessCategory.SENSOR -> readSensors()
+            AccessCategory.BLUETOOTH -> readBluetooth()
+            AccessCategory.NETWORK -> readNetwork(event.targetPackage)
+            AccessCategory.STORAGE -> readStorage(event.targetPackage)
+            AccessCategory.PERMISSION -> readPermission(event)
+            AccessCategory.IDENTIFIER -> readIdentifier(event)
+            AccessCategory.SYSTEM_API -> readSystemApi(event.targetPackage)
+            AccessCategory.SYSCALL, AccessCategory.OTHER -> readFromCaptured(event)
+        }
+        return values.filter { it.value.isNotBlank() && it.value != "(пусто)" }
+    }
+
+    private fun readIdentifier(event: CaptureEvent): List<IdentifierValue> {
         val def = event.identifierName?.let { IdentifierCatalog.findById(it) }
-        val values = linkedMapOf<String, IdentifierValue>()
-
-        fun addAll(list: List<IdentifierValue>) {
-            list.forEach { values.putIfAbsent(it.id, it) }
+        val fromDef = def?.let { readDefinition(it) }
+        val group = def?.group ?: inferGroup(event)
+        val rest = when (group) {
+            IdentifierGroup.LOCATION -> readLocation()
+            IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> readTelephony()
+            IdentifierGroup.SETTINGS -> readSettings()
+            IdentifierGroup.BUILD, IdentifierGroup.OS_VERSION, IdentifierGroup.SYSTEM_PROPERTY -> readBuild()
+            IdentifierGroup.WIFI -> readWifi()
+            IdentifierGroup.BLUETOOTH -> readBluetooth()
+            IdentifierGroup.DRM -> readDrm()
+            IdentifierGroup.ACCOUNT -> readAccounts()
+            else -> emptyList()
         }
-
-        def?.let { addAll(listOfNotNull(readDefinition(it))) }
-
-        val group = def?.group ?: inferGroup(event) ?: inferFromCategory(event)
-        when (group) {
-            IdentifierGroup.LOCATION -> addAll(readLocation())
-            IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> addAll(readTelephony())
-            IdentifierGroup.SETTINGS -> addAll(readSettings())
-            IdentifierGroup.BUILD, IdentifierGroup.OS_VERSION, IdentifierGroup.SYSTEM_PROPERTY -> addAll(readBuild())
-            IdentifierGroup.WIFI -> addAll(readWifi())
-            IdentifierGroup.BLUETOOTH -> addAll(readBluetooth())
-            else -> {
-                if (event.category == AccessCategory.LOCATION || looksLikeLocation(event)) {
-                    addAll(readLocation())
-                } else if (event.category == AccessCategory.TELEPHONY || looksLikeTelephony(event)) {
-                    addAll(readTelephony())
-                } else if (event.category == AccessCategory.IDENTIFIER) {
-                    addAll(readCommon())
-                }
-            }
+        return buildList {
+            fromDef?.let { add(it) }
+            addAll(rest.filter { it.id != fromDef?.id })
         }
-
-        if (values.isEmpty() && (event.category == AccessCategory.LOCATION || looksLikeLocation(event))) {
-            addAll(readLocation())
-        }
-        return values.values.filter { it.value.isNotBlank() && it.value != "(пусто)" }
     }
 
     fun readCommon(): List<IdentifierValue> = buildList {
@@ -291,6 +299,173 @@ object IdentifierReader {
             IdentifierValue("bt.local_mac", "Bluetooth MAC", mac ?: ""),
             IdentifierValue("bt.local_name", "Bluetooth name", name ?: "")
         )
+    }
+
+    private fun readCamera(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys media.camera 2>/dev/null | head -c 8000", timeoutSec = 8)
+        val provider = RootShell.execAndRead("dumpsys media.camera.provider 2>/dev/null | head -c 4000", timeoutSec = 8)
+        val ids = Regex("(?i)Camera\\s+(\\d+|ID\\s*[=:]\\s*\\S+)").findAll(dump + provider)
+            .map { it.value }.distinct().take(8).joinToString(", ")
+        val clients = dump.lineSequence().filter {
+            it.contains("client", ignoreCase = true) || it.contains("active", ignoreCase = true) ||
+                it.contains("device", ignoreCase = true)
+        }.take(6).joinToString(" | ")
+        return listOfNotEmpty(
+            IdentifierValue("camera.ids", "Камеры", ids.ifBlank { "список недоступен" }),
+            IdentifierValue("camera.state", "Состояние", clients.ifBlank { dump.lines().firstOrNull { it.isNotBlank() } ?: "" })
+        )
+    }
+
+    private fun readMicrophone(): List<IdentifierValue> {
+        val flinger = RootShell.execAndRead("dumpsys media.audio_flinger 2>/dev/null | head -c 8000", timeoutSec = 8)
+        val audio = RootShell.execAndRead("dumpsys audio 2>/dev/null | head -c 4000", timeoutSec = 8)
+        val recording = (flinger + "\n" + audio).lineSequence().filter {
+            it.contains("Record", ignoreCase = true) || it.contains("Input", ignoreCase = true) ||
+                it.contains("source", ignoreCase = true) || it.contains("session", ignoreCase = true)
+        }.take(8).joinToString("\n")
+        val mode = fieldFrom(audio, "mMode", "mode")
+        return listOfNotEmpty(
+            IdentifierValue("mic.mode", "Audio mode", mode ?: ""),
+            IdentifierValue("mic.tracks", "Запись / входы", recording.ifBlank { "(нет активной записи в dumpsys)" })
+        )
+    }
+
+    private fun readContacts(): List<IdentifierValue> {
+        val count = RootShell.execAndRead(
+            "content query --uri content://com.android.contacts/contacts --projection _id 2>/dev/null | wc -l",
+            timeoutSec = 8
+        ).trim()
+        val sample = RootShell.execAndRead(
+            "content query --uri content://com.android.contacts/contacts --projection display_name:has_phone_number 2>/dev/null | head -n 5",
+            timeoutSec = 8
+        ).trim()
+        return listOfNotEmpty(
+            IdentifierValue("contacts.count", "Контактов (строк)", count),
+            IdentifierValue("contacts.sample", "Пример", sample.take(400))
+        )
+    }
+
+    private fun readSms(): List<IdentifierValue> {
+        val inbox = RootShell.execAndRead(
+            "content query --uri content://sms/inbox --projection address:date:body 2>/dev/null | head -n 4",
+            timeoutSec = 8
+        ).trim()
+        val count = RootShell.execAndRead(
+            "content query --uri content://sms --projection _id 2>/dev/null | wc -l",
+            timeoutSec = 8
+        ).trim()
+        return listOfNotEmpty(
+            IdentifierValue("sms.count", "SMS (строк)", count),
+            IdentifierValue("sms.inbox", "Последние входящие", inbox.take(500).ifBlank { "(пусто / нет доступа)" })
+        )
+    }
+
+    private fun readCalendar(): List<IdentifierValue> {
+        val events = RootShell.execAndRead(
+            "content query --uri content://com.android.calendar/events --projection title:dtstart 2>/dev/null | head -n 5",
+            timeoutSec = 8
+        ).trim()
+        return listOfNotEmpty(
+            IdentifierValue("calendar.events", "События календаря", events.take(500).ifBlank { "(пусто / нет доступа)" })
+        )
+    }
+
+    private fun readClipboard(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys clipboard 2>/dev/null | head -c 3000", timeoutSec = 6)
+        val text = dump.lineSequence()
+            .filter { it.contains("text", ignoreCase = true) || it.contains("clip", ignoreCase = true) || it.contains("mPrimary") }
+            .take(8)
+            .joinToString("\n")
+        return listOfNotEmpty(
+            IdentifierValue("clipboard.primary", "Буфер обмена", text.ifBlank { dump.take(300).ifBlank { "(пусто)" } })
+        )
+    }
+
+    private fun readSensors(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys sensorservice 2>/dev/null | head -c 8000", timeoutSec = 8)
+        val active = dump.lineSequence().filter {
+            it.contains("accelerometer", ignoreCase = true) ||
+                it.contains("gyroscope", ignoreCase = true) ||
+                it.contains("magnetometer", ignoreCase = true) ||
+                it.contains("Connection", ignoreCase = true) ||
+                it.contains("active", ignoreCase = true)
+        }.take(10).joinToString("\n")
+        return listOfNotEmpty(
+            IdentifierValue("sensors.active", "Активные сенсоры", active.ifBlank { dump.lines().take(8).joinToString("\n") })
+        )
+    }
+
+    private fun readNetwork(packageName: String): List<IdentifierValue> {
+        val wifi = readWifi()
+        val conn = RootShell.execAndRead("dumpsys connectivity 2>/dev/null | head -c 4000", timeoutSec = 8)
+        val active = conn.lineSequence().filter {
+            it.contains("NetworkAgentInfo", ignoreCase = true) ||
+                it.contains("CONNECTED", ignoreCase = true) ||
+                it.contains("extra:", ignoreCase = true)
+        }.take(6).joinToString(" | ")
+        return wifi + listOfNotEmpty(
+            IdentifierValue("net.active", "Активная сеть", active)
+        )
+    }
+
+    private fun readStorage(packageName: String): List<IdentifierValue> {
+        val db = RootShell.execAndRead("dumpsys dbinfo $packageName 2>/dev/null | head -c 3000", timeoutSec = 8)
+        val media = RootShell.execAndRead(
+            "content query --uri content://media/external/images/media --projection _id 2>/dev/null | wc -l",
+            timeoutSec = 8
+        ).trim()
+        return listOfNotEmpty(
+            IdentifierValue("storage.images", "Изображений в MediaStore", media),
+            IdentifierValue("storage.db", "БД пакета", db.lines().take(8).joinToString("\n"))
+        )
+    }
+
+    private fun readPermission(event: CaptureEvent): List<IdentifierValue> {
+        val op = event.permission ?: event.action
+        val appops = RootShell.execAndRead("dumpsys appops ${event.targetPackage} 2>/dev/null | head -c 8000", timeoutSec = 10)
+        val block = Regex("""$op[\s\S]{0,350}""").find(appops)?.value
+            ?: appops.lineSequence().filter { it.contains(op, ignoreCase = true) }.take(6).joinToString("\n")
+        val granted = RootShell.execAndRead(
+            "dumpsys package ${event.targetPackage} 2>/dev/null | grep -A1 '$op' | head -n 4",
+            timeoutSec = 8
+        ).trim()
+        return listOfNotEmpty(
+            IdentifierValue("perm.op", "AppOps $op", block.take(400)),
+            IdentifierValue("perm.grant", "Package $op", granted)
+        )
+    }
+
+    private fun readSystemApi(packageName: String): List<IdentifierValue> {
+        val svc = RootShell.execAndRead(
+            "dumpsys activity services $packageName 2>/dev/null | head -c 4000",
+            timeoutSec = 8
+        )
+        val snippet = svc.lineSequence().filter {
+            it.contains("ServiceRecord") || it.contains("isForeground") || it.contains("app=")
+        }.take(8).joinToString("\n")
+        return listOfNotEmpty(
+            IdentifierValue("sys.services", "Сервисы пакета", snippet.ifBlank { svc.take(300) })
+        )
+    }
+
+    private fun readDrm(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys media.drm 2>/dev/null | head -c 2000", timeoutSec = 6)
+        return listOfNotEmpty(IdentifierValue("drm.widevine_id", "MediaDrm", dump.take(300)))
+    }
+
+    private fun readAccounts(): List<IdentifierValue> {
+        val dump = RootShell.execAndRead("dumpsys account 2>/dev/null | head -c 3000", timeoutSec = 6)
+        val lines = dump.lineSequence().filter {
+            it.contains("Account ", ignoreCase = true) || it.contains("type=", ignoreCase = true)
+        }.take(8).joinToString("\n")
+        return listOfNotEmpty(IdentifierValue("account.list", "Аккаунты", lines.ifBlank { dump.take(300) }))
+    }
+
+    private fun readFromCaptured(event: CaptureEvent): List<IdentifierValue> {
+        val captured = event.responseDetails?.takeIf { it.isNotBlank() && !it.startsWith("FD=") }
+            ?: event.requestDetails
+            ?: return emptyList()
+        return listOf(IdentifierValue(event.action, event.action, captured))
     }
 
     private fun getprop(key: String): String {

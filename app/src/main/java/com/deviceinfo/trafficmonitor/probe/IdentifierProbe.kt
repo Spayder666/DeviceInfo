@@ -1,5 +1,6 @@
 package com.deviceinfo.trafficmonitor.probe
 
+import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.root.RootShell
@@ -15,24 +16,15 @@ object IdentifierProbe {
 
     fun probe(event: CaptureEvent): ProbeResult {
         val def = event.identifierName?.let { IdentifierCatalog.findById(it) }
-        val property = resolveProperty(event, def)
 
-        if (property != null) {
-            val propResult = probeProperty(property, event.processId, event.targetPackage)
-            val extras = IdentifierReader.readForEvent(event)
-                .filter { it.id != def?.id }
-            if (extras.isEmpty()) return propResult
-            return propResult.copy(
-                valueAsRoot = buildString {
-                    append(propResult.valueAsRoot)
-                    append("\n\n")
-                    append(IdentifierReader.format(extras))
-                }
-            )
-        }
-
-        if (def?.filePath != null) {
-            return probeFile(def.filePath, event.processId)
+        if (event.category == AccessCategory.IDENTIFIER) {
+            val property = resolveProperty(event, def)
+            if (property != null) {
+                return probeProperty(property, event.processId, event.targetPackage)
+            }
+            if (def?.filePath != null && def.group != com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup.LOCATION) {
+                return probeFile(def.filePath, event.processId)
+            }
         }
 
         val values = IdentifierReader.readForEvent(event)
@@ -41,12 +33,7 @@ object IdentifierProbe {
                 requestLabel = def?.displayName ?: event.action,
                 valueAsRoot = IdentifierReader.format(values),
                 valueInTargetContext = event.responseDetails?.takeIf { looksLikeCapturedValue(it) },
-                note = when {
-                    event.category.name == "LOCATION" || event.identifierGroup == "LOCATION" ->
-                        "Координаты из LocationManagerService (gps / fused / network). Это ответ на запрос локации, не идентификаторы устройства."
-                    else ->
-                        "Значения того же типа, что и запрос. Frida фиксирует точный ответ внутри приложения в момент вызова."
-                }
+                note = noteFor(event)
             )
         }
 
@@ -67,6 +54,25 @@ object IdentifierProbe {
             valueInTargetContext = null,
             note = "Для этого типа события нет системного API. Нажмите «Запустить + Frida», чтобы перехватывать ответы внутри приложения."
         )
+    }
+
+    private fun noteFor(event: CaptureEvent): String = when (event.category) {
+        AccessCategory.LOCATION -> "Координаты провайдеров gps/fused/network — ответ на запрос локации."
+        AccessCategory.CAMERA -> "Состояние камер из media.camera, не идентификаторы устройства."
+        AccessCategory.MICROPHONE -> "Активные аудиовходы / запись из AudioFlinger."
+        AccessCategory.TELEPHONY -> "IMEI / IMSI / ICCID / номер — ответ на телефонный запрос."
+        AccessCategory.CONTACTS -> "Данные контактов (content://contacts)."
+        AccessCategory.SMS -> "SMS inbox (content://sms)."
+        AccessCategory.CALENDAR -> "События календаря."
+        AccessCategory.CLIPBOARD -> "Текущий буфер обмена."
+        AccessCategory.SENSOR -> "Активные сенсоры из sensorservice."
+        AccessCategory.BLUETOOTH -> "BT MAC / имя."
+        AccessCategory.NETWORK -> "Wi‑Fi и активная сеть."
+        AccessCategory.STORAGE -> "MediaStore / БД пакета."
+        AccessCategory.PERMISSION -> "Статус AppOps / grant для этого разрешения."
+        AccessCategory.IDENTIFIER -> "Идентификатор того же типа, что в запросе."
+        AccessCategory.SYSTEM_API -> "Системные сервисы пакета."
+        else -> "Ответ того же типа, что и запрос."
     }
 
     private fun looksLikeCapturedValue(text: String): Boolean {
