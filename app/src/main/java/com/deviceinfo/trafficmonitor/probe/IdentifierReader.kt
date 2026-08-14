@@ -32,7 +32,11 @@ object IdentifierReader {
             id?.startsWith("sensor.") == true -> readSensors()
             id?.startsWith("clipboard.") == true -> readClipboard()
             id?.startsWith("fcm.") == true || id?.startsWith("cred.") == true ||
-                id?.startsWith("play.") == true || id == "webview.ua" -> readFromCaptured(event)
+                id?.startsWith("play.") == true || id == "webview.ua" ||
+                id?.startsWith("ad.") == true || id?.startsWith("oem.") == true ||
+                id?.startsWith("fido.") == true || id == "health.connect" ||
+                id?.startsWith("tel.eid") == true || id == "install.source" ||
+                id == "install.referrer" -> readFromCaptured(event)
             id?.startsWith("pkg.") == true || id?.startsWith("perm.") == true ->
                 readSystemApi(event.targetPackage) + readFromCaptured(event)
             id?.startsWith("tel.") == true || id?.startsWith("sub.") == true ->

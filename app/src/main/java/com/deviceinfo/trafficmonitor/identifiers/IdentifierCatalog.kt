@@ -72,6 +72,7 @@ object IdentifierCatalog {
         addAll(hardwareIdentifiers())
         addAll(identityIdentifiers())
         addAll(packageQueryIdentifiers())
+        addAll(extraRequestIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -186,7 +187,15 @@ object IdentifierCatalog {
         id("tel.has_icc", "hasIccCard", IdentifierGroup.TELEPHONY, "TelephonyManager.hasIccCard()", logcat = listOf("hasIccCard")),
         id("tel.network_type", "Тип сети", IdentifierGroup.TELEPHONY, "TelephonyManager.getDataNetworkType()", logcat = listOf("getDataNetworkType", "getNetworkType", "getVoiceNetworkType")),
         id("tel.service_state", "ServiceState", IdentifierGroup.TELEPHONY, "TelephonyManager.getServiceState()", logcat = listOf("getServiceState")),
-        id("tel.phone_interface", "PhoneInterfaceManager", IdentifierGroup.TELEPHONY, logcat = listOf("PhoneInterfaceManager", "ITelephony", "TelephonyPermissions"))
+        id("tel.phone_interface", "PhoneInterfaceManager", IdentifierGroup.TELEPHONY, logcat = listOf("PhoneInterfaceManager", "ITelephony", "TelephonyPermissions")),
+        id("tel.eid", "eSIM EID", IdentifierGroup.TELEPHONY, "EuiccManager.getEid()", logcat = listOf("getEid", "EuiccManager"), perm = "READ_PRIVILEGED_PHONE_STATE"),
+        id("tel.msisdn", "MSISDN", IdentifierGroup.TELEPHONY, "TelephonyManager.getMsisdn()", logcat = listOf("getMsisdn"), perm = "READ_PHONE_NUMBERS"),
+        id("tel.manufacturer_code", "Manufacturer code", IdentifierGroup.TELEPHONY, "TelephonyManager.getManufacturerCode()", logcat = listOf("getManufacturerCode")),
+        id("tel.icc_auth", "SIM ICC authentication", IdentifierGroup.TELEPHONY, "TelephonyManager.getIccAuthentication()", logcat = listOf("getIccAuthentication", "iccOpenLogicalChannel")),
+        id("tel.isim", "ISIM IMPI/IMPU", IdentifierGroup.TELEPHONY, "TelephonyManager.getIsimImpi()", logcat = listOf("getIsimImpi", "getIsimImpu", "getIsimDomain")),
+        id("tel.callback", "TelephonyCallback / listen", IdentifierGroup.TELEPHONY, "registerTelephonyCallback / listen", logcat = listOf("registerTelephonyCallback", "PhoneStateListener")),
+        id("tel.carrier_config", "CarrierConfig", IdentifierGroup.TELEPHONY, "CarrierConfigManager.getConfigForSubId()", logcat = listOf("CarrierConfigManager", "getConfigForSubId")),
+        id("tel.telecom", "TelecomManager.getLine1Number", IdentifierGroup.TELEPHONY, "TelecomManager.getLine1Number()", logcat = listOf("TelecomManager"), perm = "READ_PHONE_NUMBERS")
     )
 
     private fun subscriptionIdentifiers() = listOf(
@@ -198,7 +207,9 @@ object IdentifierCatalog {
         id("sub.mnc", "MNC string", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.getMncString()", logcat = listOf("getMncString")),
         id("sub.group_uuid", "Group UUID", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.getGroupUuid()", logcat = listOf("getGroupUuid")),
         id("sub.card_id", "Card ID", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.getCardId()", logcat = listOf("getCardId")),
-        id("sub.port_index", "eSIM port index", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.getPortIndex()", logcat = listOf("getPortIndex"))
+        id("sub.port_index", "eSIM port index", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.getPortIndex()", logcat = listOf("getPortIndex")),
+        id("sub.card_string", "Card string / eUICC", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.getCardString()", logcat = listOf("getCardString")),
+        id("sub.embedded", "isEmbedded (eSIM)", IdentifierGroup.SUBSCRIPTION, "SubscriptionInfo.isEmbedded()", logcat = listOf("isEmbedded"))
     )
 
     private fun wifiIdentifiers() = listOf(
@@ -229,7 +240,11 @@ object IdentifierCatalog {
         id("ad.firebase_token", "Firebase auth token", IdentifierGroup.ADVERTISING, "FirebaseInstallations.getToken()", logcat = listOf("Installation auth token")),
         id("ad.app_set_id", "App Set ID (ASID)", IdentifierGroup.ADVERTISING, "AppSetIdManager.getAppSetId()", logcat = listOf("AppSetId", "AppSetIdManager")),
         id("ad.oaid", "OAID (China/OEM)", IdentifierGroup.OEM, logcat = listOf("OAID", "MdidSdk", "com\\.bun\\.miitmdid", "HmsAdsIdentifier")),
-        id("ad.limit_tracking", "Limit ad tracking flag", IdentifierGroup.ADVERTISING, logcat = listOf("limit ad tracking", "isLimitAdTrackingEnabled"))
+        id("ad.limit_tracking", "Limit ad tracking flag", IdentifierGroup.ADVERTISING, logcat = listOf("limit ad tracking", "isLimitAdTrackingEnabled")),
+        id("ad.adservices", "Privacy Sandbox AdId", IdentifierGroup.ADVERTISING, "android.adservices.adid.AdIdManager.getAdId()", logcat = listOf("AdIdManager", "adservices.adid"), perm = "ACCESS_ADSERVICES_AD_ID"),
+        id("ad.topics", "Privacy Sandbox Topics", IdentifierGroup.ADVERTISING, "TopicsManager.getTopics()", logcat = listOf("TopicsManager", "getTopics")),
+        id("ad.measurement", "Privacy Sandbox Measurement", IdentifierGroup.ADVERTISING, "MeasurementManager", logcat = listOf("MeasurementManager", "registerSource")),
+        id("ad.instance_id", "InstanceID / FID", IdentifierGroup.ADVERTISING, "FirebaseInstanceId.getId / InstanceID.getId", logcat = listOf("FirebaseInstanceId", "InstanceID.getId"))
     )
 
     private fun drmIdentifiers() = listOf(
@@ -248,7 +263,8 @@ object IdentifierCatalog {
         id("install.last_update", "Last update time", IdentifierGroup.INSTALL, "PackageInfo.lastUpdateTime", logcat = listOf("lastUpdateTime")),
         id("install.signing_cert", "Signing certificate hash", IdentifierGroup.INSTALL, "PackageManager GET_SIGNING_CERTIFICATES", logcat = listOf("GET_SIGNING_CERTIFICATES", "signatures")),
         id("install.package_info", "PackageManager.getPackageInfo", IdentifierGroup.INSTALL, "PackageManager.getPackageInfo", logcat = listOf("getPackageInfo")),
-        id("install.application_info", "getApplicationInfo", IdentifierGroup.INSTALL, "PackageManager.getApplicationInfo", logcat = listOf("getApplicationInfo"))
+        id("install.application_info", "getApplicationInfo", IdentifierGroup.INSTALL, "PackageManager.getApplicationInfo", logcat = listOf("getApplicationInfo")),
+        id("install.source", "InstallSourceInfo", IdentifierGroup.INSTALL, "PackageManager.getInstallSourceInfo()", logcat = listOf("getInstallSourceInfo", "InstallSourceInfo"))
     )
 
     private fun accountIdentifiers() = listOf(
@@ -321,7 +337,13 @@ object IdentifierCatalog {
         id("oem.samsung_account", "Samsung account", IdentifierGroup.OEM, "Settings.System.samsungaccount", logcat = listOf("samsungaccount")),
         id("oem.samsung_imsi", "Samsung SIM IMSI cache", IdentifierGroup.OEM, "dsa_sim1_value", logcat = listOf("dsa_sim")),
         id("oem.vivo_wifi", "Vivo ext Wi‑Fi scan", IdentifierGroup.OEM, logcat = listOf("getExtWifiScanResults")),
-        id("oem.huawei_oaid", "Huawei OAID", IdentifierGroup.OEM, logcat = listOf("HmsAdsIdentifier"))
+        id("oem.huawei_oaid", "Huawei OAID", IdentifierGroup.OEM, logcat = listOf("HmsAdsIdentifier")),
+        id("oem.oaid_msa", "MSA OAID (MdidSdk)", IdentifierGroup.OEM, "com.bun.miitmdid.core.MdidSdkHelper", logcat = listOf("MdidSdkHelper", "miitmdid")),
+        id("oem.oaid_xiaomi", "Xiaomi OAID", IdentifierGroup.OEM, "com.android.id.impl.IdProviderImpl", logcat = listOf("IdProviderImpl", "xiaomi.oaid")),
+        id("oem.oaid_oppo", "OPPO/Heytap OAID", IdentifierGroup.OEM, "com.heytap.openid", logcat = listOf("heytap.openid", "HeytapID")),
+        id("oem.oaid_vivo", "Vivo OAID", IdentifierGroup.OEM, "com.vivo.identifier", logcat = listOf("VivoIdentifier", "vivo.identifier")),
+        id("oem.sem_tel", "Samsung SemTelephony", IdentifierGroup.OEM, "SemTelephonyManager.getImei()", logcat = listOf("SemTelephonyManager", "semGetImei")),
+        id("oem.knox", "Samsung Knox / TIMA", IdentifierGroup.OEM, "EnterpriseDeviceManager / Knox", logcat = listOf("EnterpriseDeviceManager", "KnoxAttestation", "TIMA"))
     )
 
     private fun locationIdentifiers() = listOf(
@@ -427,6 +449,47 @@ object IdentifierCatalog {
         id("perm.appops", "AppOpsManager.checkOp / noteOp", IdentifierGroup.INSTALL, "AppOpsManager", logcat = listOf("AppOpsManager", "noteOp", "checkOp"))
     )
 
+    private fun extraRequestIdentifiers() = listOf(
+        id("hw.usb_serial", "USB serial", IdentifierGroup.HARDWARE, "UsbDevice.getSerialNumber()", logcat = listOf("UsbDevice.getSerialNumber")),
+        id("hw.input", "InputDevice descriptor", IdentifierGroup.HARDWARE, "InputDevice.getDescriptor()", logcat = listOf("InputDevice.getDescriptor", "InputManager")),
+        id("hw.config", "Configuration MCC/MNC/uiMode", IdentifierGroup.HARDWARE, "Resources.getConfiguration()", logcat = listOf("getConfiguration", "Configuration.mcc")),
+        id("hw.storage_uuid", "StorageVolume UUID", IdentifierGroup.HARDWARE, "StorageManager.getStorageVolumes / getUuid", logcat = listOf("StorageVolume", "getUuidForPath")),
+        id("hw.memory", "RAM / MemoryInfo", IdentifierGroup.HARDWARE, "ActivityManager.getMemoryInfo", logcat = listOf("getMemoryInfo", "availMem")),
+        id("hw.features", "hasSystemFeature", IdentifierGroup.HARDWARE, "PackageManager.hasSystemFeature / getSystemAvailableFeatures", logcat = listOf("hasSystemFeature", "getSystemAvailableFeatures")),
+        id("hw.power", "PowerManager idle/save", IdentifierGroup.HARDWARE, "PowerManager.isPowerSaveMode / isInteractive", logcat = listOf("isPowerSaveMode", "isDeviceIdleMode")),
+        id("hw.audio_dev", "AudioDeviceInfo", IdentifierGroup.HARDWARE, "AudioManager.getDevices / getAddress", logcat = listOf("AudioManager.getDevices")),
+        id("net.link_props", "LinkProperties DNS/IP", IdentifierGroup.NETWORK, "ConnectivityManager.getLinkProperties", logcat = listOf("getLinkProperties", "getDnsServers")),
+        id("net.interfaces", "NetworkInterface.list", IdentifierGroup.NETWORK, "NetworkInterface.getNetworkInterfaces()", logcat = listOf("getNetworkInterfaces")),
+        id("net.local", "InetAddress.getLocalHost", IdentifierGroup.NETWORK, "InetAddress.getLocalHost / getHostAddress", logcat = listOf("getLocalHost", "getHostAddress")),
+        id("net.cookies", "CookieManager", IdentifierGroup.NETWORK, "CookieManager.getCookie", logcat = listOf("CookieManager", "getCookie")),
+        id("net.traffic", "TrafficStats UID", IdentifierGroup.NETWORK, "TrafficStats.getUidRxBytes", logcat = listOf("TrafficStats", "getUidRxBytes")),
+        id("net.nsd", "NSD / mDNS", IdentifierGroup.NETWORK, "NsdManager.discoverServices", logcat = listOf("NsdManager", "discoverServices")),
+        id("net.p2p", "Wi‑Fi P2P", IdentifierGroup.NETWORK, "WifiP2pManager", logcat = listOf("WifiP2pManager", "requestPeers")),
+        id("net.aware", "Wi‑Fi Aware / NAN", IdentifierGroup.NETWORK, "WifiAwareManager", logcat = listOf("WifiAwareManager", "attach")),
+        id("net.netstats", "NetworkStatsManager", IdentifierGroup.NETWORK, "NetworkStatsManager.querySummary", logcat = listOf("NetworkStatsManager", "querySummary")),
+        id("bt.bonded", "Bonded Bluetooth devices", IdentifierGroup.BLUETOOTH, "BluetoothAdapter.getBondedDevices()", logcat = listOf("getBondedDevices"), perm = "BLUETOOTH_CONNECT"),
+        id("fido.fido2", "FIDO2 / WebAuthn", IdentifierGroup.IDENTITY, "Fido.getFido2ApiClient", logcat = listOf("Fido2ApiClient", "PublicKeyCredential")),
+        id("health.connect", "Health Connect", IdentifierGroup.PERSONAL, "HealthConnectClient / HealthConnectManager", logcat = listOf("HealthConnect", "HealthConnectClient"), perm = "HEALTH"),
+        id("games.player", "Play Games player ID", IdentifierGroup.IDENTITY, "PlayersClient.getCurrentPlayer", logcat = listOf("PlayersClient", "getCurrentPlayer")),
+        id("droidguard", "DroidGuard", IdentifierGroup.ATTESTATION, "com.google.ccc.abuse.droidguard", logcat = listOf("DroidGuard", "droidguard")),
+        id("play.recaptcha_ent", "reCAPTCHA Enterprise", IdentifierGroup.IDENTITY, "Recaptcha.getClient / execute", logcat = listOf("RecaptchaAction", "RecaptchaEnterprise")),
+        id("autofill", "AutofillManager", IdentifierGroup.IDENTITY, "AutofillManager", logcat = listOf("AutofillManager")),
+        id("role.sms", "Default SMS / RoleManager", IdentifierGroup.IDENTITY, "RoleManager.isRoleHeld(ROLE_SMS) / getDefaultSmsPackage", logcat = listOf("RoleManager", "getDefaultSmsPackage")),
+        id("keystore.aliases", "AndroidKeyStore aliases", IdentifierGroup.ATTESTATION, "KeyStore.getInstance(AndroidKeyStore).aliases", logcat = listOf("AndroidKeyStore", "KeyStore.aliases")),
+        id("keychain", "KeyChain cert/key", IdentifierGroup.ATTESTATION, "KeyChain.getCertificateChain / getPrivateKey", logcat = listOf("KeyChain.getCertificateChain", "KeyChain.getPrivateKey")),
+        id("gms.availability", "Play Services version", IdentifierGroup.IDENTITY, "GoogleApiAvailability.isGooglePlayServicesAvailable", logcat = listOf("GoogleApiAvailability", "isGooglePlayServicesAvailable")),
+        id("location.settings", "LocationSettings check", IdentifierGroup.LOCATION, "SettingsClient.checkLocationSettings", logcat = listOf("checkLocationSettings", "LocationSettingsRequest")),
+        id("location.geocoder", "Geocoder", IdentifierGroup.LOCATION, "Geocoder.getFromLocation", logcat = listOf("Geocoder", "getFromLocation")),
+        id("companion", "CompanionDevice", IdentifierGroup.HARDWARE, "CompanionDeviceManager.associate", logcat = listOf("CompanionDeviceManager", "associate")),
+        id("launcher.apps", "LauncherApps list", IdentifierGroup.INSTALL, "LauncherApps.getActivityList", logcat = listOf("LauncherApps", "getActivityList")),
+        id("notify.enabled", "Notifications enabled", IdentifierGroup.SETTINGS, "NotificationManager.areNotificationsEnabled", logcat = listOf("areNotificationsEnabled")),
+        id("download.manager", "DownloadManager", IdentifierGroup.CONTENT_PROVIDER, "DownloadManager.enqueue / query", logcat = listOf("DownloadManager")),
+        id("photo.picker", "Photo Picker / READ_MEDIA", IdentifierGroup.CONTENT_PROVIDER, "PickVisualMedia / MediaStore.createWriteRequest", logcat = listOf("PickVisualMedia", "createWriteRequest", "READ_MEDIA")),
+        id("user.serial", "UserManager serial", IdentifierGroup.SETTINGS, "UserManager.getSerialNumberForUser", logcat = listOf("getSerialNumberForUser", "UserManager")),
+        id("dpm.owner", "Device owner / admin", IdentifierGroup.ENTERPRISE, "DevicePolicyManager.isDeviceOwnerApp / isAdminActive", logcat = listOf("isDeviceOwnerApp", "isProfileOwnerApp", "isAdminActive")),
+        id("cell.identity", "CellIdentity MCC/CID/TAC", IdentifierGroup.LOCATION, "CellIdentity.getMccString / getCi / getTac", logcat = listOf("CellIdentity", "getCi", "getTac"))
+    )
+
     // --- helpers ---
 
     private fun id(
@@ -500,7 +563,13 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id.startsWith("sensor.") -> AccessCategory.SENSOR
             id.startsWith("clipboard.") -> AccessCategory.CLIPBOARD
             id.startsWith("perm.") || id.startsWith("pkg.") -> AccessCategory.SYSTEM_API
-            id.startsWith("fcm.") || id.startsWith("cred.") || id.startsWith("play.") -> AccessCategory.IDENTIFIER
+            id.startsWith("fcm.") || id.startsWith("cred.") || id.startsWith("play.") ||
+                id.startsWith("ad.") || id.startsWith("fido.") || id.startsWith("games.") -> AccessCategory.IDENTIFIER
+            id.startsWith("health.") -> AccessCategory.SENSOR
+            id.startsWith("cell.") -> AccessCategory.LOCATION
+            id.startsWith("hw.") || id.startsWith("oem.") || id.startsWith("dpm.") ||
+                id.startsWith("user.") || id.startsWith("role.") || id.startsWith("notify.") ->
+                AccessCategory.SYSTEM_API
             else -> null
         }
 }

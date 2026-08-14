@@ -88,7 +88,7 @@ function classifyUri(uri) {
   if (u.indexOf('voicemail') >= 0) return 'cp.voicemail';
   if (u.indexOf('blocked') >= 0) return 'cp.blocked';
   if (u.indexOf('download') >= 0) return 'storage.downloads';
-  if (u.indexOf('health') >= 0) return 'cp.other';
+  if (u.indexOf('health') >= 0) return 'health.connect';
   if (u.indexOf('content://') === 0) return 'cp.other';
   return '';
 }
@@ -167,7 +167,20 @@ function hookTelephonyManager() {
     ['getServiceState', 'tel.service_state', 'READ_PHONE_STATE'],
     ['getCallState', 'tel.phone_interface', null],
     ['getDataState', 'tel.phone_interface', null],
-    ['getUiccCardsInfo', 'tel.has_icc', 'READ_PRIVILEGED_PHONE_STATE']
+    ['getUiccCardsInfo', 'tel.has_icc', 'READ_PRIVILEGED_PHONE_STATE'],
+    ['getMsisdn', 'tel.msisdn', 'READ_PHONE_NUMBERS'],
+    ['getManufacturerCode', 'tel.manufacturer_code', null],
+    ['getIccAuthentication', 'tel.icc_auth', 'READ_PRIVILEGED_PHONE_STATE'],
+    ['getIsimImpi', 'tel.isim', 'READ_PRIVILEGED_PHONE_STATE'],
+    ['getIsimImpu', 'tel.isim', 'READ_PRIVILEGED_PHONE_STATE'],
+    ['getIsimDomain', 'tel.isim', 'READ_PRIVILEGED_PHONE_STATE'],
+    ['getCardIdForDefaultEuicc', 'tel.eid', 'READ_PRIVILEGED_PHONE_STATE'],
+    ['registerTelephonyCallback', 'tel.callback', 'READ_PHONE_STATE'],
+    ['listen', 'tel.callback', 'READ_PHONE_STATE'],
+    ['isNetworkRoaming', 'tel.network_operator', null],
+    ['getSignalStrength', 'location.cell', 'READ_PHONE_STATE'],
+    ['getEmergencyNumberList', 'tel.phone_interface', null],
+    ['iccOpenLogicalChannel', 'tel.icc_auth', 'MODIFY_PHONE_STATE']
   ];
 
   hooks.forEach(function (h) {
@@ -210,11 +223,11 @@ function hookSubscriptionManager() {
     var SI = Java.use('android.telephony.SubscriptionInfo');
     ['getIccId', 'getSubscriptionId', 'getSimSlotIndex', 'getMccString', 'getMncString',
       'getCardId', 'getDisplayName', 'getCarrierName', 'getCountryIso', 'getNumber',
-      'getMcc', 'getMnc'].forEach(function (m) {
+      'getMcc', 'getMnc', 'getCardString', 'isEmbedded', 'getPortIndex', 'getGroupUuid'].forEach(function (m) {
       try {
         SI[m].implementation = function () {
           var result = this[m]();
-          var sid = m === 'getIccId' ? 'sub.iccid' : (m === 'getNumber' ? 'sub.phone_number' : 'sub.subscription_id');
+          var sid = m === 'getIccId' ? 'sub.iccid' : (m === 'getNumber' ? 'sub.phone_number' : (m === 'getCardString' ? 'sub.card_string' : (m === 'isEmbedded' ? 'sub.embedded' : 'sub.subscription_id')));
           writeEvent(sid, 'SubscriptionInfo.' + m, '', safeStr(result), null);
           return result;
         };
@@ -532,6 +545,33 @@ function hookPackageManager() {
             overload.implementation = function () {
               var result = overload.apply(this, arguments);
               writeReq('pkg.installed', name + '.' + scan, safeStr(arguments[0]), 'count=' + (result ? result.size() : 0), 'QUERY_ALL_PACKAGES');
+              return result;
+            };
+          });
+        } catch (e) {}
+      });
+      try {
+        PM.getInstallSourceInfo.overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var pkg = safeStr(arguments[0]);
+            var result = overload.apply(this, arguments);
+            var src = '';
+            try {
+              src = 'installing=' + result.getInstallingPackageName() +
+                ' initiating=' + result.getInitiatingPackageName() +
+                ' originating=' + result.getOriginatingPackageName();
+            } catch (e) { src = safeStr(result); }
+            writeReq('install.source', name + '.getInstallSourceInfo', pkg, src, null);
+            return result;
+          };
+        });
+      } catch (e) {}
+      ['hasSystemFeature', 'getSystemAvailableFeatures'].forEach(function (m) {
+        try {
+          PM[m].overloads.forEach(function (overload) {
+            overload.implementation = function () {
+              var result = overload.apply(this, arguments);
+              writeOnce('hw.features', name + '.' + m, safeStr(arguments[0]), safeStr(result), null);
               return result;
             };
           });
@@ -2252,6 +2292,131 @@ function hookRequestSurface() {
   } catch (e) {}
 }
 
+function hookAny(className, id, methods, perm) {
+  try {
+    var Cls = Java.use(className);
+    methods.forEach(function (m) {
+      try {
+        Cls[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeReq(id, className.split('.').pop() + '.' + m, safeStr(arguments[0]), safeStr(result), perm || null);
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookMissedRequestApis() {
+  hookAny('android.telephony.euicc.EuiccManager', 'tel.eid', ['getEid', 'getOtaStatus'], 'READ_PRIVILEGED_PHONE_STATE');
+  hookAny('android.telephony.CarrierConfigManager', 'tel.carrier_config', ['getConfigForSubId', 'getConfig'], null);
+  hookAny('android.telecom.TelecomManager', 'tel.telecom', ['getLine1Number', 'getVoiceMailNumber', 'getCallCapablePhoneAccounts'], 'READ_PHONE_NUMBERS');
+  hookAny('android.adservices.adid.AdIdManager', 'ad.adservices', ['getAdId'], 'ACCESS_ADSERVICES_AD_ID');
+  hookAny('android.adservices.appsetid.AppSetIdManager', 'ad.app_set_id', ['getAppSetId'], null);
+  hookAny('android.adservices.topics.TopicsManager', 'ad.topics', ['getTopics'], null);
+  hookAny('android.adservices.measurement.MeasurementManager', 'ad.measurement', ['registerSource', 'registerTrigger', 'getMeasurementApiStatus'], null);
+  hookAny('com.google.firebase.installations.FirebaseInstallations', 'ad.firebase_fid', ['getId', 'getToken'], null);
+  hookAny('com.google.firebase.iid.FirebaseInstanceId', 'ad.instance_id', ['getId', 'getToken'], null);
+  hookAny('com.google.android.gms.iid.InstanceID', 'ad.instance_id', ['getId', 'getToken'], null);
+  hookAny('com.android.installreferrer.api.InstallReferrerClient', 'install.referrer', ['startConnection', 'getInstallReferrer'], null);
+  hookAny('com.google.android.gms.auth.api.signin.GoogleSignIn', 'account.google', ['getLastSignedInAccount', 'getClient'], null);
+  hookAny('com.google.android.gms.auth.api.signin.GoogleSignInAccount', 'account.google', ['getId', 'getIdToken', 'getEmail', 'getServerAuthCode'], null);
+  hookAny('com.huawei.hms.ads.identifier.AdvertisingIdClient', 'oem.huawei_oaid', ['getAdvertisingIdInfo'], null);
+  hookAny('com.bun.miitmdid.core.MdidSdkHelper', 'oem.oaid_msa', ['InitSdk', 'initSdk'], null);
+  hookAny('com.android.id.impl.IdProviderImpl', 'oem.oaid_xiaomi', ['getOAID', 'getVAID', 'getAAID', 'getUDID'], null);
+  hookAny('com.heytap.openid.sdk.OpenIDSDK', 'oem.oaid_oppo', ['getOpenId', 'getOAID'], null);
+  hookAny('com.vivo.identifier.IdentifierManager', 'oem.oaid_vivo', ['getGuid', 'getOAID', 'getVAID', 'getAAID'], null);
+  hookAny('com.samsung.android.telephony.SemTelephonyManager', 'oem.sem_tel', ['getImei', 'getMeid', 'getSubscriberId', 'semGetImei'], null);
+  hookAny('com.samsung.android.knox.EnterpriseDeviceManager', 'oem.knox', ['getInstance', 'getVersion'], null);
+  hookAny('android.hardware.usb.UsbDevice', 'hw.usb_serial', ['getSerialNumber', 'getDeviceName', 'getVendorId'], null);
+  hookAny('android.view.InputDevice', 'hw.input', ['getDescriptor', 'getName', 'getVendorId'], null);
+  try {
+    var Res = Java.use('android.content.res.Resources');
+    Res.getConfiguration.implementation = function () {
+      var c = this.getConfiguration();
+      try {
+        writeOnce('hw.config', 'Resources.getConfiguration', '', 'mcc=' + c.mcc + ' mnc=' + c.mnc + ' locale=' + c.getLocales(), null);
+      } catch (e) {}
+      return c;
+    };
+  } catch (e) {}
+  hookAny('android.os.storage.StorageManager', 'hw.storage_uuid', ['getStorageVolumes', 'getUuidForPath', 'getPrimaryStorageVolume'], null);
+  hookAny('android.os.storage.StorageVolume', 'hw.storage_uuid', ['getUuid', 'getDirectory'], null);
+  hookAny('android.app.ActivityManager', 'hw.memory', ['getMemoryInfo', 'getDeviceConfigurationInfo'], null);
+  hookAny('android.os.PowerManager', 'hw.power', ['isPowerSaveMode', 'isDeviceIdleMode', 'isInteractive'], null);
+  hookAny('android.media.AudioManager', 'hw.audio_dev', ['getDevices', 'getCommunicationDevice'], null);
+  hookAny('android.net.ConnectivityManager', 'net.link_props', ['getLinkProperties', 'getActiveNetworkInfo'], null);
+  hookAny('android.net.LinkProperties', 'net.link_props', ['getLinkAddresses', 'getDnsServers', 'getDomains'], null);
+  hookAny('java.net.InetAddress', 'net.local', ['getLocalHost', 'getHostAddress', 'getCanonicalHostName'], null);
+  hookAny('android.webkit.CookieManager', 'net.cookies', ['getCookie', 'setCookie'], null);
+  hookAny('android.net.TrafficStats', 'net.traffic', ['getUidRxBytes', 'getUidTxBytes', 'getMobileRxBytes'], null);
+  hookAny('android.net.nsd.NsdManager', 'net.nsd', ['discoverServices', 'registerService'], null);
+  hookAny('android.net.wifi.p2p.WifiP2pManager', 'net.p2p', ['requestPeers', 'discoverPeers'], null);
+  hookAny('android.net.wifi.aware.WifiAwareManager', 'net.aware', ['attach', 'isAvailable'], null);
+  hookAny('android.app.usage.NetworkStatsManager', 'net.netstats', ['querySummary', 'queryDetails'], null);
+  hookAny('android.bluetooth.BluetoothAdapter', 'bt.bonded', ['getBondedDevices'], 'BLUETOOTH_CONNECT');
+  hookAny('com.google.android.gms.fido.Fido', 'fido.fido2', ['getFido2ApiClient', 'getFido2PrivilegedApiClient'], null);
+  hookAny('androidx.health.connect.client.HealthConnectClient', 'health.connect', ['getOrCreate', 'insertRecords', 'readRecords'], null);
+  hookAny('android.health.connect.HealthConnectManager', 'health.connect', ['getChangeLogs', 'aggregate'], null);
+  hookAny('com.google.android.gms.games.PlayersClient', 'games.player', ['getCurrentPlayer', 'getCurrentPlayerId'], null);
+  hookAny('com.google.android.recaptcha.Recaptcha', 'play.recaptcha_ent', ['getClient', 'fetchClient'], null);
+  hookAny('android.view.autofill.AutofillManager', 'autofill', ['requestAutofill', 'isEnabled'], null);
+  hookAny('android.app.role.RoleManager', 'role.sms', ['isRoleHeld', 'isRoleAvailable'], null);
+  hookAny('android.telephony.SmsManager', 'role.sms', ['getDefaultSmsSubscriptionId'], null);
+  hookAny('android.security.KeyChain', 'keychain', ['getCertificateChain', 'getPrivateKey', 'choosePrivateKeyAlias'], null);
+  hookAny('com.google.android.gms.common.GoogleApiAvailability', 'gms.availability', ['isGooglePlayServicesAvailable', 'getApkVersion'], null);
+  hookAny('com.google.android.gms.location.SettingsClient', 'location.settings', ['checkLocationSettings'], null);
+  hookAny('android.location.Geocoder', 'location.geocoder', ['getFromLocation', 'getFromLocationName'], null);
+  hookAny('android.companion.CompanionDeviceManager', 'companion', ['associate', 'getAssociations'], null);
+  hookAny('android.content.pm.LauncherApps', 'launcher.apps', ['getActivityList', 'getProfiles'], null);
+  hookAny('android.app.NotificationManager', 'notify.enabled', ['areNotificationsEnabled', 'getActiveNotifications'], null);
+  hookAny('android.app.DownloadManager', 'download.manager', ['enqueue', 'query'], null);
+  hookAny('android.os.UserManager', 'user.serial', ['getSerialNumberForUser', 'getUserName'], null);
+  hookAny('android.app.admin.DevicePolicyManager', 'dpm.owner', ['isDeviceOwnerApp', 'isProfileOwnerApp', 'isAdminActive'], null);
+  hookAny('android.app.admin.DevicePolicyManager', 'ent.esid', ['getEnrollmentSpecificId'], null);
+  hookAny('android.telephony.CellIdentityLte', 'cell.identity', ['getMccString', 'getMncString', 'getCi', 'getTac', 'getEarfcn'], null);
+  hookAny('android.telephony.CellIdentityNr', 'cell.identity', ['getMccString', 'getMncString', 'getNci', 'getTac', 'getNrarfcn'], null);
+  hookAny('android.telephony.CellIdentityGsm', 'cell.identity', ['getMccString', 'getMncString', 'getCid', 'getLac'], null);
+  try {
+    var KS = Java.use('java.security.KeyStore');
+    KS.getInstance.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var type = safeStr(arguments[0]);
+        var result = overload.apply(this, arguments);
+        if (/AndroidKeyStore|BKS|PKCS/i.test(type)) writeReq('keystore.aliases', 'KeyStore.getInstance', type, '', null);
+        return result;
+      };
+    });
+  } catch (e) {}
+  try {
+    var KS = Java.use('java.security.KeyStore');
+    KS.aliases.implementation = function () {
+      var r = this.aliases();
+      writeReq('keystore.aliases', 'KeyStore.aliases', '', 'enum', null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var NI = Java.use('java.net.NetworkInterface');
+    var orig = NI.getNetworkInterfaces;
+    orig.implementation = function () {
+      var r = orig.call(this);
+      writeOnce('net.interfaces', 'NetworkInterface.getNetworkInterfaces', '', 'listed', null);
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var Sms = Java.use('android.provider.Telephony$Sms');
+    Sms.getDefaultSmsPackage.implementation = function (ctx) {
+      var r = this.getDefaultSmsPackage(ctx);
+      writeReq('role.sms', 'Telephony.Sms.getDefaultSmsPackage', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
+}
+
 function installJavaHooks() {
   writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
   hookBuild();
@@ -2286,6 +2451,7 @@ function installJavaHooks() {
   hookHmsAndFlutter();
   hookSniAndIntent();
   hookRequestSurface();
+  hookMissedRequestApis();
   hookRootDetection();
 }
 
