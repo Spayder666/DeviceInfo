@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.deviceinfo.trafficmonitor.TrafficMonitorApp
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
+import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.model.InstalledApp
 import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
@@ -180,5 +181,54 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearExportResult() {
         _exportResult.value = null
+    }
+
+    private val _fridaStatus = MutableStateFlow(FridaInstaller.status)
+    val fridaStatus = _fridaStatus.asStateFlow()
+
+    private val _isFridaInjecting = MutableStateFlow(false)
+    val isFridaInjecting = _isFridaInjecting.asStateFlow()
+
+    private val _fridaMessage = MutableStateFlow<String?>(null)
+    val fridaMessage = _fridaMessage.asStateFlow()
+
+    fun refreshFridaStatus() {
+        _fridaStatus.value = FridaInstaller.status
+    }
+
+    fun injectFridaAttach() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isFridaInjecting.value = true
+            FridaInstaller.ensureReady(getApplication())
+            FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
+            val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, useWrap = false)
+            _fridaStatus.value = FridaInstaller.status
+            _fridaMessage.value = if (ok) {
+                "Frida подключена (attach)"
+            } else {
+                FridaInstaller.lastError ?: "Attach не удался"
+            }
+            _isFridaInjecting.value = false
+        }
+    }
+
+    fun injectFridaWrap() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isFridaInjecting.value = true
+            FridaInstaller.ensureReady(getApplication())
+            FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
+            val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, useWrap = true)
+            _fridaStatus.value = FridaInstaller.status
+            _fridaMessage.value = if (ok) {
+                "Frida активна — приложение перезапущено"
+            } else {
+                FridaInstaller.lastError ?: "Инъекция не удалась"
+            }
+            _isFridaInjecting.value = false
+        }
+    }
+
+    fun clearFridaMessage() {
+        _fridaMessage.value = null
     }
 }

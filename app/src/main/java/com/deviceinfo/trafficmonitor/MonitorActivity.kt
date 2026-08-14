@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Launch
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -148,8 +149,22 @@ fun MonitorScreen(
     val isProbing by viewModel.isProbing.collectAsState()
     val exportResult by viewModel.exportResult.collectAsState()
     val isExporting by viewModel.isExporting.collectAsState()
+    val fridaStatus by viewModel.fridaStatus.collectAsState()
+    val isFridaInjecting by viewModel.isFridaInjecting.collectAsState()
+    val fridaMessage by viewModel.fridaMessage.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshFridaStatus()
+    }
+
+    LaunchedEffect(fridaMessage) {
+        fridaMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearFridaMessage()
+        }
+    }
 
     LaunchedEffect(exportResult) {
         exportResult?.let { result ->
@@ -173,7 +188,7 @@ fun MonitorScreen(
                     Column {
                         Text(appName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Зафиксировано: $eventCount · ${FridaInstaller.statusLabel()}",
+                            "Зафиксировано: $eventCount · ${fridaStatusLabel(fridaStatus)}",
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.8f)
                         )
@@ -233,6 +248,13 @@ fun MonitorScreen(
                 )
             }
 
+            FridaControlRow(
+                status = fridaStatus,
+                isInjecting = isFridaInjecting,
+                onAttach = { viewModel.injectFridaAttach() },
+                onWrap = { viewModel.injectFridaWrap() }
+            )
+
             if (events.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -243,6 +265,12 @@ fun MonitorScreen(
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Запустите приложение и выполните действия",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Для точных ответов API нажмите «Frida attach» после запуска приложения",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -389,6 +417,15 @@ fun EventCard(event: CaptureEvent, onClick: () -> Unit) {
                         maxLines = 2
                     )
                 }
+                event.responseDetails?.let {
+                    Text(
+                        text = "→ $it",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
                 Text(
                     text = sourceLabel(event.source),
                     fontSize = 10.sp,
@@ -475,7 +512,7 @@ fun EventDetailSheet(
         }
 
         Text(
-            text = "Frida перехватывает точный ответ в момент вызова (источник: Frida). Logcat показывает только факт обращения к property.",
+            text = "Frida перехватывает точный ответ в момент вызова (источник: Frida). Без Frida видны только факты обращений (logcat, strace, /proc).",
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(top = 8.dp)
@@ -501,6 +538,57 @@ fun EventDetailSheet(
 
         Spacer(Modifier.height(32.dp))
     }
+}
+
+@Composable
+fun FridaControlRow(
+    status: FridaInstaller.FridaStatus,
+    isInjecting: Boolean,
+    onAttach: () -> Unit,
+    onWrap: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Science, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Button(
+            onClick = onAttach,
+            enabled = !isInjecting && status != FridaInstaller.FridaStatus.INJECTED,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            if (isInjecting) {
+                CircularProgressIndicator(modifier = Modifier.height(14.dp).width(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text("Frida attach", fontSize = 12.sp)
+        }
+        Button(
+            onClick = onWrap,
+            enabled = !isInjecting,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            Text("Перезапуск с Frida", fontSize = 12.sp)
+        }
+        Text(
+            text = fridaStatusLabel(status),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun fridaStatusLabel(status: FridaInstaller.FridaStatus): String = when (status) {
+    FridaInstaller.FridaStatus.NOT_INSTALLED -> "Frida: не установлен"
+    FridaInstaller.FridaStatus.EXTRACTING -> "Frida: установка из APK…"
+    FridaInstaller.FridaStatus.DOWNLOADING -> "Frida: загрузка…"
+    FridaInstaller.FridaStatus.READY -> "Frida: готов (ручное подключение)"
+    FridaInstaller.FridaStatus.INJECTED -> "Frida: хуки активны"
+    FridaInstaller.FridaStatus.ERROR -> "Frida: ошибка"
 }
 
 @Composable

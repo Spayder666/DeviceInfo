@@ -63,6 +63,7 @@ class StraceMonitor(
 
         classifySyscall(line)?.let { info ->
             if (repository.isDuplicate(packageName, info.action, line, sinceMs = 500)) return
+            val returnInfo = parseSyscallReturn(line)
             repository.insert(
                 CaptureEvent(
                     targetPackage = packageName,
@@ -70,7 +71,7 @@ class StraceMonitor(
                     source = EventSource.STRACE,
                     action = info.action,
                     requestDetails = info.request,
-                    responseDetails = info.response,
+                    responseDetails = returnInfo ?: info.response,
                     rawData = line.trim(),
                     processId = pid
                 )
@@ -81,6 +82,8 @@ class StraceMonitor(
     private suspend fun recordIdentifier(def: IdentifierDefinition, line: String, path: String? = null) {
         val action = def.displayName
         if (repository.isDuplicate(packageName, action, line, sinceMs = 500)) return
+
+        val returnInfo = parseSyscallReturn(line)
 
         repository.insert(
             CaptureEvent(
@@ -93,7 +96,7 @@ class StraceMonitor(
                     ?: def.filePath?.let { "File: $it" }
                     ?: def.systemProperty?.let { "Property: $it" }
                     ?: "Системный вызов: ${def.api ?: def.id}",
-                responseDetails = if (line.contains("= -1")) "Ошибка доступа" else "Успешно",
+                responseDetails = returnInfo ?: if (line.contains("= -1")) "Ошибка доступа" else "Успешно",
                 rawData = line.trim(),
                 processId = pid,
                 identifierName = def.id,
@@ -154,7 +157,7 @@ class StraceMonitor(
             category = category,
             action = "open($path)",
             request = "Открытие: $path",
-            response = if (line.contains("= -1")) "Ошибка" else "Успешно"
+            response = parseSyscallReturn(line) ?: if (line.contains("= -1")) "Ошибка" else "Успешно"
         )
     }
 
@@ -164,7 +167,7 @@ class StraceMonitor(
             category = AccessCategory.NETWORK,
             action = "connect()",
             request = "Подключение: $dest",
-            response = if (line.contains("= -1")) "Не удалось" else "Подключено"
+            response = parseSyscallReturn(line) ?: if (line.contains("= -1")) "Не удалось" else "Подключено"
         )
     }
 
@@ -200,5 +203,18 @@ class StraceMonitor(
         val idx = line.indexOf(prefix)
         if (idx < 0) return null
         return line.substring(idx).take(300)
+    }
+
+    /** Парсит «= 42», «= -1 EACCES (Permission denied)» из строки strace. */
+    private fun parseSyscallReturn(line: String): String? {
+        val match = Regex("=\\s*(-?\\d+)(?:\\s+([A-Z]+(?:\\s+\\([^)]+\\))?))?").find(line) ?: return null
+        val code = match.groupValues[1].toIntOrNull() ?: return null
+        val err = match.groupValues.getOrNull(2)?.trim().orEmpty()
+
+        return when {
+            code >= 0 -> "Возврат: $code"
+            err.isNotEmpty() -> "Ошибка: $err (код $code)"
+            else -> "Ошибка (код $code)"
+        }
     }
 }

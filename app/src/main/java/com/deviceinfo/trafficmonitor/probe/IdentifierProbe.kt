@@ -25,11 +25,45 @@ object IdentifierProbe {
             return probeFile(def.filePath, event.processId)
         }
 
+        probeFdEvent(event)?.let { return it }
+
+        event.responseDetails?.takeIf { it.isNotBlank() && !it.startsWith("FD=") }?.let { response ->
+            return ProbeResult(
+                requestLabel = event.action,
+                valueAsRoot = response,
+                valueInTargetContext = null,
+                note = "Значение из перехвата (${event.source.name.lowercase()}). Для точного ответа API включите Frida-хуки."
+            )
+        }
+
         return ProbeResult(
             requestLabel = event.action,
             valueAsRoot = "Повтор недоступен для этого типа запроса",
             valueInTargetContext = null,
-            note = "Для точного перехвата ответа используйте Frida-хуки (источник Frida в списке событий)."
+            note = "Нажмите «Подключить Frida» на экране мониторинга для перехвата точных ответов API."
+        )
+    }
+
+    private fun probeFdEvent(event: CaptureEvent): ProbeResult? {
+        val fdMatch = Regex("^fd:(\\d+)$").find(event.action) ?: return null
+        val fd = fdMatch.groupValues[1]
+        val pid = event.processId ?: return ProbeResult(
+            requestLabel = event.action,
+            valueAsRoot = event.responseDetails ?: "(PID неизвестен)",
+            valueInTargetContext = null,
+            note = "Путь fd виден в ответе. Для повторной проверки нужен PID процесса."
+        )
+
+        val link = RootShell.execAndRead("readlink /proc/$pid/fd/$fd 2>&1").trim()
+        val pathFromRequest = event.requestDetails
+            ?.substringAfter("Открытый дескриптор: ")
+            ?.trim()
+
+        return ProbeResult(
+            requestLabel = "fd:$fd",
+            valueAsRoot = link.ifBlank { pathFromRequest ?: "(не удалось прочитать)" },
+            valueInTargetContext = pathFromRequest?.takeIf { it != link },
+            note = "Текущий путь файлового дескриптора в /proc/$pid/fd/$fd."
         )
     }
 

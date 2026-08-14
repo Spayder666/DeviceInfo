@@ -6,7 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-/** Frida-мониторинг через встроенный frida-gadget (wrap.+LD_PRELOAD). */
+/** Frida-мониторинг: poller событий + ручная инъекция (без auto wrap — иначе приложения зависают). */
 class FridaMonitor(
     private val context: Context,
     private val packageName: String,
@@ -26,8 +26,15 @@ class FridaMonitor(
                 it.resetOffset()
                 it.start()
             }
+        }
+    }
 
-            FridaInstaller.injectViaWrap(packageName)
+    /** Ручная инъекция: attach к запущенному процессу или wrap+перезапуск. */
+    fun requestInject(useWrap: Boolean) {
+        scope.launch(Dispatchers.IO) {
+            if (!FridaInstaller.ensureReady(context)) return@launch
+            FridaInstaller.prepareHooksForPackage(packageName, context)
+            FridaInstaller.injectManual(context, packageName, useWrap)
         }
     }
 

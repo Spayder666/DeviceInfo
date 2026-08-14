@@ -173,38 +173,7 @@ function hookBuild() {
       return result;
     };
   } catch (e) {}
-
-  try {
-    var BuildVersion = Java.use('android.os.Build$VERSION');
-    var fields = ['RELEASE', 'SDK_INT', 'INCREMENTAL', 'SECURITY_PATCH', 'CODENAME'];
-    fields.forEach(function (f) {
-      try {
-        var field = BuildVersion.class.getDeclaredField(f);
-        field.setAccessible(true);
-      } catch (e) {}
-    });
-  } catch (e) {}
-
-  // Log Build static field reads via reflection hook on Build class init values
-  try {
-    var fields = [
-      ['MODEL', 'build.model'], ['MANUFACTURER', 'build.manufacturer'], ['DEVICE', 'build.device'],
-      ['BRAND', 'build.brand'], ['PRODUCT', 'build.product'], ['HARDWARE', 'build.hardware'],
-      ['BOARD', 'build.board'], ['BOOTLOADER', 'build.bootloader'], ['DISPLAY', 'build.display'],
-      ['FINGERPRINT', 'build.fingerprint'], ['ID', 'build.id'], ['HOST', 'build.host'],
-      ['TAGS', 'build.tags'], ['TYPE', 'build.type'], ['USER', 'build.user'],
-      ['SOC_MANUFACTURER', 'build.soc_manufacturer'], ['SOC_MODEL', 'build.soc_model'],
-      ['SKU', 'build.sku'], ['ODM_SKU', 'build.odm_sku'], ['RADIO', 'build.radio'],
-      ['TIME', 'build.time'], ['SUPPORTED_ABIS', 'build.supported_abis']
-    ];
-    fields.forEach(function (f) {
-      try {
-        var fieldObj = Build[f[0]];
-        var val = fieldObj ? fieldObj.value : '<unknown>';
-        writeEvent(f[1], 'Build.' + f[0], 'static field read', safeStr(val), null);
-      } catch (e) {}
-    });
-  } catch (e) {}
+  // Не дампим все Build.* при старте — это блокирует UI целевого приложения.
 }
 
 function hookWifiAndBluetooth() {
@@ -412,19 +381,21 @@ setImmediate(function () {
   hookNativeProperties();
 });
 
-Java.perform(function () {
-  writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
-  hookBuild();
-  hookSystemProperties();
-  hookSettings();
-  hookTelephonyManager();
-  hookSubscriptionManager();
-  hookWifiAndBluetooth();
-  hookMediaDrm();
-  hookAdvertisingId();
-  hookAccounts();
-  hookNetworkInterface();
-  hookPackageManager();
-  hookContentResolver();
-  hookLocation();
+setImmediate(function () {
+  Java.perform(function () {
+    writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
+    hookBuild();
+    hookSystemProperties();
+    hookSettings();
+    hookTelephonyManager();
+    hookSubscriptionManager();
+    hookWifiAndBluetooth();
+    hookMediaDrm();
+    hookAdvertisingId();
+    hookAccounts();
+    hookNetworkInterface();
+    hookPackageManager();
+    hookContentResolver();
+    hookLocation();
+  });
 });

@@ -18,6 +18,7 @@ object FridaInstaller {
     const val CONFIG_PATH = "$BASE_DIR/libfrida-gadget.config.so"
     const val HOOKS_PATH = "$BASE_DIR/identifier_hooks.js"
     const val EVENTS_PATH = "$BASE_DIR/events.jsonl"
+    const val SERVER_PATH = "$BASE_DIR/frida-server"
 
     @Volatile
     var status: FridaStatus = FridaStatus.NOT_INSTALLED
@@ -173,6 +174,77 @@ object FridaInstaller {
         }
     }
 
+    /** Attach к уже запущенному процессу (без перезапуска). */
+    suspend fun injectViaAttach(context: Context, pid: Int): Boolean = withContext(Dispatchers.IO) {
+        if (injectViaGdbDlopen(pid)) {
+            status = FridaStatus.INJECTED
+            lastError = null
+            return@withContext true
+        }
+
+        if (!ensureFridaServerRunning(context)) {
+            lastError = lastError ?: "frida-server не запустился"
+            return@withContext false
+        }
+
+        val result = RootShell.execAndRead(
+            """
+            if command -v frida >/dev/null 2>&1; then
+              frida -H 127.0.0.1 -p $pid -l $HOOKS_PATH --runtime=v8 -q 2>&1 && echo FRIDA_OK
+            else
+              echo FRIDA_CLI_MISSING
+            fi
+            """.trimIndent(),
+            timeoutSec = 25
+        )
+
+        when {
+            result.contains("FRIDA_OK") -> {
+                status = FridaStatus.INJECTED
+                lastError = null
+                true
+            }
+            result.contains("FRIDA_CLI_MISSING") -> {
+                lastError = "Attach не удался. Попробуйте «Перезапуск с Frida» или установите frida-tools в Termux."
+                false
+            }
+            else -> {
+                lastError = "Attach: ${result.take(200)}"
+                false
+            }
+        }
+    }
+
+    /** Загрузка gadget.so в работающий процесс через gdb+dlopen (root). */
+    private fun injectViaGdbDlopen(pid: Int): Boolean {
+        val gdbCandidates = listOf(
+            "/system/bin/gdbserver",
+            "/system/xbin/gdb",
+            "/system/bin/gdb",
+            "/data/local/tmp/gdb"
+        )
+        for (gdb in gdbCandidates) {
+            if (gdb.contains("gdbserver")) continue
+            val check = RootShell.execAndRead("test -x $gdb && echo ok").trim()
+            if (check != "ok") continue
+
+            val result = RootShell.execAndRead(
+                """
+                $gdb -batch -p $pid \
+                  -ex 'set pagination off' \
+                  -ex 'call (void*)dlopen("$GADGET_PATH", 2)' \
+                  -ex detach -ex quit 2>&1
+                """.trimIndent(),
+                timeoutSec = 15
+            )
+            if (!result.contains("No such file") && !result.contains("can't attach")) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /** Wrap+LD_PRELOAD — только по запросу пользователя; перезапускает приложение. */
     suspend fun injectViaWrap(packageName: String): Boolean = withContext(Dispatchers.IO) {
         clearInjection(packageName)
         val result = RootShell.execAndRead(
@@ -186,7 +258,64 @@ object FridaInstaller {
         RootShell.execAndRead("am force-stop $packageName")
         delay(400)
         RootShell.exec("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
+        lastError = null
         true
+    }
+
+    /** Ручная инъекция: attach к PID или wrap+перезапуск. */
+    suspend fun injectManual(context: Context, packageName: String, useWrap: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!useWrap) {
+                val pid = RootShell.findPid(packageName)
+                if (pid == null) {
+                    lastError = "Приложение не запущено — сначала запустите его"
+                    return@withContext false
+                }
+                return@withContext injectViaAttach(context, pid)
+            }
+            injectViaWrap(packageName)
+        }
+
+    private suspend fun ensureFridaServerRunning(context: Context): Boolean = withContext(Dispatchers.IO) {
+        if (!deployFridaServerIfNeeded(context)) return@withContext false
+
+        val running = RootShell.execAndRead(
+            "pidof frida-server 2>/dev/null || pgrep -f '$SERVER_PATH' 2>/dev/null"
+        ).trim()
+        if (running.isNotEmpty()) return@withContext true
+
+        RootShell.execAndRead("chmod 755 $SERVER_PATH && $SERVER_PATH -D >/dev/null 2>&1 & sleep 1 && echo ok")
+        delay(500)
+        RootShell.execAndRead("pidof frida-server 2>/dev/null || pgrep -f '$SERVER_PATH' 2>/dev/null")
+            .trim().isNotEmpty()
+    }
+
+    private fun deployFridaServerIfNeeded(context: Context): Boolean {
+        if (RootShell.execAndRead("test -x $SERVER_PATH && echo ok").trim() == "ok") {
+            return true
+        }
+        val abi = resolveDownloadAbi()
+        val url = "https://github.com/frida/frida/releases/download/$FRIDA_VERSION/" +
+            "frida-server-$FRIDA_VERSION-android-$abi.xz"
+        val cacheXz = File(context.cacheDir, "frida-server-$abi.xz")
+        val cacheBin = File(context.cacheDir, "frida-server-$abi")
+
+        return try {
+            downloadFile(url, cacheXz)
+            RootShell.execAndRead(
+                "which xz >/dev/null 2>&1 && xz -d -f ${cacheXz.absolutePath} || unxz -f ${cacheXz.absolutePath}"
+            )
+            if (!cacheBin.exists()) {
+                lastError = "Не удалось распаковать frida-server"
+                return false
+            }
+            RootShell.execAndRead(
+                "cp ${cacheBin.absolutePath} $SERVER_PATH && chmod 755 $SERVER_PATH && echo ok"
+            ).trim() == "ok"
+        } catch (e: Exception) {
+            lastError = "frida-server: ${e.message}"
+            false
+        }
     }
 
     fun clearInjection(packageName: String) {
@@ -204,7 +333,7 @@ object FridaInstaller {
         FridaStatus.NOT_INSTALLED -> "Frida: не установлен"
         FridaStatus.EXTRACTING -> "Frida: установка из APK…"
         FridaStatus.DOWNLOADING -> "Frida: загрузка…"
-        FridaStatus.READY -> "Frida: встроен, готов"
+        FridaStatus.READY -> "Frida: готов (ручное подключение)"
         FridaStatus.INJECTED -> "Frida: хуки активны"
         FridaStatus.ERROR -> "Frida: ошибка (${lastError ?: "unknown"})"
     }

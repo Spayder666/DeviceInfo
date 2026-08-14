@@ -47,6 +47,8 @@ class ProcMonitor(
             if (parts.size < 2) continue
             val fd = parts[0].trim().substringAfterLast(' ')
             val target = parts[1].trim()
+            if (isNoisePath(target)) continue
+
             val key = "$fd:$target"
             if (knownFds.put(key, target) != null) continue
 
@@ -62,10 +64,51 @@ class ProcMonitor(
                 category = category,
                 action = "fd:$fd",
                 request = "Открытый дескриптор: $target",
-                response = "FD=$fd",
+                response = target,
                 raw = line.trim()
             )
         }
+    }
+
+    private fun isNoisePath(path: String): Boolean {
+        val lower = path.lowercase()
+        return lower in NOISE_PATHS ||
+            lower.startsWith("/dev/ashmem") ||
+            lower.startsWith("/dev/__properties__") ||
+            "anon_inode" in lower ||
+            lower.endsWith("/loader")
+    }
+
+    companion object {
+        private val NOISE_PATHS = setOf(
+            "/dev/null",
+            "/dev/zero",
+            "/dev/urandom",
+            "/dev/random",
+            "/dev/tty",
+            "/dev/log",
+            "/dev/console",
+            "/dev/kmsg",
+            "/dev/ptmx",
+            "/dev/binder",
+            "/dev/hwbinder",
+            "/dev/vndbinder",
+            "/dev/ion",
+            "/dev/dmabuf",
+            "/dev/eventfd",
+            "/dev/inotify",
+            "/dev/alarm",
+            "/dev/rtc0",
+            "/dev/uinput",
+            "/dev/input/event0",
+            "/dev/input/event1",
+            "/dev/input/event2",
+            "/dev/input/event3",
+            "/dev/input/event4",
+            "/dev/input/event5",
+            "/dev/graphics/fb0",
+            "/sys/kernel/debug/tracing/trace_marker"
+        )
     }
 
     private suspend fun pollNetworkConnections() {
