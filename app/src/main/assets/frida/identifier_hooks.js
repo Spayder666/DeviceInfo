@@ -204,7 +204,20 @@ function isInterestingProperty(key) {
     key === 'ro.product.manufacturer' ||
     key === 'ro.build.fingerprint' ||
     key === 'ro.bootimage.build.fingerprint' ||
-    key === 'ro.build.version.security_patch';
+    key === 'ro.build.version.security_patch' ||
+    key === 'ro.secure' ||
+    key === 'ro.debuggable' ||
+    key === 'ro.build.tags' ||
+    key === 'ro.build.type' ||
+    key === 'ro.kernel.qemu' ||
+    key === 'ro.hardware' ||
+    key.indexOf('ro.boot.verifiedboot') === 0 ||
+    key.indexOf('ro.boot.flash.locked') === 0 ||
+    key.indexOf('ro.boot.vbmeta') === 0 ||
+    key.indexOf('ro.boot.warranty') === 0 ||
+    key.indexOf('ro.boot.selinux') === 0 ||
+    key.indexOf('init.svc.magisk') === 0 ||
+    key.indexOf('persist.sys.magisk') === 0;
 }
 
 function mapPropertyToId(key) {
@@ -223,8 +236,19 @@ function mapPropertyToId(key) {
     'ro.build.version.sdk': 'version.sdk',
     'ro.build.version.security_patch': 'version.security_patch',
     'gsm.version.baseband': 'prop.gsm.version.baseband',
-    'persist.radio.imei': 'prop.persist.radio.imei'
+    'persist.radio.imei': 'prop.persist.radio.imei',
+    'ro.secure': 'root.props',
+    'ro.debuggable': 'root.props',
+    'ro.build.tags': 'root.props',
+    'ro.build.type': 'root.props',
+    'ro.kernel.qemu': 'root.emulator',
+    'ro.hardware': 'root.emulator',
+    'ro.boot.verifiedbootstate': 'attest.verified_boot',
+    'ro.boot.flash.locked': 'attest.verified_boot',
+    'ro.boot.vbmeta.device_state': 'attest.verified_boot'
   };
+  if (key.indexOf('magisk') >= 0) return 'root.magisk';
+  if (key.indexOf('qemu') >= 0 || key.indexOf('goldfish') >= 0) return 'root.emulator';
   return map[key] || 'getprop.shell';
 }
 
@@ -1035,10 +1059,248 @@ function hookNativeNetMeta() {
           if (this.path && /loc|gps|gnss|map|cronet|okhttp|mqtt/i.test(this.path)) {
             writeEvent('location.hal', 'dlopen', this.path, 'loaded', null);
           }
+          if (this.path && /magisk|zygisk|xposed|lsposed|frida|gadget|riru|substrate/i.test(this.path)) {
+            writeRoot('root.maps', 'dlopen', this.path, 'loaded');
+          }
         }
       });
     }
   } catch (e) {}
+}
+
+var lastRoot = {};
+
+function writeRoot(id, action, req, resp) {
+  var key = id + '|' + action + '|' + req;
+  var now = Date.now();
+  if (lastRoot[key] && now - lastRoot[key] < 1200) return;
+  lastRoot[key] = now;
+  writeEvent(id, action, req, resp, null);
+}
+
+function isRootPath(p) {
+  if (!p) return false;
+  var s = String(p).toLowerCase();
+  return /\/su$|\/su\/|superuser|supersu|magisk|zygisk|ksu|apatch|busybox|xposed|lsposed|riru|frida-server|\/data\/adb|\/sbin\/\.|debug_ramdisk|qemu_pipe|goldfish_pipe|\/sys\/qemu/.test(s);
+}
+
+function isRootCmd(cmd) {
+  if (!cmd) return false;
+  return /(^|[\/\s])su(\s|$)|which\s+su|magisk|getenforce|busybox|resetprop|zygisk|ksud|apatch|id\s+-u/.test(String(cmd).toLowerCase());
+}
+
+function isRootPkg(pkg) {
+  if (!pkg) return false;
+  var s = String(pkg).toLowerCase();
+  return /magisk|supersu|superuser|kernelsu|ksunext|lsposed|xposed|edxposed|apatch|kingroot|kingo|framaroot|hidemyroot|rootcloak|shamiko|me\.weishu|topjohnwu|chainfire/.test(s);
+}
+
+function isHookClass(name) {
+  if (!name) return false;
+  return /rootbeer|xposed|lsposed|edxposed|magisk|frida|de\.robv\.android\.xposed|com\.scottyab\.rootbeer/.test(String(name).toLowerCase());
+}
+
+function hookRootFiles() {
+  try {
+    var File = Java.use('java.io.File');
+    ['exists', 'canRead', 'canExecute', 'canWrite', 'isFile', 'isDirectory'].forEach(function (m) {
+      try {
+        var orig = File[m];
+        orig.implementation = function () {
+          var path = '';
+          try { path = this.getAbsolutePath(); } catch (e) {}
+          var result = orig.call(this);
+          if (isRootPath(path)) {
+            writeRoot(/qemu|goldfish/.test(path) ? 'root.emulator' : 'root.su',
+              'File.' + m, path, safeStr(result));
+          }
+          return result;
+        };
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookRootExec() {
+  try {
+    var RT = Java.use('java.lang.Runtime');
+    RT.exec.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var cmd = '';
+        try {
+          var a0 = arguments[0];
+          if (a0 && a0.getClass && a0.getClass().isArray && a0.getClass().isArray()) {
+            var parts = [];
+            for (var i = 0; i < a0.length; i++) parts.push(safeStr(a0[i]));
+            cmd = parts.join(' ');
+          } else {
+            cmd = safeStr(a0);
+          }
+        } catch (e) { cmd = safeStr(arguments[0]); }
+        var result = overload.apply(this, arguments);
+        if (isRootCmd(cmd)) writeRoot('root.exec', 'Runtime.exec', cmd, 'started');
+        return result;
+      };
+    });
+  } catch (e) {}
+  try {
+    var PB = Java.use('java.lang.ProcessBuilder');
+    PB.start.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var cmd = '';
+        try { cmd = safeStr(this.command()); } catch (e) {}
+        var result = overload.apply(this, arguments);
+        if (isRootCmd(cmd)) writeRoot('root.exec', 'ProcessBuilder.start', cmd, 'started');
+        return result;
+      };
+    });
+  } catch (e) {}
+}
+
+function hookRootPackages() {
+  var classes = ['android.app.ApplicationPackageManager', 'android.content.pm.PackageManager'];
+  classes.forEach(function (name) {
+    try {
+      var PM = Java.use(name);
+      ['getPackageInfo', 'getApplicationInfo', 'getPackageUid'].forEach(function (m) {
+        try {
+          PM[m].overloads.forEach(function (overload) {
+            overload.implementation = function () {
+              var pkg = safeStr(arguments[0]);
+              var result = overload.apply(this, arguments);
+              if (isRootPkg(pkg)) writeRoot('root.packages', name + '.' + m, pkg, 'found');
+              return result;
+            };
+          });
+        } catch (e) {}
+      });
+      try {
+        PM.getInstalledPackages.overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeRoot('root.packages', name + '.getInstalledPackages', safeStr(arguments[0]), 'count=' + (result ? result.size() : 0));
+            return result;
+          };
+        });
+      } catch (e) {}
+    } catch (e) {}
+  });
+}
+
+function hookRootDebug() {
+  try {
+    var Debug = Java.use('android.os.Debug');
+    var origDbg = Debug.isDebuggerConnected;
+    origDbg.implementation = function () {
+      var result = origDbg.call(this);
+      writeRoot('root.debugger', 'Debug.isDebuggerConnected', '', safeStr(result));
+      return result;
+    };
+  } catch (e) {}
+  try {
+    var SG = Java.use('android.provider.Settings$Global');
+    var origGet = SG.getInt.overload('android.content.ContentResolver', 'java.lang.String', 'int');
+    origGet.implementation = function (cr, key, def) {
+      var result = origGet.call(this, cr, key, def);
+      if (key === 'adb_enabled' || key === 'development_settings_enabled') {
+        writeRoot('root.adb', 'Settings.Global.getInt', key, safeStr(result));
+      }
+      return result;
+    };
+  } catch (e) {}
+}
+
+function hookRootBeer() {
+  try {
+    var RB = Java.use('com.scottyab.rootbeer.RootBeer');
+    ['isRooted', 'isRootedWithoutBusyBoxCheck', 'detectRootManagementApps', 'detectPotentiallyDangerousApps',
+      'detectTestKeys', 'checkForBusyBoxBinary', 'checkForSuBinary', 'checkSuExists',
+      'checkForRWPaths', 'checkForDangerousProps', 'checkForRootNative', 'detectRootCloakingApps',
+      'checkForMagiskBinary'].forEach(function (m) {
+      try {
+        RB[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            writeRoot('root.rootbeer', 'RootBeer.' + m, safeStr(arguments[0]), safeStr(result));
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function hookIntegrityApis() {
+  try {
+    var IM = Java.use('com.google.android.play.core.integrity.IntegrityManager');
+    IM.requestIntegrityToken.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeRoot('ent.integrity', 'IntegrityManager.requestIntegrityToken', safeStr(arguments[0]), 'requested');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var SN = Java.use('com.google.android.gms.safetynet.SafetyNetClient');
+    SN.attest.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeRoot('ent.safetynet', 'SafetyNetClient.attest', '', 'requested');
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var KG = Java.use('android.security.keystore.KeyGenParameterSpec$Builder');
+    var origCh = KG.setAttestationChallenge;
+    origCh.implementation = function (challenge) {
+      writeRoot('attest.key', 'KeyGenParameterSpec.setAttestationChallenge', 'len=' + (challenge ? challenge.length : 0), 'set');
+      return origCh.call(this, challenge);
+    };
+  } catch (e) {}
+}
+
+function hookRootClassForName() {
+  try {
+    var Cls = Java.use('java.lang.Class');
+    var origForName = Cls.forName.overload('java.lang.String');
+    origForName.implementation = function (name) {
+      if (isHookClass(name)) {
+        var id = /xposed|lsposed/.test(String(name).toLowerCase()) ? 'root.xposed' :
+          (/frida/.test(String(name).toLowerCase()) ? 'root.frida_detect' : 'root.rootbeer');
+        writeRoot(id, 'Class.forName', name, '');
+      }
+      return origForName.call(this, name);
+    };
+  } catch (e) {}
+}
+
+function hookNativeRootAccess() {
+  ['access', 'faccessat', 'stat', 'lstat'].forEach(function (fn) {
+    try {
+      var addr = Module.findExportByName('libc.so', fn);
+      if (!addr) return;
+      Interceptor.attach(addr, {
+        onEnter: function (args) {
+          var idx = fn === 'faccessat' ? 1 : 0;
+          try { this.path = Memory.readUtf8String(args[idx]); } catch (e) { this.path = ''; }
+        },
+        onLeave: function (retval) {
+          if (!this.path || !isRootPath(this.path)) return;
+          writeRoot('root.su', 'native.' + fn, this.path, 'rc=' + retval.toInt32());
+        }
+      });
+    } catch (e) {}
+  });
+}
+
+function hookRootDetection() {
+  hookRootFiles();
+  hookRootExec();
+  hookRootPackages();
+  hookRootDebug();
+  hookRootBeer();
+  hookIntegrityApis();
+  hookRootClassForName();
 }
 
 function installJavaHooks() {
@@ -1074,6 +1336,7 @@ function installJavaHooks() {
   hookCronetVolleyRetrofit();
   hookHmsAndFlutter();
   hookSniAndIntent();
+  hookRootDetection();
 }
 
 // Хуки ставим после старта приложения, чтобы не блокировать запуск.
@@ -1085,6 +1348,7 @@ setTimeout(function () {
   }
   try { hookNativeProperties(); } catch (e) {}
   try { hookNativeNetMeta(); } catch (e) {}
+  try { hookNativeRootAccess(); } catch (e) {}
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }

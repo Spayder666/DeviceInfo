@@ -75,6 +75,7 @@ private val primaryFilters = listOf(
     AccessCategory.CAMERA,
     AccessCategory.TELEPHONY,
     AccessCategory.IDENTIFIER,
+    AccessCategory.SECURITY,
     AccessCategory.NETWORK
 )
 

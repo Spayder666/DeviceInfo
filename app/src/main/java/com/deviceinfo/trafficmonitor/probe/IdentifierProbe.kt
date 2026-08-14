@@ -76,6 +76,7 @@ object IdentifierProbe {
         AccessCategory.PERMISSION -> "Статус AppOps / grant для этого разрешения."
         AccessCategory.IDENTIFIER -> "Идентификатор того же типа, что в запросе."
         AccessCategory.SYSTEM_API -> "Системные сервисы пакета."
+        AccessCategory.SECURITY -> "Что устройство отвечает на ту же проверку root/integrity (su, props, SELinux, verified boot)."
         else -> "Ответ того же типа, что и запрос."
     }
 

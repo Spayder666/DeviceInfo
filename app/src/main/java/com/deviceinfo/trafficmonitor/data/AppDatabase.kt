@@ -12,7 +12,8 @@ class EnumConverters {
     fun fromCategory(value: AccessCategory): String = value.name
 
     @TypeConverter
-    fun toCategory(value: String): AccessCategory = AccessCategory.valueOf(value)
+    fun toCategory(value: String): AccessCategory =
+        runCatching { AccessCategory.valueOf(value) }.getOrDefault(AccessCategory.OTHER)
 
     @TypeConverter
     fun fromSource(value: EventSource): String = value.name
@@ -21,7 +22,7 @@ class EnumConverters {
     fun toSource(value: String): EventSource = EventSource.valueOf(value)
 }
 
-@Database(entities = [CaptureEvent::class], version = 2, exportSchema = false)
+@Database(entities = [CaptureEvent::class], version = 3, exportSchema = false)
 @TypeConverters(EnumConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun captureEventDao(): CaptureEventDao

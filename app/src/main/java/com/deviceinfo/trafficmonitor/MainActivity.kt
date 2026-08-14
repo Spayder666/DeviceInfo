@@ -299,7 +299,7 @@ private fun RootChip(ok: Boolean) {
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            if (ok) "Root · GPS, камера, SIM, HTTPS" else "Нужен root (su)",
+            if (ok) "Root · GPS, SIM, HTTPS, детект root" else "Нужен root (su)",
             fontSize = 12.sp,
             color = color,
             fontWeight = FontWeight.Medium

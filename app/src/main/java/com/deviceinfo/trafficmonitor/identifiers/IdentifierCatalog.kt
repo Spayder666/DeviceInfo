@@ -25,7 +25,8 @@ enum class IdentifierGroup(val label: String) {
     ENTERPRISE("Enterprise / MDM"),
     OEM("OEM-специфичные"),
     ATTESTATION("Attestation / Integrity"),
-    LOCATION("GPS / локация")
+    LOCATION("GPS / локация"),
+    ROOT("Root / детект среды")
 }
 
 data class IdentifierDefinition(
@@ -63,6 +64,7 @@ object IdentifierCatalog {
         addAll(oemIdentifiers())
         addAll(attestationIdentifiers())
         addAll(locationIdentifiers())
+        addAll(rootIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -311,7 +313,25 @@ object IdentifierCatalog {
     private fun attestationIdentifiers() = listOf(
         id("attest.key", "Key attestation", IdentifierGroup.ATTESTATION, "KeyGenParameterSpec.setAttestationChallenge()", logcat = listOf("KeyAttestation", "KeyMint", "attestation")),
         id("attest.strongbox", "StrongBox", IdentifierGroup.ATTESTATION, "KeyInfo.isInsideSecureHardware()", logcat = listOf("StrongBox")),
-        id("attest.verified_boot", "Verified boot state", IdentifierGroup.ATTESTATION, logcat = listOf("verifiedbootstate", "vbmeta"))
+        id("attest.verified_boot", "Verified boot state", IdentifierGroup.ATTESTATION, systemProp = "ro.boot.verifiedbootstate", logcat = listOf("verifiedbootstate", "vbmeta"))
+    )
+
+    private fun rootIdentifiers() = listOf(
+        id("root.su", "Поиск su", IdentifierGroup.ROOT, "File.exists(/system/bin/su)", file = "/system/bin/su", logcat = listOf("which su", "su binary", "/system/bin/su", "/system/xbin/su"), strace = listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su")),
+        id("root.magisk", "Magisk / Zygisk", IdentifierGroup.ROOT, "File.exists(/sbin/.magisk)", file = "/sbin/.magisk", logcat = listOf("Magisk", "Zygisk", "magiskd"), strace = listOf("/sbin/.magisk", "/data/adb/magisk", "/debug_ramdisk", "libmagisk", "libzygisk")),
+        id("root.ksu", "KernelSU / APatch", IdentifierGroup.ROOT, logcat = listOf("KernelSU", "APatch", "ksud"), strace = listOf("/data/adb/ksu", "/data/adb/ap")),
+        id("root.exec", "Runtime.exec (su / getenforce)", IdentifierGroup.ROOT, "Runtime.exec / ProcessBuilder", logcat = listOf("getenforce", "which su")),
+        id("root.packages", "Пакеты root-менеджеров", IdentifierGroup.ROOT, "PackageManager.getPackageInfo(magisk/supersu)", logcat = listOf("com.topjohnwu.magisk", "eu.chainfire.supersu", "me.weishu.kernelsu")),
+        id("root.props", "Свойства root/unlock", IdentifierGroup.ROOT, "SystemProperties ro.secure / ro.debuggable / ro.build.tags", systemProp = "ro.secure", logcat = listOf("ro.secure", "ro.debuggable", "ro.build.tags", "test-keys")),
+        id("root.selinux", "SELinux getenforce", IdentifierGroup.ROOT, "Runtime.exec(getenforce)", logcat = listOf("getenforce", "SELinux")),
+        id("root.adb", "ADB / developer options", IdentifierGroup.ROOT, "Settings.Global.adb_enabled", logcat = listOf("adb_enabled", "development_settings")),
+        id("root.debugger", "Отладчик / TracerPid", IdentifierGroup.ROOT, "Debug.isDebuggerConnected / TracerPid", logcat = listOf("isDebuggerConnected", "TracerPid")),
+        id("root.maps", "maps: frida/xposed/magisk", IdentifierGroup.ROOT, "/proc/self/maps", file = "/proc/self/maps", strace = listOf("/proc/self/maps", "/proc/self/status")),
+        id("root.rootbeer", "RootBeer.isRooted", IdentifierGroup.ROOT, "com.scottyab.rootbeer.RootBeer", logcat = listOf("RootBeer", "isRooted")),
+        id("root.xposed", "Xposed / LSPosed", IdentifierGroup.ROOT, "Class.forName(XposedBridge)", logcat = listOf("XposedBridge", "LSPosed", "EdXposed"), strace = listOf("XposedBridge", "libxposed", "liblsposed")),
+        id("root.frida_detect", "Детект Frida", IdentifierGroup.ROOT, "frida-server / :27042 / gum-js-loop", logcat = listOf("frida-server", "27042", "gum-js-loop", "LIBFRIDA")),
+        id("root.emulator", "Детект эмулятора", IdentifierGroup.ROOT, "qemu/goldfish/ranchu", logcat = listOf("goldfish", "ranchu", "qemu_pipe", "ro.kernel.qemu"), strace = listOf("/dev/qemu_pipe", "/dev/goldfish_pipe", "/sys/qemu_trace")),
+        id("root.mounts", "mount magisk/rw system", IdentifierGroup.ROOT, "/proc/mounts", file = "/proc/mounts", strace = listOf("/proc/mounts", "/proc/self/mounts"))
     )
 
     // --- helpers ---
@@ -346,6 +366,7 @@ fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {
     IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> AccessCategory.TELEPHONY
     IdentifierGroup.WIFI, IdentifierGroup.NETWORK -> AccessCategory.NETWORK
     IdentifierGroup.BLUETOOTH -> AccessCategory.BLUETOOTH
+    IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION -> AccessCategory.SECURITY
     IdentifierGroup.ACCOUNT -> AccessCategory.IDENTIFIER
     else -> AccessCategory.IDENTIFIER
 }
@@ -358,6 +379,8 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id.startsWith("net.") || id.startsWith("wifi.") -> AccessCategory.NETWORK
             id.startsWith("location.") -> AccessCategory.LOCATION
             id.startsWith("bt.") -> AccessCategory.BLUETOOTH
+            id.startsWith("root.") || id.startsWith("attest.") ||
+                id == "ent.integrity" || id == "ent.safetynet" -> AccessCategory.SECURITY
             else -> null
         }
 }

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.material.icons.outlined.Wifi
@@ -57,6 +58,7 @@ fun categoryColor(category: AccessCategory): Color = when (category) {
     AccessCategory.PERMISSION -> Color(0xFFFFD54F)
     AccessCategory.SYSTEM_API -> Color(0xFF8B949E)
     AccessCategory.SYSCALL -> Color(0xFF9E9E9E)
+    AccessCategory.SECURITY -> Color(0xFFFF8A4C)
     AccessCategory.OTHER -> Color(0xFF757575)
 }
 
@@ -77,6 +79,7 @@ fun categoryIcon(category: AccessCategory): ImageVector = when (category) {
     AccessCategory.PERMISSION -> Icons.Outlined.Lock
     AccessCategory.SYSTEM_API -> Icons.Outlined.Settings
     AccessCategory.SYSCALL -> Icons.Outlined.Code
+    AccessCategory.SECURITY -> Icons.Outlined.GppMaybe
     AccessCategory.OTHER -> Icons.Outlined.MoreHoriz
 }
 
@@ -97,6 +100,7 @@ fun categoryLabel(category: AccessCategory): String = when (category) {
     AccessCategory.PERMISSION -> "Права"
     AccessCategory.SYSTEM_API -> "Система"
     AccessCategory.SYSCALL -> "syscall"
+    AccessCategory.SECURITY -> "Root"
     AccessCategory.OTHER -> "Прочее"
 }
 
@@ -117,6 +121,7 @@ fun categoryFullLabel(category: AccessCategory): String = when (category) {
     AccessCategory.PERMISSION -> "Разрешения"
     AccessCategory.SYSTEM_API -> "Системные API"
     AccessCategory.SYSCALL -> "Системные вызовы"
+    AccessCategory.SECURITY -> "Root / Integrity"
     AccessCategory.OTHER -> "Прочее"
 }
 
@@ -168,6 +173,7 @@ fun identifierGroupIcon(group: IdentifierGroup): ImageVector = when (group) {
     IdentifierGroup.OEM -> Icons.Outlined.Build
     IdentifierGroup.ATTESTATION -> Icons.Outlined.VerifiedUser
     IdentifierGroup.LOCATION -> Icons.Outlined.MyLocation
+    IdentifierGroup.ROOT -> Icons.Outlined.GppMaybe
 }
 
 fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
@@ -190,6 +196,7 @@ fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
     IdentifierGroup.OEM -> "OEM"
     IdentifierGroup.ATTESTATION -> "Attest"
     IdentifierGroup.LOCATION -> "GPS"
+    IdentifierGroup.ROOT -> "Root"
 }
 
 fun allIcon(): ImageVector = Icons.Outlined.Apps

@@ -44,12 +44,14 @@ class ExtraLogcatMonitor(
             line.contains("LTE") || line.contains("NR_") || line.contains("IMS")
         val sim = Regex("(?i)sim.?state|imsi|iccid|operator|mccmnc|subscriber|iphonesubinfo|getSim").containsMatchIn(line)
         val loc = line.contains("location", ignoreCase = true) || line.contains("gps", ignoreCase = true)
-        if (!mentions && !radio && !loc && !sim) return
+        val security = Regex("(?i)RootBeer|SafetyNet|PlayIntegrity|IntegrityService|Magisk|Xposed|LSPosed|isRooted").containsMatchIn(line)
+        if (!mentions && !radio && !loc && !sim && !security) return
         if (!mentions && radio && !sim && !line.contains("imei", ignoreCase = true) &&
             !line.contains("cell", ignoreCase = true)
         ) return
 
         val category = when {
+            security -> AccessCategory.SECURITY
             loc -> AccessCategory.LOCATION
             radio || line.contains("RIL") -> AccessCategory.TELEPHONY
             line.contains("am_crash") || line.contains("force_finish") -> AccessCategory.SYSTEM_API

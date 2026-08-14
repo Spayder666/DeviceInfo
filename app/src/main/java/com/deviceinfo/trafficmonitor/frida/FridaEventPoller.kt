@@ -119,7 +119,11 @@ class FridaEventPoller(
             "storage" in text || "file" in text || "sqlite" in text || "sharedpref" in text ||
                 "media/" in text -> AccessCategory.STORAGE
             "biometric" in text || "fingerprint" in text || "projection" in text -> AccessCategory.SYSTEM_API
+            "root" in text || "magisk" in text || "safetynet" in text || "integrity" in text ||
+                "xposed" in text || "frida" in text || "selinux" in text || "emulator" in text ||
+                "debugger" in text || "attest" in text -> AccessCategory.SECURITY
             group == "LOCATION" -> AccessCategory.LOCATION
+            group == "ROOT" || group == "ATTESTATION" -> AccessCategory.SECURITY
             group == "TELEPHONY" || group == "SUBSCRIPTION" -> AccessCategory.TELEPHONY
             group == "NETWORK" || group == "WIFI" -> AccessCategory.NETWORK
             else -> AccessCategory.IDENTIFIER

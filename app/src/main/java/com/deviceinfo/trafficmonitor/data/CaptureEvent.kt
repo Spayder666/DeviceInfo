@@ -20,6 +20,7 @@ enum class AccessCategory {
     CLIPBOARD,
     SYSTEM_API,
     SYSCALL,
+    SECURITY,
     OTHER
 }
 

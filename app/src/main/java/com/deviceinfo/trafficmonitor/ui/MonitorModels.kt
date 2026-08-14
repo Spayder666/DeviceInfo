@@ -42,7 +42,8 @@ fun isHighRisk(category: AccessCategory): Boolean = when (category) {
     AccessCategory.IDENTIFIER,
     AccessCategory.CONTACTS,
     AccessCategory.SMS,
-    AccessCategory.CLIPBOARD -> true
+    AccessCategory.CLIPBOARD,
+    AccessCategory.SECURITY -> true
     else -> false
 }
 

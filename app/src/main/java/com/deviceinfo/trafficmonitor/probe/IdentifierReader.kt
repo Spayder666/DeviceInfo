@@ -39,6 +39,7 @@ object IdentifierReader {
             event.category == AccessCategory.PERMISSION -> readPermission(event)
             event.category == AccessCategory.IDENTIFIER -> readIdentifier(event)
             event.category == AccessCategory.SYSTEM_API -> readSystemApi(event.targetPackage)
+            event.category == AccessCategory.SECURITY -> readSecurity(event)
             else -> readFromCaptured(event)
         }
         return values.filter { it.value.isNotBlank() && it.value != "(пусто)" }
@@ -57,6 +58,7 @@ object IdentifierReader {
             IdentifierGroup.BLUETOOTH -> readBluetooth()
             IdentifierGroup.DRM -> readDrm()
             IdentifierGroup.ACCOUNT -> readAccounts()
+            IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION -> readSecurity(event)
             else -> emptyList()
         }
         return buildList {
@@ -106,6 +108,7 @@ object IdentifierReader {
         AccessCategory.TELEPHONY -> IdentifierGroup.TELEPHONY
         AccessCategory.BLUETOOTH -> IdentifierGroup.BLUETOOTH
         AccessCategory.NETWORK -> IdentifierGroup.WIFI
+        AccessCategory.SECURITY -> IdentifierGroup.ROOT
         else -> null
     }
 
@@ -522,6 +525,44 @@ object IdentifierReader {
         return listOfNotEmpty(
             IdentifierValue("perm.op", "AppOps $op", block.take(400)),
             IdentifierValue("perm.grant", "Package $op", granted)
+        )
+    }
+
+    private fun readSecurity(event: CaptureEvent): List<IdentifierValue> {
+        val id = event.identifierName.orEmpty()
+        return when {
+            id == "root.selinux" || event.action.contains("getenforce", ignoreCase = true) ->
+                listOfNotEmpty(IdentifierValue("root.selinux", "getenforce", RootShell.execAndRead("getenforce", timeoutSec = 5).trim()))
+            id == "root.adb" -> listOfNotEmpty(
+                IdentifierValue("root.adb", "adb_enabled", settingsGet("global", "adb_enabled")),
+                IdentifierValue("root.dev", "development_settings", settingsGet("global", "development_settings_enabled"))
+            )
+            id == "root.emulator" -> listOfNotEmpty(
+                IdentifierValue("root.qemu", "ro.kernel.qemu", getprop("ro.kernel.qemu")),
+                IdentifierValue("root.hardware", "ro.hardware", getprop("ro.hardware")),
+                IdentifierValue("root.fingerprint", "fingerprint", getprop("ro.build.fingerprint"))
+            )
+            id == "ent.integrity" || id == "ent.safetynet" || id.startsWith("attest.") -> listOfNotEmpty(
+                IdentifierValue("attest.vb", "verifiedbootstate", getprop("ro.boot.verifiedbootstate")),
+                IdentifierValue("attest.lock", "flash.locked", getprop("ro.boot.flash.locked")),
+                IdentifierValue("attest.vbmeta", "vbmeta.device_state", getprop("ro.boot.vbmeta.device_state"))
+            )
+            else -> readRootSnapshot()
+        }.ifEmpty { readRootSnapshot() } + readFromCaptured(event)
+    }
+
+    private fun readRootSnapshot(): List<IdentifierValue> {
+        val su = RootShell.execAndRead(
+            "ls -l /system/bin/su /system/xbin/su /sbin/su /su/bin/su /data/adb/magisk /sbin/.magisk 2>&1 | head -n 12",
+            timeoutSec = 6
+        )
+        return listOfNotEmpty(
+            IdentifierValue("root.secure", "ro.secure", getprop("ro.secure")),
+            IdentifierValue("root.debuggable", "ro.debuggable", getprop("ro.debuggable")),
+            IdentifierValue("root.tags", "ro.build.tags", getprop("ro.build.tags")),
+            IdentifierValue("root.vb", "verifiedbootstate", getprop("ro.boot.verifiedbootstate")),
+            IdentifierValue("root.selinux", "getenforce", RootShell.execAndRead("getenforce", timeoutSec = 5).trim()),
+            IdentifierValue("root.paths", "su/magisk paths", su.take(400))
         )
     }
 

@@ -5,6 +5,7 @@ import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierMatcher
+import com.deviceinfo.trafficmonitor.identifiers.toAccessCategory
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -154,6 +155,8 @@ class ProcMonitor(
         val lower = path.lowercase()
         return when {
             "camera" in lower -> AccessCategory.CAMERA
+            lower.endsWith("/su") || "/su/" in lower || "magisk" in lower || "xposed" in lower ||
+                "frida" in lower || "qemu_pipe" in lower || "goldfish" in lower -> AccessCategory.SECURITY
             "gps" in lower || "location" in lower || "gnss" in lower -> AccessCategory.LOCATION
             "audio" in lower || "mic" in lower -> AccessCategory.MICROPHONE
             "bluetooth" in lower -> AccessCategory.BLUETOOTH
@@ -203,7 +206,7 @@ class ProcMonitor(
         repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
-                category = AccessCategory.IDENTIFIER,
+                category = def.toAccessCategory(),
                 source = EventSource.PROC,
                 action = def.displayName,
                 permission = def.permission,
