@@ -117,15 +117,15 @@ AccessMonitorService  → foreground-сервис
 
 **Не** используется `wrap.*` / `LD_PRELOAD` (на Android 13+ вешает приложения). Инъекция только вручную: **Frida к запущенному** или **Запустить + Frida** (`frida-inject -p PID`).
 
-Хуки — **запросы целевого приложения**: Location, Telephony, Privacy Sandbox, OAID, InstallSource, Health Connect, FIDO2, KeyStore, контакты/SMS, пакеты, FCM, Play Integrity, VPN/pin, антифрод SDK, **браузер/WebView/JS** (Client Hints, Custom Tabs, EME, canvas/WebGL/fonts/audio, FingerprintJS/CreepJS).
+Хуки — **запросы целевого приложения**: локация (GNSS antenna/clock, Places, Awareness, IZat), сенсоры (direct/step/heart/hinge), идентификаторы (VAID/AAID/UDID, AppMetrica), Nearby/BLE, OMAPI, EXIF GPS, браузер/WebView/JS, антифрод SDK.
 
 События: `/data/local/tmp/access_monitor/events.jsonl` → источник **Frida**.
 
 Данные хранятся локально в Room Database.
 
-## Каталог запросов (474 типа)
+## Каталог запросов (586 типов)
 
-Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`, основан на AOSP, antifraud SDK и браузерных API (android.webkit / androidx.webkit / Chromium AwSettings / FingerprintJS / CreepJS).
+Полный список в `app/src/main/java/.../identifiers/IdentifierCatalog.kt`. AOSP/GMS + antifraud + браузер + GNSS extras (antenna/clock/Places/Awareness/IZat), сенсоры (direct/step/heart/hinge), VAID/AAID, OMAPI, Nearby, EXIF GPS, mDoc, thermal/fold.
 
 | Группа | Кол-во | Что входит |
 |--------|--------|------------|
@@ -144,7 +144,7 @@ AccessMonitorService  → foreground-сервис
 | **CONTENT_PROVIDER** | 8 | telephony, GSF, MediaStore, downloads, SQLite, prefs |
 | **PROC_SYS** | 12 | /proc/cpuinfo, meminfo, uptime, stat, boot_id, CPU freq, __properties__… |
 | **NETWORK** | 17 | IP, HTTP/2, VPN, proxy, user CA, pin, NetworkCapabilities, STUN/WebRTC |
-| **LOCATION** | 14 | GPS, fused, NLP, GNSS, geofence, cell, Wi‑Fi scan, RTT, UWB, HAL, SUPL |
+| **LOCATION** | 32 | GPS, fused, NLP, GNSS antenna/clock/caps, Places, Awareness, IZat, mock test, altitude, RTT, UWB |
 | **ENTERPRISE** | 2 | Enrollment Specific ID, Organization ID |
 | **OEM** | 6 | Samsung, Huawei, Vivo, OAID-специфичные ключи |
 | **ATTESTATION** | 9 | Key attestation, StrongBox, Play Integrity, vbmeta digest, bootloader lock |

@@ -29,7 +29,8 @@ object IdentifierReader {
             id?.startsWith("calendar.") == true || id == "cp.calendar" -> readCalendar()
             id?.startsWith("camera.") == true -> readCamera()
             id?.startsWith("mic.") == true -> readMicrophone()
-            id?.startsWith("sensor.") == true -> readSensors()
+            id?.startsWith("sensor.") == true || id == "hw.sensor_list" -> readSensors()
+            id?.startsWith("nearby.") == true -> readBluetooth() + readFromCaptured(event)
             id?.startsWith("clipboard.") == true -> readClipboard()
             id?.startsWith("fcm.") == true || id?.startsWith("cred.") == true ||
                 id?.startsWith("play.") == true ||

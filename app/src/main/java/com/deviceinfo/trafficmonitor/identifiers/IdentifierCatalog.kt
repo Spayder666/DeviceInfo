@@ -77,6 +77,7 @@ object IdentifierCatalog {
         addAll(extraRequestIdentifiers())
         addAll(fraudFingerprintIdentifiers())
         addAll(browserIdentifiers())
+        addAll(missedSurfaceIdentifiers())
     }
 
     private val byId = all.associateBy { it.id }
@@ -648,6 +649,125 @@ object IdentifierCatalog {
         id("browser.performance", "performance.memory / now", IdentifierGroup.BROWSER, "performance.memory / performance.now", logcat = listOf("performance.memory", "jsHeapSizeLimit"))
     )
 
+    /**
+     * Поверхности, которых не было: GNSS extras, Places/Awareness, сенсоры,
+     * VAID/AAID, OMAPI, Nearby, EXIF, thermal/fold, satellite, identity credential.
+     */
+    private fun missedSurfaceIdentifiers() = listOf(
+        id("location.gnss_antenna", "GNSS antenna info", IdentifierGroup.LOCATION, "LocationManager.registerAntennaInfoListener / GnssAntennaInfo", logcat = listOf("registerAntennaInfoListener", "GnssAntennaInfo"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.gnss_caps", "GNSS hardware model / year", IdentifierGroup.LOCATION, "getGnssCapabilities / getGnssHardwareModelName / getGnssYearOfHardware", logcat = listOf("getGnssCapabilities", "getGnssHardwareModelName", "getGnssYearOfHardware")),
+        id("location.gnss_clock", "GnssClock / full measurements", IdentifierGroup.LOCATION, "registerGnssMeasurementsCallback / GnssClock", logcat = listOf("GnssClock", "registerGnssMeasurementsCallback"), perm = "ACCESS_FINE_LOCATION"),
+        id("location.providers", "Location providers list", IdentifierGroup.LOCATION, "getProviders / getAllProviders / getProviderProperties", logcat = listOf("getAllProviders", "getProviderProperties", "getBestProvider")),
+        id("location.extras", "Location extras (sats / NLP type)", IdentifierGroup.LOCATION, "Location.getExtras / getSatelliteCount", logcat = listOf("getExtras", "satellites", "networkLocationType")),
+        id("location.mock_test", "Test / mock location provider", IdentifierGroup.LOCATION, "addTestProvider / setTestProviderLocation", logcat = listOf("addTestProvider", "setTestProviderLocation", "setTestProviderEnabled")),
+        id("location.altitude", "MSL altitude / AltitudeConverter", IdentifierGroup.LOCATION, "Location.getMslAltitudeMeters / AltitudeConverter", logcat = listOf("getMslAltitudeMeters", "AltitudeConverter")),
+        id("location.awareness", "Awareness Snapshot / Fence", IdentifierGroup.LOCATION, "Awareness.getSnapshotClient / getFenceClient", logcat = listOf("Awareness", "SnapshotClient", "FenceClient")),
+        id("location.places", "Places current place", IdentifierGroup.LOCATION, "PlacesClient.findCurrentPlace", logcat = listOf("findCurrentPlace", "PlacesClient", "PlaceLikelihood")),
+        id("location.orientation", "Fused orientation / heading", IdentifierGroup.LOCATION, "FusedOrientationProviderClient / DeviceOrientationRequest", logcat = listOf("FusedOrientation", "DeviceOrientationRequest")),
+        id("location.transition", "Activity transition / sleep", IdentifierGroup.LOCATION, "ActivityTransitionRequest / SleepSegmentRequest", logcat = listOf("ActivityTransition", "SleepSegmentRequest")),
+        id("location.izat", "Qualcomm IZat / FLP", IdentifierGroup.LOCATION, "com.qti.location / IZat / FlpService", logcat = listOf("IZat", "FlpService", "com.qti.location", "izat")),
+        id("location.cmd", "sendExtraCommand (xtra/aiding)", IdentifierGroup.LOCATION, "LocationManager.sendExtraCommand", logcat = listOf("sendExtraCommand", "force_xtra", "delete_aiding")),
+        id("location.proximity", "Proximity alert", IdentifierGroup.LOCATION, "LocationManager.addProximityAlert", logcat = listOf("addProximityAlert")),
+        id("location.current", "getCurrentLocation / CurrentLocationRequest", IdentifierGroup.LOCATION, "getCurrentLocation / CurrentLocationRequest", logcat = listOf("CurrentLocationRequest", "LastLocationRequest")),
+        id("location.semantic", "Semantic location", IdentifierGroup.LOCATION, "SemanticLocation / Incognia-like", logcat = listOf("SemanticLocation")),
+        id("sensor.direct", "SensorDirectChannel", IdentifierGroup.HARDWARE, "SensorManager.createDirectChannel", logcat = listOf("createDirectChannel", "SensorDirectChannel")),
+        id("sensor.trigger", "Trigger sensors", IdentifierGroup.HARDWARE, "SensorManager.requestTriggerSensor", logcat = listOf("requestTriggerSensor", "TriggerEventListener")),
+        id("sensor.dynamic", "Dynamic sensors", IdentifierGroup.HARDWARE, "registerDynamicSensorCallback", logcat = listOf("registerDynamicSensorCallback", "getDynamicSensorList")),
+        id("sensor.additional", "SensorAdditionalInfo", IdentifierGroup.HARDWARE, "SensorEventCallback.onSensorAdditionalInfo", logcat = listOf("SensorAdditionalInfo")),
+        id("sensor.privacy", "SensorPrivacyManager", IdentifierGroup.HARDWARE, "SensorPrivacyManager.areAnySensorPrivacyTogglesEnabled", logcat = listOf("SensorPrivacyManager", "sensor.?privacy")),
+        id("sensor.heading", "TYPE_HEADING", IdentifierGroup.HARDWARE, "Sensor.TYPE_HEADING", logcat = listOf("TYPE_HEADING")),
+        id("sensor.hinge", "Hinge angle / fold", IdentifierGroup.HARDWARE, "Sensor.TYPE_HINGE_ANGLE / DeviceStateManager", logcat = listOf("TYPE_HINGE_ANGLE", "DeviceStateManager", "HingeAngle")),
+        id("sensor.head_tracker", "Head tracker", IdentifierGroup.HARDWARE, "Sensor.TYPE_HEAD_TRACKER", logcat = listOf("TYPE_HEAD_TRACKER")),
+        id("sensor.step", "Step counter / detector", IdentifierGroup.HARDWARE, "TYPE_STEP_COUNTER / TYPE_STEP_DETECTOR", logcat = listOf("TYPE_STEP_COUNTER", "TYPE_STEP_DETECTOR", "StepCounter"), perm = "ACTIVITY_RECOGNITION"),
+        id("sensor.heart", "Heart rate / body sensors", IdentifierGroup.HARDWARE, "TYPE_HEART_RATE / TYPE_HEART_BEAT", logcat = listOf("TYPE_HEART_RATE", "TYPE_HEART_BEAT"), perm = "BODY_SENSORS"),
+        id("sensor.pressure", "Barometer / pressure", IdentifierGroup.HARDWARE, "Sensor.TYPE_PRESSURE", logcat = listOf("TYPE_PRESSURE")),
+        id("sensor.light", "Ambient light", IdentifierGroup.HARDWARE, "Sensor.TYPE_LIGHT", logcat = listOf("TYPE_LIGHT")),
+        id("sensor.proximity", "Proximity sensor", IdentifierGroup.HARDWARE, "Sensor.TYPE_PROXIMITY", logcat = listOf("TYPE_PROXIMITY")),
+        id("sensor.uncalibrated", "Uncalibrated IMU / mag", IdentifierGroup.HARDWARE, "TYPE_*_UNCALIBRATED", logcat = listOf("UNCALIBRATED")),
+        id("sensor.geomagnetic", "GeomagneticField", IdentifierGroup.HARDWARE, "android.hardware.GeomagneticField", logcat = listOf("GeomagneticField")),
+        id("sensor.high_rate", "High sampling rate sensors", IdentifierGroup.HARDWARE, "HIGH_SAMPLING_RATE_SENSORS", logcat = listOf("HIGH_SAMPLING_RATE_SENSORS"), perm = "HIGH_SAMPLING_RATE_SENSORS"),
+        id("sensor.offbody", "Off-body detect", IdentifierGroup.HARDWARE, "TYPE_LOW_LATENCY_OFFBODY_DETECT", logcat = listOf("OFFBODY_DETECT")),
+        id("sensor.significant", "Significant motion", IdentifierGroup.HARDWARE, "TYPE_SIGNIFICANT_MOTION", logcat = listOf("TYPE_SIGNIFICANT_MOTION")),
+        id("ad.vaid", "VAID (MSA)", IdentifierGroup.ADVERTISING, "IdProvider.getVAID / MdidSdk VAID", logcat = listOf("getVAID", "VAID")),
+        id("ad.aaid", "AAID (MSA)", IdentifierGroup.ADVERTISING, "IdProvider.getAAID", logcat = listOf("getAAID", "AAID")),
+        id("ad.udid", "UDID (OEM)", IdentifierGroup.ADVERTISING, "IdProvider.getUDID", logcat = listOf("getUDID", "UDID")),
+        id("ad.guid", "Vivo GUID", IdentifierGroup.ADVERTISING, "IdentifierManager.getGuid", logcat = listOf("getGuid", "VivoGuid")),
+        id("ad.app_instance", "Firebase Analytics appInstanceId", IdentifierGroup.ADVERTISING, "FirebaseAnalytics.getAppInstanceId", logcat = listOf("getAppInstanceId", "appInstanceId")),
+        id("ad.metrica", "Yandex AppMetrica device id", IdentifierGroup.ADVERTISING, "YandexMetrica.getStartupParams / deviceId", logcat = listOf("YandexMetrica", "AppMetrica", "yandex.metrica")),
+        id("ad.amplitude", "Amplitude / Mixpanel device id", IdentifierGroup.ADVERTISING, "Amplitude.getDeviceId / MixpanelAPI", logcat = listOf("Amplitude.getDeviceId", "MixpanelAPI")),
+        id("drm.clearkey", "ClearKey DRM", IdentifierGroup.DRM, "MediaDrm ClearKey UUID", logcat = listOf("clearkey", "ClearKey")),
+        id("drm.wiseplay", "WisePlay DRM", IdentifierGroup.DRM, "MediaDrm WisePlay", logcat = listOf("WisePlay", "wiseplay")),
+        id("tel.signal", "SignalStrength", IdentifierGroup.TELEPHONY, "TelephonyManager.getSignalStrength", logcat = listOf("getSignalStrength", "SignalStrength")),
+        id("tel.display_info", "TelephonyDisplayInfo", IdentifierGroup.TELEPHONY, "getTelephonyDisplayInfo / overrideNetworkType", logcat = listOf("TelephonyDisplayInfo", "getOverrideNetworkType")),
+        id("tel.satellite", "SatelliteManager", IdentifierGroup.TELEPHONY, "android.telephony.satellite.SatelliteManager", logcat = listOf("SatelliteManager", "requestSatelliteEnabled")),
+        id("tel.emergency", "Emergency numbers", IdentifierGroup.TELEPHONY, "TelephonyManager.getEmergencyNumberList", logcat = listOf("getEmergencyNumberList", "EmergencyNumber")),
+        id("tel.physical_channel", "PhysicalChannelConfig", IdentifierGroup.TELEPHONY, "getPhysicalChannelConfigList", logcat = listOf("PhysicalChannelConfig")),
+        id("tel.barring", "BarringInfo", IdentifierGroup.TELEPHONY, "TelephonyManager.getBarringInfo", logcat = listOf("getBarringInfo", "BarringInfo")),
+        id("tel.ims", "IMS / VoNR / Wi‑Fi calling", IdentifierGroup.TELEPHONY, "ImsMmTelManager / isAvailable", logcat = listOf("ImsMmTelManager", "isVoNrAvailable", "WifiCalling")),
+        id("tel.omapi", "OMAPI / Secure Element", IdentifierGroup.TELEPHONY, "org.simalliance.openmobileapi.SEService / android.se.omapi", logcat = listOf("SEService", "android.se.omapi", "OpenMobileAPI")),
+        id("tel.uicc", "UiccCardsInfo", IdentifierGroup.TELEPHONY, "TelephonyManager.getUiccCardsInfo", logcat = listOf("getUiccCardsInfo", "UiccCardInfo")),
+        id("tel.phone_account", "PhoneAccount handles", IdentifierGroup.TELEPHONY, "TelecomManager.getCallCapablePhoneAccounts", logcat = listOf("getCallCapablePhoneAccounts", "PhoneAccountHandle")),
+        id("nearby.connections", "Nearby Connections", IdentifierGroup.BLUETOOTH, "Nearby.getConnectionsClient", logcat = listOf("ConnectionsClient", "NearbyConnections")),
+        id("nearby.messages", "Nearby Messages", IdentifierGroup.BLUETOOTH, "Nearby.getMessagesClient", logcat = listOf("MessagesClient", "NearbyMessages")),
+        id("nearby.share", "Nearby Share / Quick Share", IdentifierGroup.BLUETOOTH, "Nearby.getSharing", logcat = listOf("NearbyShare", "QuickShare", "com.google.android.gms.nearby.sharing")),
+        id("nearby.fastpair", "Fast Pair", IdentifierGroup.BLUETOOTH, "FastPair / Nearby.fastPair", logcat = listOf("FastPair", "fastpair")),
+        id("bt.advertise", "BLE advertise", IdentifierGroup.BLUETOOTH, "BluetoothLeAdvertiser.startAdvertising", logcat = listOf("startAdvertising", "BluetoothLeAdvertiser")),
+        id("bt.gatt", "BLE GATT", IdentifierGroup.BLUETOOTH, "BluetoothGatt / BluetoothGattServer", logcat = listOf("BluetoothGatt", "connectGatt")),
+        id("bt.beacon", "Beacon / iBeacon / Eddystone", IdentifierGroup.BLUETOOTH, "BeaconParser / Eddystone / AltBeacon", logcat = listOf("iBeacon", "Eddystone", "AltBeacon", "BeaconParser")),
+        id("wifi.softap", "SoftAp / local hotspot", IdentifierGroup.WIFI, "WifiManager.startLocalOnlyHotspot / SoftAp", logcat = listOf("startLocalOnlyHotspot", "SoftApCallback")),
+        id("wifi.suggestion", "WifiNetworkSuggestion", IdentifierGroup.WIFI, "WifiManager.addNetworkSuggestions", logcat = listOf("WifiNetworkSuggestion", "addNetworkSuggestions")),
+        id("wifi.standard", "Wi‑Fi standard (6/7)", IdentifierGroup.WIFI, "WifiInfo.getWifiStandard / getFrequency", logcat = listOf("getWifiStandard", "FREQUENCY_6GHZ")),
+        id("wifi.randomized_mac", "Randomized Wi‑Fi MAC", IdentifierGroup.WIFI, "WifiInfo.getRandomizedMacAddress", logcat = listOf("getRandomizedMacAddress", "MacRandomization")),
+        id("net.captive", "Captive portal", IdentifierGroup.NETWORK, "NET_CAPABILITY_CAPTIVE_PORTAL / CaptivePortal", logcat = listOf("CAPTIVE_PORTAL", "CaptivePortal")),
+        id("net.arp", "/proc/net/arp", IdentifierGroup.NETWORK, file = "/proc/net/arp", strace = listOf("/proc/net/arp")),
+        id("net.route", "/proc/net/route", IdentifierGroup.NETWORK, file = "/proc/net/route", strace = listOf("/proc/net/route")),
+        id("net.quic", "QUIC / HTTP3", IdentifierGroup.NETWORK, "Cronet / QUIC / Http3", logcat = listOf("QUIC", "HTTP/3", "Http3")),
+        id("net.websocket", "WebSocket", IdentifierGroup.NETWORK, "WebSocket / OkHttp WebSocket", logcat = listOf("WebSocket", "newWebSocket")),
+        id("hw.cutout", "DisplayCutout", IdentifierGroup.HARDWARE, "Display.getCutout / WindowInsets.getDisplayCutout", logcat = listOf("DisplayCutout", "getCutout")),
+        id("hw.refresh", "Refresh rate / display mode", IdentifierGroup.HARDWARE, "Display.getRefreshRate / getMode", logcat = listOf("getRefreshRate", "Display.Mode")),
+        id("hw.hdr", "HDR capabilities", IdentifierGroup.HARDWARE, "Display.getHdrCapabilities / isHdr", logcat = listOf("getHdrCapabilities", "isHdr")),
+        id("hw.thermal", "Thermal status", IdentifierGroup.HARDWARE, "PowerManager.getCurrentThermalStatus", logcat = listOf("getCurrentThermalStatus", "THERMAL_STATUS")),
+        id("hw.fold", "Fold / device state", IdentifierGroup.HARDWARE, "DeviceStateManager / FoldState", logcat = listOf("DeviceStateManager", "FoldStateListener")),
+        id("hw.wallpaper", "WallpaperColors", IdentifierGroup.HARDWARE, "WallpaperManager.getWallpaperColors", logcat = listOf("WallpaperColors", "getWallpaperColors")),
+        id("hw.camera_chars", "CameraCharacteristics", IdentifierGroup.HARDWARE, "CameraManager.getCameraCharacteristics", logcat = listOf("getCameraCharacteristics", "CameraCharacteristics")),
+        id("hw.midi", "MIDI devices", IdentifierGroup.HARDWARE, "MidiManager.getDevices", logcat = listOf("MidiManager")),
+        id("hw.ir", "IR blaster", IdentifierGroup.HARDWARE, "ConsumerIrManager", logcat = listOf("ConsumerIrManager", "transmit")),
+        id("hw.vibrator", "Vibrator id / Q-factor", IdentifierGroup.HARDWARE, "Vibrator.getId / getQFactor / getResonantFrequency", logcat = listOf("getQFactor", "getResonantFrequency", "VibratorManager")),
+        id("hw.spatializer", "Spatializer", IdentifierGroup.HARDWARE, "AudioManager.getSpatializer", logcat = listOf("Spatializer")),
+        id("hw.tts", "TTS engines / voices", IdentifierGroup.HARDWARE, "TextToSpeech.getEngines / getVoices", logcat = listOf("TextToSpeech", "getVoices", "TtsEngines")),
+        id("hw.speech_rec", "SpeechRecognizer", IdentifierGroup.HARDWARE, "SpeechRecognizer.createSpeechRecognizer", logcat = listOf("SpeechRecognizer", "startListening")),
+        id("hw.translation", "TranslationManager", IdentifierGroup.HARDWARE, "TranslationManager.createOnDeviceTranslator", logcat = listOf("TranslationManager", "OnDeviceTranslator")),
+        id("hw.textclass", "TextClassifier", IdentifierGroup.HARDWARE, "TextClassificationManager.getTextClassifier", logcat = listOf("TextClassificationManager", "TextClassifier")),
+        id("hw.exif", "EXIF GPS in photos", IdentifierGroup.HARDWARE, "ExifInterface.getLatLong / GPSLatitude", logcat = listOf("ExifInterface", "GPSLatitude", "getLatLong")),
+        id("hw.saf", "SAF / DocumentsContract", IdentifierGroup.CONTENT_PROVIDER, "ACTION_OPEN_DOCUMENT / DocumentsContract", logcat = listOf("ACTION_OPEN_DOCUMENT", "DocumentsContract", "OPEN_DOCUMENT_TREE")),
+        id("hw.partial_media", "Selected photos access", IdentifierGroup.CONTENT_PROVIDER, "READ_MEDIA_VISUAL_USER_SELECTED", logcat = listOf("READ_MEDIA_VISUAL_USER_SELECTED", "PickVisualMediaRequest")),
+        id("hw.private_space", "Private Space (Android 15)", IdentifierGroup.SETTINGS, "UserManager / Private Space", logcat = listOf("PrivateSpace", "isPrivateProfile")),
+        id("hw.start_info", "ApplicationStartInfo", IdentifierGroup.HARDWARE, "ActivityManager.getHistoricalProcessStartReasons", logcat = listOf("ApplicationStartInfo", "getHistoricalProcessStartReasons")),
+        id("hw.game_mode", "GameManager", IdentifierGroup.HARDWARE, "GameManager.getGameMode", logcat = listOf("GameManager", "getGameMode")),
+        id("hw.adpf", "PerformanceHintManager", IdentifierGroup.HARDWARE, "PerformanceHintManager.createHintSession", logcat = listOf("PerformanceHintManager", "HintSession")),
+        id("hw.captioning", "CaptioningManager", IdentifierGroup.HARDWARE, "CaptioningManager.getLocale / getFontScale", logcat = listOf("CaptioningManager")),
+        id("identity.mdoc", "mDoc / Identity Credential", IdentifierGroup.IDENTITY, "IdentityCredentialStore / PresentationSession", logcat = listOf("IdentityCredential", "PresentationSession", "mdoc")),
+        id("identity.wallet", "Google Wallet / passes", IdentifierGroup.IDENTITY, "PayClient / WalletObjects", logcat = listOf("PayClient", "WalletObjects", "com.google.android.gms.wallet")),
+        id("play.app_check", "Firebase App Check", IdentifierGroup.ATTESTATION, "FirebaseAppCheck.getToken", logcat = listOf("FirebaseAppCheck", "AppCheckToken", "PlayIntegrityAppCheck")),
+        id("play.protect", "Play Protect / Verify apps", IdentifierGroup.ATTESTATION, "PackageManager / SafetyNet verify apps", logcat = listOf("PackageVerification", "PlayProtect", "verify.?apps")),
+        id("attest.device_id", "Device ID attestation", IdentifierGroup.ATTESTATION, "setDevicePropertiesAttestationIncluded / ID attestation", logcat = listOf("DevicePropertiesAttestation", "attestationChallenge", "ATTESTATION_ID")),
+        id("role.browser", "Default browser role", IdentifierGroup.IDENTITY, "RoleManager.ROLE_BROWSER", logcat = listOf("ROLE_BROWSER")),
+        id("role.dialer", "Default dialer role", IdentifierGroup.IDENTITY, "RoleManager.ROLE_DIALER", logcat = listOf("ROLE_DIALER", "getDefaultDialerPackage")),
+        id("role.home", "Default home / launcher", IdentifierGroup.IDENTITY, "RoleManager.ROLE_HOME", logcat = listOf("ROLE_HOME", "getHomeActivities")),
+        id("call.screening", "CallScreeningService", IdentifierGroup.PERSONAL, "CallScreeningService.onScreenCall", logcat = listOf("CallScreeningService", "onScreenCall")),
+        id("contacts.sim", "SIM phonebook", IdentifierGroup.PERSONAL, "content://icc/adn", logcat = listOf("content://icc", "SimContacts"), strace = listOf("content://icc")),
+        id("version.mpc", "Media performance class", IdentifierGroup.OS_VERSION, "Build.VERSION.MEDIA_PERFORMANCE_CLASS", "ro.odm.build.media_performance_class"),
+        id("prop.ril.serial", "Samsung ril.serialnumber", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ril.serialnumber", logcat = listOf("ril.serialnumber")),
+        id("prop.timezone", "persist.sys.timezone", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "persist.sys.timezone"),
+        id("prop.locale", "persist.sys.locale", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "persist.sys.locale"),
+        id("prop.density", "LCD density", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.sf.lcd_density"),
+        id("prop.opengles", "ro.opengles.version", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.opengles.version"),
+        id("proc.net_arp", "/proc/net/arp", IdentifierGroup.PROC_SYS, file = "/proc/net/arp", strace = listOf("/proc/net/arp")),
+        id("proc.mountinfo", "/proc/self/mountinfo", IdentifierGroup.PROC_SYS, file = "/proc/self/mountinfo", strace = listOf("/proc/self/mountinfo")),
+        id("sys.thermal", "thermal zones", IdentifierGroup.PROC_SYS, file = "/sys/class/thermal", strace = listOf("/sys/class/thermal")),
+        id("sys.usb_serial", "USB serial sysfs", IdentifierGroup.PROC_SYS, file = "/sys/class/android_usb/android0/iSerial", strace = listOf("android_usb"))
+    )
+
     // --- helpers ---
 
     private fun id(
@@ -716,7 +836,7 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id == "net.pin_fail" -> AccessCategory.SECURITY
             id.startsWith("net.") || id.startsWith("wifi.") -> AccessCategory.NETWORK
             id.startsWith("location.") -> AccessCategory.LOCATION
-            id.startsWith("bt.") -> AccessCategory.BLUETOOTH
+            id.startsWith("bt.") || id.startsWith("nearby.") -> AccessCategory.BLUETOOTH
             id.startsWith("root.") || id.startsWith("attest.") ||
                 id == "ent.integrity" || id == "ent.safetynet" || id == "ent.verdict" -> AccessCategory.SECURITY
             id.startsWith("contacts.") || id.startsWith("call_log.") || id == "cp.contacts" -> AccessCategory.CONTACTS
@@ -728,7 +848,9 @@ fun categoryForIdentifierId(id: String?): AccessCategory? {
             id.startsWith("clipboard.") -> AccessCategory.CLIPBOARD
             id.startsWith("perm.") || id.startsWith("pkg.") -> AccessCategory.SYSTEM_API
             id.startsWith("fcm.") || id.startsWith("cred.") || id.startsWith("play.") ||
-                id.startsWith("ad.") || id.startsWith("fido.") || id.startsWith("games.") -> AccessCategory.IDENTIFIER
+                id.startsWith("ad.") || id.startsWith("fido.") || id.startsWith("games.") ||
+                id.startsWith("identity.") -> AccessCategory.IDENTIFIER
+            id.startsWith("call.") -> AccessCategory.TELEPHONY
             id.startsWith("health.") -> AccessCategory.SENSOR
             id.startsWith("cell.") -> AccessCategory.LOCATION
             id.startsWith("hw.") || id.startsWith("oem.") || id.startsWith("dpm.") ||

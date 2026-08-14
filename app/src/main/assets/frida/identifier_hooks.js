@@ -694,7 +694,10 @@ function hookLocation() {
       'isProviderEnabled', 'getBestProvider', 'addNmeaListener',
       'registerGnssStatusCallback', 'registerGnssMeasurementsCallback',
       'registerGnssNavigationMessageCallback', 'addGpsStatusListener',
-      'sendExtraCommand', 'getGnssYearOfHardware'
+      'sendExtraCommand', 'getGnssYearOfHardware', 'getGnssCapabilities',
+      'getGnssHardwareModelName', 'registerAntennaInfoListener',
+      'addTestProvider', 'setTestProviderLocation', 'setTestProviderEnabled',
+      'addProximityAlert', 'getProviderProperties'
     ];
     methods.forEach(function (m) {
       try {
@@ -705,7 +708,16 @@ function hookLocation() {
             var result = overload.apply(this, arguments);
             var response = (m.indexOf('getLast') === 0 || m === 'getCurrentLocation')
               ? formatLocation(result) : safeStr(result);
-            writeEvent('location.gps', 'LocationManager.' + m, args.join(', '), response, 'ACCESS_FINE_LOCATION');
+            var locId = 'location.gps';
+            if (m.indexOf('GnssMeasurement') >= 0 || m.indexOf('GnssNavigation') >= 0) locId = 'location.gnss_clock';
+            else if (m.indexOf('Antenna') >= 0) locId = 'location.gnss_antenna';
+            else if (m.indexOf('Gnss') === 0 || m.indexOf('getGnss') === 0) locId = 'location.gnss_caps';
+            else if (m.indexOf('TestProvider') >= 0) locId = 'location.mock_test';
+            else if (m === 'addProximityAlert') locId = 'location.proximity';
+            else if (m.indexOf('Provider') >= 0) locId = 'location.providers';
+            else if (m === 'sendExtraCommand') locId = 'location.cmd';
+            else if (m.indexOf('Nmea') >= 0) locId = 'location.gnss_nmea';
+            writeEvent(locId, 'LocationManager.' + m, args.join(', '), response, 'ACCESS_FINE_LOCATION');
             return result;
           };
         });
@@ -2632,6 +2644,74 @@ function hookFraudSdks() {
   hookAny('com.sumsub.sns.core.SNSMobileSDK', 'fraud.sumsub', ['init', 'launch'], null);
 }
 
+function hookMissedSurface() {
+  hookAny('android.location.LocationManager', 'location.gnss_antenna', ['registerAntennaInfoListener', 'unregisterAntennaInfoListener'], 'ACCESS_FINE_LOCATION');
+  hookAny('android.location.Location', 'location.altitude', ['getMslAltitudeMeters', 'hasMslAltitude'], null);
+  hookAny('android.location.Location', 'location.extras', ['getExtras', 'getElapsedRealtimeNanos'], null);
+  hookAny('com.google.android.gms.awareness.Awareness', 'location.awareness', ['getSnapshotClient', 'getFenceClient'], null);
+  hookAny('com.google.android.libraries.places.api.Places', 'location.places', ['createClient', 'initialize'], null);
+  hookAny('com.google.android.libraries.places.api.net.PlacesClient', 'location.places', ['findCurrentPlace', 'fetchPlace'], null);
+  hookAny('com.google.android.gms.location.FusedOrientationProviderClient', 'location.orientation', ['requestOrientationUpdates'], null);
+  hookAny('com.google.android.gms.location.ActivityRecognitionClient', 'location.transition', ['requestActivityTransitionUpdates', 'requestSleepSegmentUpdates'], null);
+  hookAny('android.hardware.SensorManager', 'sensor.direct', ['createDirectChannel'], null);
+  hookAny('android.hardware.SensorManager', 'sensor.trigger', ['requestTriggerSensor', 'cancelTriggerSensor'], null);
+  hookAny('android.hardware.SensorManager', 'sensor.dynamic', ['registerDynamicSensorCallback', 'getDynamicSensorList'], null);
+  hookAny('android.hardware.SensorPrivacyManager', 'sensor.privacy', ['areAnySensorPrivacyTogglesEnabled', 'isSensorPrivacyEnabled'], null);
+  hookAny('android.hardware.GeomagneticField', 'sensor.geomagnetic', ['getDeclination', 'getFieldStrength'], null);
+  hookAny('android.telephony.TelephonyManager', 'tel.signal', ['getSignalStrength'], null);
+  hookAny('android.telephony.TelephonyManager', 'tel.emergency', ['getEmergencyNumberList'], null);
+  hookAny('android.telephony.TelephonyManager', 'tel.uicc', ['getUiccCardsInfo'], null);
+  hookAny('android.telephony.TelephonyManager', 'tel.barring', ['getBarringInfo'], null);
+  hookAny('android.telephony.satellite.SatelliteManager', 'tel.satellite', ['requestSatelliteEnabled', 'requestIsSatelliteEnabled'], null);
+  hookAny('android.se.omapi.SEService', 'tel.omapi', ['getReaders', 'isConnected'], null);
+  hookAny('org.simalliance.openmobileapi.SEService', 'tel.omapi', ['getReaders'], null);
+  hookAny('com.google.android.gms.nearby.Nearby', 'nearby.connections', ['getConnectionsClient', 'getMessagesClient'], null);
+  hookAny('android.bluetooth.le.BluetoothLeAdvertiser', 'bt.advertise', ['startAdvertising', 'startAdvertisingSet'], null);
+  hookAny('android.bluetooth.BluetoothDevice', 'bt.gatt', ['connectGatt'], 'BLUETOOTH_CONNECT');
+  hookAny('android.net.wifi.WifiManager', 'wifi.softap', ['startLocalOnlyHotspot'], null);
+  hookAny('android.net.wifi.WifiManager', 'wifi.suggestion', ['addNetworkSuggestions'], null);
+  hookAny('android.net.wifi.WifiInfo', 'wifi.standard', ['getWifiStandard', 'getFrequency'], null);
+  hookAny('android.net.wifi.WifiInfo', 'wifi.randomized_mac', ['getRandomizedMacAddress'], null);
+  hookAny('android.view.Display', 'hw.refresh', ['getRefreshRate', 'getMode', 'getSupportedModes'], null);
+  hookAny('android.view.Display', 'hw.hdr', ['getHdrCapabilities', 'isHdr'], null);
+  hookAny('android.os.PowerManager', 'hw.thermal', ['getCurrentThermalStatus'], null);
+  hookAny('android.hardware.devicestate.DeviceStateManager', 'hw.fold', ['registerCallback', 'getCurrentState'], null);
+  hookAny('android.app.WallpaperManager', 'hw.wallpaper', ['getWallpaperColors', 'getDrawable'], null);
+  hookAny('android.hardware.camera2.CameraManager', 'hw.camera_chars', ['getCameraCharacteristics'], null);
+  hookAny('android.media.midi.MidiManager', 'hw.midi', ['getDevices'], null);
+  hookAny('android.hardware.ConsumerIrManager', 'hw.ir', ['hasIrEmitter', 'transmit'], null);
+  hookAny('android.os.Vibrator', 'hw.vibrator', ['getId', 'getQFactor', 'getResonantFrequency'], null);
+  hookAny('android.speech.tts.TextToSpeech', 'hw.tts', ['getEngines', 'getVoices'], null);
+  hookAny('android.speech.SpeechRecognizer', 'hw.speech_rec', ['startListening', 'createSpeechRecognizer'], null);
+  hookAny('android.media.ExifInterface', 'hw.exif', ['getLatLong', 'getAttribute'], null);
+  hookAny('androidx.exifinterface.media.ExifInterface', 'hw.exif', ['getLatLong', 'getAttribute'], null);
+  hookAny('android.security.identity.IdentityCredentialStore', 'identity.mdoc', ['getInstance', 'createPresentationSession'], null);
+  hookAny('com.google.firebase.appcheck.FirebaseAppCheck', 'play.app_check', ['getAppCheckToken', 'getToken'], null);
+  hookAny('android.app.role.RoleManager', 'role.browser', ['isRoleHeld'], null);
+  hookAny('com.google.firebase.analytics.FirebaseAnalytics', 'ad.app_instance', ['getAppInstanceId'], null);
+  hookAny('io.appmetrica.analytics.AppMetrica', 'ad.metrica', ['getDeviceId', 'activate'], null);
+  try {
+    var SM = Java.use('android.hardware.SensorManager');
+    SM.getDefaultSensor.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var r = overload.apply(this, arguments);
+        var t = safeStr(arguments[0]);
+        var id = 'hw.sensor_list';
+        if (t === '19' || t === '18') id = 'sensor.step';
+        else if (t === '21' || t === '31') id = 'sensor.heart';
+        else if (t === '6') id = 'sensor.pressure';
+        else if (t === '5') id = 'sensor.light';
+        else if (t === '8') id = 'sensor.proximity';
+        else if (t === '36') id = 'sensor.hinge';
+        else if (t === '37') id = 'sensor.head_tracker';
+        else if (t === '17') id = 'sensor.significant';
+        writeOnce(id, 'SensorManager.getDefaultSensor', t, safeStr(r), null);
+        return r;
+      };
+    });
+  } catch (e) {}
+}
+
 function hookBrowserApis() {
   hookAny('android.webkit.WebView', 'browser.js_interface', ['addJavascriptInterface', 'removeJavascriptInterface'], null);
   hookAny('android.webkit.WebView', 'browser.debug', ['setWebContentsDebuggingEnabled'], null);
@@ -2749,6 +2829,7 @@ function installJavaHooks() {
   hookFraudFingerprint();
   hookFraudSdks();
   hookBrowserApis();
+  hookMissedSurface();
   hookRootDetection();
 }
 
