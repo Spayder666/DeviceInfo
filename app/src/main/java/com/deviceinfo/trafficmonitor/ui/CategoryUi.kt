@@ -50,5 +50,6 @@ fun sourceLabel(source: com.deviceinfo.trafficmonitor.data.EventSource): String 
     com.deviceinfo.trafficmonitor.data.EventSource.LOGCAT -> "Logcat"
     com.deviceinfo.trafficmonitor.data.EventSource.STRACE -> "strace"
     com.deviceinfo.trafficmonitor.data.EventSource.PROC -> "/proc"
-    com.deviceinfo.trafficmonitor.data.EventSource.DUMPSYS -> "dumpsys"
+    com.deviceinfo.trafficmonitor.data.    EventSource.DUMPSYS -> "dumpsys"
+    EventSource.FRIDA -> "Frida"
 }

@@ -14,6 +14,8 @@ import com.deviceinfo.trafficmonitor.MainActivity
 import com.deviceinfo.trafficmonitor.MonitorActivity
 import com.deviceinfo.trafficmonitor.R
 import com.deviceinfo.trafficmonitor.TrafficMonitorApp
+import com.deviceinfo.trafficmonitor.frida.FridaInstaller
+import com.deviceinfo.trafficmonitor.frida.FridaMonitor
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +35,7 @@ class AccessMonitorService : Service() {
     private var logcatMonitor: LogcatMonitor? = null
     private var straceMonitor: StraceMonitor? = null
     private var procMonitor: ProcMonitor? = null
+    private var fridaMonitor: FridaMonitor? = null
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -63,6 +66,9 @@ class AccessMonitorService : Service() {
         serviceScope.launch {
             targetPid = waitForPid(targetPackage) ?: -1
             targetUid = RootShell.getUid(targetPackage) ?: -1
+
+            fridaMonitor = FridaMonitor(applicationContext, targetPackage, repository, serviceScope)
+                .also { it.start() }
 
             if (targetPid > 0) {
                 appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
@@ -110,6 +116,8 @@ class AccessMonitorService : Service() {
         logcatMonitor?.stop()
         straceMonitor?.stop()
         procMonitor?.stop()
+        fridaMonitor?.stop()
+        FridaInstaller.clearInjection(targetPackage)
         isRunning = false
     }
 

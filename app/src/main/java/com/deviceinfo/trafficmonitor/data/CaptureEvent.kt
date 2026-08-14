@@ -28,7 +28,8 @@ enum class EventSource {
     LOGCAT,
     STRACE,
     PROC,
-    DUMPSYS
+    DUMPSYS,
+    FRIDA
 }
 
 @Entity(tableName = "capture_events")

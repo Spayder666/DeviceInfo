@@ -55,9 +55,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
-import com.deviceinfo.trafficmonitor.data.CaptureEvent
+import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.ui.categoryColor
 import com.deviceinfo.trafficmonitor.ui.categoryLabel
@@ -134,8 +135,8 @@ fun MonitorScreen(
                     Column {
                         Text(appName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Зафиксировано: $eventCount",
-                            fontSize = 12.sp,
+                            "Зафиксировано: $eventCount · ${FridaInstaller.statusLabel()}",
+                            fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.8f)
                         )
                     }
