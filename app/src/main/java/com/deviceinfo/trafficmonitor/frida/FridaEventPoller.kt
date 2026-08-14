@@ -60,6 +60,9 @@ class FridaEventPoller(
             val json = JSONObject(line)
             val identifierId = json.optString("identifierId", "")
             if (identifierId == "frida.init") return
+            if (identifierId == "net.https" && action.contains("MITM HTTPS on")) {
+                // keep — user-visible confirmation
+            }
 
             val def = IdentifierCatalog.findById(identifierId)
             val action = json.optString("action", identifierId)

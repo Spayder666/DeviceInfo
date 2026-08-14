@@ -277,7 +277,7 @@ fun MonitorScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Для точных ответов API нажмите «Запустить + Frida»",
+                            "Для точных ответов API — «Запустить + Frida». Для тел HTTPS — «MITM HTTPS».",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
