@@ -52,7 +52,7 @@ class InotifyDataMonitor(
     }
 
     private suspend fun pollLoop(base: String) {
-        while (isActive) {
+        while (scope.isActive) {
             val listing = RootShell.execAndRead(
                 "find $base -type f \\( -name '*.db' -o -name '*.xml' -o -name '*loc*' " +
                     "-o -name '*gps*' -o -name '*track*' -o -name '*coord*' -o -name '*cache*' \\) " +
