@@ -419,6 +419,12 @@ fun EmptyMonitorHint() {
         Icon(Icons.Outlined.Sensors, null, tint = Accent, modifier = Modifier.size(32.dp))
         Spacer(Modifier.height(10.dp))
         Text("Пока тихо", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text(
+            "Чекер железа читает Build/getprop внутри процесса — без логов. Запусти цель, затем Frida, и повтори проверку.",
+            fontSize = 12.sp,
+            color = TextMuted,
+            modifier = Modifier.padding(top = 6.dp)
+        )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             HintStep(Icons.Outlined.PlayArrow, "Запуск")

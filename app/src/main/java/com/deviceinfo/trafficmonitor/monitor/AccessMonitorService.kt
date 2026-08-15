@@ -35,7 +35,6 @@ class AccessMonitorService : Service() {
 
     private var appOpsMonitor: AppOpsMonitor? = null
     private var logcatMonitor: LogcatMonitor? = null
-    private var straceMonitor: StraceMonitor? = null
     private var procMonitor: ProcMonitor? = null
     private var fridaMonitor: FridaMonitor? = null
     private var locationDumpMonitor: LocationDumpMonitor? = null
@@ -64,6 +63,8 @@ class AccessMonitorService : Service() {
     private var environmentAnalysisMonitor: EnvironmentAnalysisMonitor? = null
     private var networkEnvMonitor: NetworkEnvMonitor? = null
     private var decisionTracker: DecisionTracker? = null
+    private var identifierAccessMonitor: IdentifierAccessMonitor? = null
+    private val straceMonitors = mutableListOf<StraceMonitor>()
 
     private var targetPackage: String = ""
     private var targetPid: Int = -1
@@ -109,6 +110,10 @@ class AccessMonitorService : Service() {
             targetUid = RootShell.getUid(targetPackage) ?: -1
             targetPid = RootShell.findPid(targetPackage) ?: -1
 
+            identifierAccessMonitor = IdentifierAccessMonitor(
+                targetPackage, targetUid, repository, serviceScope
+            ).also { it.start() }
+
             fridaMonitor = FridaMonitor(applicationContext, targetPackage, repository, serviceScope)
                 .also { it.start() }
 
@@ -143,8 +148,8 @@ class AccessMonitorService : Service() {
             if (targetUid > 0 || targetPid > 0) {
                 logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
             }
+            startStraceForPids(repository)
             if (targetPid > 0) {
-                straceMonitor = StraceMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
                 procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
             }
 
@@ -162,15 +167,27 @@ class AccessMonitorService : Service() {
     }
 
     private fun restartProcessMonitors(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
-        straceMonitor?.stop()
         procMonitor?.stop()
 
         if (logcatMonitor == null && (targetUid > 0 || targetPid > 0)) {
             logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
         }
+        startStraceForPids(repository)
         if (targetPid > 0) {
-            straceMonitor = StraceMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
             procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
+        }
+    }
+
+    private fun startStraceForPids(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
+        val pids = RootShell.findAllPids(targetPackage).ifEmpty {
+            listOfNotNull(targetPid.takeIf { it > 0 })
+        }.distinct().take(6)
+        val already = straceMonitors.map { it.pid }.toSet()
+        for (pid in pids) {
+            if (pid in already) continue
+            val monitor = StraceMonitor(targetPackage, pid, repository, serviceScope)
+            monitor.start()
+            straceMonitors += monitor
         }
     }
 
@@ -179,7 +196,9 @@ class AccessMonitorService : Service() {
         notifyJob?.cancel()
         appOpsMonitor?.stop()
         logcatMonitor?.stop()
-        straceMonitor?.stop()
+        straceMonitors.forEach { it.stop() }
+        straceMonitors.clear()
+        identifierAccessMonitor?.stop()
         procMonitor?.stop()
         fridaMonitor?.stop()
         locationDumpMonitor?.stop()

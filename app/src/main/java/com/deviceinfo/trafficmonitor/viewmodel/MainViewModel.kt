@@ -207,9 +207,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val app = getApplication<Application>()
         _pinnedKeys.value = SessionPrefs.pins(app)
         _dedupEnabled.value = SessionPrefs.dedup(app)
-        _selectedCategory.value = SessionPrefs.lastCategory(app)?.let { runCatching { AccessCategory.valueOf(it) }.getOrNull() }
-        _selectedSource.value = SessionPrefs.lastSource(app)?.let { runCatching { EventSource.valueOf(it) }.getOrNull() }
-        _selectedIdentifierGroup.value = SessionPrefs.lastIdentifierGroup(app)
+        _selectedCategory.value = null
+        _selectedSource.value = null
+        _selectedIdentifierGroup.value = null
         _sessionStartedAt.value = System.currentTimeMillis()
         _targetDied.value = false
         _targetRunning.value = false

@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 
 class StraceMonitor(
     private val packageName: String,
-    private val pid: Int,
+    val pid: Int,
     private val repository: CaptureRepository,
     private val scope: CoroutineScope
 ) {
@@ -27,7 +27,7 @@ class StraceMonitor(
         job = scope.launch(Dispatchers.IO) {
             val cmd = buildString {
                 append("$stracePath -p $pid -f ")
-                append("-e trace=network,file,desc,ipc,signal,process ")
+                append("-e trace=openat,open,faccessat,faccessat2,newfstatat,statx,access,stat,lstat,readlinkat,connect,ioctl,execve ")
                 append("-s 512 -tt -y 2>&1")
             }
             try {
@@ -114,7 +114,11 @@ class StraceMonitor(
 
     private fun classifySyscall(line: String): SyscallInfo? {
         return when {
-            line.contains("openat") || line.contains("open(") -> classifyOpen(line)
+            line.contains("openat") || line.contains("open(") ||
+                line.contains("faccessat") || line.contains("newfstatat") ||
+                line.contains("statx") || line.contains("access(") ||
+                line.contains("stat(") || line.contains("lstat(") ||
+                line.contains("readlinkat") -> classifyOpen(line)
             line.contains("connect(") -> classifyConnect(line).let { info ->
                 val dest = info.request.orEmpty().lowercase()
                 if (listOf("7275", "7276", "1883", "8883", "mqtt", "supl", "googleapis.com/geolocation").any { it in dest }) {
@@ -157,6 +161,10 @@ class StraceMonitor(
             path.contains("sms", ignoreCase = true) || path.contains("mms", ignoreCase = true) -> AccessCategory.SMS
             path.contains("sensor", ignoreCase = true) -> AccessCategory.SENSOR
             path.contains("/data/", ignoreCase = true) || path.contains("/storage/", ignoreCase = true) -> AccessCategory.STORAGE
+            path.startsWith("/proc/") || path.startsWith("/sys/") ||
+                path.contains("build.prop") || path.contains("__properties__") ||
+                path.endsWith("/su") || path.contains("magisk") ||
+                path.contains("/sbin/") -> AccessCategory.IDENTIFIER
             else -> return null
         }
         return SyscallInfo(
