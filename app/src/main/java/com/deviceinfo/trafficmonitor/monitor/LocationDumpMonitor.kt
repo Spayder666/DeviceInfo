@@ -31,7 +31,6 @@ class LocationDumpMonitor(
             while (isActive) {
                 if (TargetPresence.isAliveNow()) {
                     pollLocationService()
-                    pollGnss()
                     pollAppLocationOps()
                     pollForegroundService()
                 }
@@ -53,45 +52,8 @@ class LocationDumpMonitor(
         val dump = RootShell.execAndRead("dumpsys location 2>/dev/null", timeoutSec = 12)
         if (dump.isBlank()) return
 
-        parseLastLocations(dump)
         parseRegistrations(dump)
         parseRecentRequests(dump)
-    }
-
-    private suspend fun parseLastLocations(dump: String) {
-        if (!dump.contains(packageName)) return
-        val regex = Regex(
-            """(?i)last (?:coarse )?location=Location\[(\w+)\s+(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)([^\]]*)]"""
-        )
-        for (match in regex.findAll(dump)) {
-            val provider = match.groupValues[1]
-            val lat = match.groupValues[2]
-            val lon = match.groupValues[3]
-            val extra = match.groupValues[4]
-            val acc = Regex("hAcc=([^\\s\\]]+)").find(extra)?.groupValues?.get(1)
-            val key = "last:$provider:$lat:$lon"
-            if (seen.containsKey(key)) continue
-
-            val id = when (provider.lowercase()) {
-                "gps", "gnss" -> "location.gps"
-                "fused" -> "location.fused"
-                "network" -> "location.network"
-                "passive" -> "location.passive"
-                else -> "location.gps"
-            }
-            val ok = record(
-                action = "Последняя координата ($provider)",
-                request = "LocationManagerService / provider=$provider",
-                response = buildString {
-                    append("lat=$lat lon=$lon")
-                    if (acc != null) append(" hAcc=$acc")
-                    append("  (это то, что система отдаёт клиентам)")
-                },
-                raw = match.value,
-                identifierId = id
-            )
-            if (ok) seen[key] = lat
-        }
     }
 
     private suspend fun parseRegistrations(dump: String) {
@@ -144,31 +106,6 @@ class LocationDumpMonitor(
             )
             if (ok) seen[key] = "1"
         }
-    }
-
-    private suspend fun pollGnss() {
-        val dump = RootShell.execAndRead("dumpsys gnss 2>/dev/null | head -c 6000", timeoutSec = 8)
-        if (dump.isBlank()) return
-
-        val started = Regex("(?i)mStarted\\s*=\\s*(true|false)").find(dump)?.groupValues?.get(1)
-        val interval = Regex("(?i)(?:mFixInterval|interval)\\s*=\\s*(\\d+)").find(dump)?.groupValues?.get(1)
-        val ttff = Regex("(?i)TTFF\\s*[=:]\\s*(\\S+)").find(dump)?.groupValues?.get(1)
-        val summary = listOfNotNull(
-            started?.let { "GNSS started=$it" },
-            interval?.let { "interval=${it}ms" },
-            ttff?.let { "TTFF=$it" }
-        ).joinToString(" ")
-        if (summary.isBlank() || !dump.contains(packageName)) return
-        val key = "gnss:$summary"
-        if (seen.containsKey(key)) return
-        val ok = record(
-            action = "GNSS HAL",
-            request = "dumpsys gnss",
-            response = summary,
-            raw = dump.take(400),
-            identifierId = "location.hal"
-        )
-        if (ok) seen[key] = summary
     }
 
     private suspend fun pollAppLocationOps() {

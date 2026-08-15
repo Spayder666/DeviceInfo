@@ -450,78 +450,6 @@ function hookBuild() {
   } catch (e) {}
 }
 
-function snapshotBuildFields() {
-  var pairs = [
-    ['MODEL', 'build.model'], ['MANUFACTURER', 'build.manufacturer'],
-    ['BRAND', 'build.brand'], ['DEVICE', 'build.device'],
-    ['PRODUCT', 'build.product'], ['HARDWARE', 'build.hardware'],
-    ['BOARD', 'build.board'], ['FINGERPRINT', 'build.fingerprint'],
-    ['DISPLAY', 'build.display'], ['ID', 'build.id'],
-    ['HOST', 'build.host'], ['TAGS', 'build.tags'],
-    ['TYPE', 'build.type'], ['USER', 'build.user'],
-    ['BOOTLOADER', 'build.bootloader']
-  ];
-  try {
-    var Build = Java.use('android.os.Build');
-    pairs.forEach(function (pair) {
-      try {
-        var val = safeStr(Build[pair[0]].value);
-        if (!val) return;
-        writeOnce(
-          pair[1],
-          'Build.' + pair[0],
-          'android.os.Build.' + pair[0],
-          val,
-          null,
-          { cached: true }
-        );
-      } catch (e) {}
-    });
-    try {
-      var abis = Build.SUPPORTED_ABIS.value;
-      if (abis) {
-        writeOnce(
-          'build.supported_abis',
-          'Build.SUPPORTED_ABIS',
-          'android.os.Build.SUPPORTED_ABIS',
-          safeStr(abis),
-          null,
-          { cached: true }
-        );
-      }
-    } catch (e) {}
-  } catch (e) {}
-  try {
-    var Version = Java.use('android.os.Build$VERSION');
-    writeOnce(
-      'version.release',
-      'Build.VERSION.RELEASE',
-      'android.os.Build.VERSION.RELEASE',
-      safeStr(Version.RELEASE.value),
-      null,
-      { cached: true }
-    );
-    writeOnce(
-      'version.sdk',
-      'Build.VERSION.SDK_INT',
-      'android.os.Build.VERSION.SDK_INT',
-      safeStr(Version.SDK_INT.value),
-      null,
-      { cached: true }
-    );
-    try {
-      writeOnce(
-        'version.security_patch',
-        'Build.VERSION.SECURITY_PATCH',
-        'android.os.Build.VERSION.SECURITY_PATCH',
-        safeStr(Version.SECURITY_PATCH.value),
-        null,
-        { cached: true }
-      );
-    } catch (e) {}
-  } catch (e) {}
-}
-
 function hookWifiAndBluetooth() {
   try {
     var WifiInfo = Java.use('android.net.wifi.WifiInfo');
@@ -2946,12 +2874,12 @@ var identifierHooksInstalled = false;
 function installIdentifierHooks() {
   if (identifierHooksInstalled) return;
   identifierHooksInstalled = true;
-  writeEvent('frida.init', 'Frida: хуки идентификаторов включены', TARGET_PKG, 'Build / Settings / Telephony / Location / Wi-Fi', null);
+  writeEvent('frida.init', 'Frida: хуки идентификаторов включены', TARGET_PKG, 'перехват вызовов Settings / Telephony / Location / Wi-Fi', null);
   hookBuild();
   hookSystemProperties();
   hookSettings();
   hookTelephonyManager();
-  snapshotBuildFields();
+  hookSubscriptionManager();
   hookLocation();
   hookWifiAndBluetooth();
 }
@@ -2961,7 +2889,6 @@ function installJavaHooks() {
   if (remainingHooksInstalled) return;
   remainingHooksInstalled = true;
   installIdentifierHooks();
-  hookSubscriptionManager();
   hookMediaDrm();
   hookAdvertisingId();
   hookAccounts();
@@ -2994,7 +2921,7 @@ function installJavaHooks() {
   hookRootDetection();
 }
 
-// Сразу: Model / Android ID / IMEI / GPS / Wi‑Fi. Остальное — чуть позже.
+// Сразу перехватываем вызовы ID/GPS/Wi‑Fi. Не читаем поля сами.
 // Без Field.get и без File I/O хуков (они вешали старт цели).
 if (Java.available) {
   Java.perform(function () {

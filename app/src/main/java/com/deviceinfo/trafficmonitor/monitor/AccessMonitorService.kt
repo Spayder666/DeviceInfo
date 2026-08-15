@@ -70,7 +70,6 @@ class AccessMonitorService : Service() {
     private var targetPackage: String = ""
     private var targetPid: Int = -1
     private var targetUid: Int = -1
-    private var snapshotPid: Int = -1
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -131,7 +130,6 @@ class AccessMonitorService : Service() {
             }
             if (targetPid > 0) {
                 procMonitor = ProcMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
-                recordSnapshotIfNeeded(repository)
             }
 
             delayedStartJob = serviceScope.launch {
@@ -156,8 +154,10 @@ class AccessMonitorService : Service() {
                     val newPid = live.firstOrNull()
                     if (alive && newPid != null && newPid != targetPid) {
                         targetPid = newPid
+                        appOpsMonitor?.resetForNewProcess()
+                        locationDumpMonitor?.resetForNewProcess()
+                        telephonyAccessMonitor?.resetForNewProcess()
                         restartProcessMonitors(repository)
-                        recordSnapshotIfNeeded(repository)
                     } else if (!alive && targetPid > 0) {
                         targetPid = -1
                         stopProcessMonitors()
@@ -173,15 +173,6 @@ class AccessMonitorService : Service() {
         if (FridaInstaller.status != FridaInstaller.FridaStatus.INJECTED) {
             startStraceForPids(repository)
         }
-    }
-
-    private suspend fun recordSnapshotIfNeeded(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
-        if (targetPid <= 0 || snapshotPid == targetPid) return
-        appOpsMonitor?.resetForNewProcess()
-        locationDumpMonitor?.resetForNewProcess()
-        telephonyAccessMonitor?.resetForNewProcess()
-        IdentifierSnapshot.record(targetPackage, targetPid, repository)
-        snapshotPid = targetPid
     }
 
     private fun restartProcessMonitors(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
@@ -220,7 +211,6 @@ class AccessMonitorService : Service() {
 
     private fun stopMonitoring() {
         TargetPresence.end()
-        snapshotPid = -1
         pidWatchJob?.cancel()
         notifyJob?.cancel()
         delayedStartJob?.cancel()

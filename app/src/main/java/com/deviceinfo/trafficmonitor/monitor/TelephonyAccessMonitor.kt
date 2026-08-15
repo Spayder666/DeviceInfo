@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * SIM / оператор без привилегированных AppOps: getSimState, getNetworkOperator и т.п.
- * не пишут READ_PHONE_STATE. Смотрим registry, isub, appops и logcat теги telephony.
+ * не пишут READ_PHONE_STATE. Пишем только свежий AppOps и logcat с именем API.
  */
 class TelephonyAccessMonitor(
     private val packageName: String,
@@ -62,22 +62,6 @@ class TelephonyAccessMonitor(
 
     private suspend fun pollDumps() {
         if (!TargetPresence.isAliveNow()) return
-        val registry = RootShell.execAndRead(
-            "dumpsys telephony.registry 2>/dev/null | grep -n -i -E '$packageName|uid=$uid' | head -n 20",
-            timeoutSec = 8
-        )
-        if (dumpMentionsTarget(registry, packageName, uid)) {
-            emitDump("telephony.registry", "tel.sim_state", registry)
-        }
-
-        val isub = RootShell.execAndRead(
-            "dumpsys isub 2>/dev/null | grep -n -i -E '$packageName|uid=$uid' | head -n 20",
-            timeoutSec = 8
-        )
-        if (dumpMentionsTarget(isub, packageName, uid)) {
-            emitDump("subscription / isub", "sub.subscription_id", isub)
-        }
-
         val appops = RootShell.execAndRead(
             "cmd appops get $packageName 2>/dev/null | grep -i -E 'PHONE|SMS|CALL|ICC'",
             timeoutSec = 6
@@ -99,8 +83,9 @@ class TelephonyAccessMonitor(
             Regex("(?i)getImei|getDeviceId").containsMatchIn(line) -> "tel.imei"
             Regex("(?i)getLine1Number|MSISDN").containsMatchIn(line) -> "tel.line1_number"
             Regex("(?i)getPhoneType").containsMatchIn(line) -> "tel.phone_type"
-            Regex("(?i)Subscription|isub").containsMatchIn(line) -> "sub.subscription_id"
-            else -> "tel.phone_interface"
+            Regex("(?i)getActiveSubscription|getDefaultSubscription|SubscriptionInfo").containsMatchIn(line) ->
+                "sub.subscription_id"
+            else -> return
         }
         emit(
             action = line.substringAfterLast("/").substringBefore(":").ifBlank { "TelephonyManager" },
@@ -118,8 +103,8 @@ class TelephonyAccessMonitor(
             if (line.isBlank() || !isRecentAccessStamp(line)) continue
             val op = Regex("""([A-Z_]+)""").find(line)?.groupValues?.get(1) ?: continue
             val id = when {
-                op.contains("IMEI") || op.contains("DEVICE_IDENTIFIER") || op == "READ_PHONE_STATE" -> "tel.imei"
-                op.contains("PHONE_NUMBER") || op.contains("SMS") -> "tel.line1_number"
+                op.contains("DEVICE_IDENTIFIER") || op.contains("IMEI") -> "tel.imei"
+                op.contains("PHONE_NUMBER") -> "tel.line1_number"
                 op.contains("ICC") -> "tel.sim_serial"
                 else -> "tel.phone_interface"
             }
@@ -132,13 +117,6 @@ class TelephonyAccessMonitor(
                 source = EventSource.DUMPSYS
             )
         }
-    }
-
-    private suspend fun emitDump(action: String, identifierId: String, dump: String) {
-        if (dump.isBlank()) return
-        val snippet = dump.lineSequence().filter { it.isNotBlank() }.take(8).joinToString("\n")
-        if (snippet.isBlank()) return
-        emit(action, "dumpsys $action", snippet.take(400), snippet, identifierId, EventSource.DUMPSYS)
     }
 
     private suspend fun emit(

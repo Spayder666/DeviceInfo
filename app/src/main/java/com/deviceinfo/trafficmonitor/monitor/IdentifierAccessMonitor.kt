@@ -26,17 +26,15 @@ class IdentifierAccessMonitor(
     private val jobs = mutableListOf<Job>()
 
     fun start() {
-        val libcCmd = if (uid > 0) {
-            "logcat -v threadtime --uid=$uid -T 1 libc:V SystemProperties:V *:S 2>&1"
-        } else {
-            "logcat -v threadtime -T 1 libc:V SystemProperties:V *:S 2>&1"
-        }
-        jobs += scope.launch(Dispatchers.IO) {
-            try {
-                RootShell.execStreaming(libcCmd) { line ->
-                    if (isActive) scope.launch { parseLibc(line) }
+        if (uid > 0) {
+            val libcCmd = "logcat -v threadtime --uid=$uid -T 1 libc:V SystemProperties:V *:S 2>&1"
+            jobs += scope.launch(Dispatchers.IO) {
+                try {
+                    RootShell.execStreaming(libcCmd) { line ->
+                        if (isActive) scope.launch { parseLibc(line) }
+                    }
+                } catch (_: Exception) {
                 }
-            } catch (_: Exception) {
             }
         }
         jobs += scope.launch(Dispatchers.IO) {

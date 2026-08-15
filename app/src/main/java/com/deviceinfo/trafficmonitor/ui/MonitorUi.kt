@@ -507,7 +507,7 @@ fun EmptyMonitorHint() {
         Spacer(Modifier.height(10.dp))
         Text("Пока тихо", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         Text(
-            "В списке: название запроса и значение, которое вернул API. Запусти цель, лучше «+ Frida», и повтори проверку.",
+            "В списке только то, что цель реально вызвала: какой API, куда обратилась и какой ответ получила. Каталог — справочник, не выгрузка. Запусти цель и нажми Frida / + Frida.",
             fontSize = 12.sp,
             color = TextMuted,
             modifier = Modifier.padding(top = 6.dp)

@@ -103,13 +103,6 @@ object IdentifierReader {
         addAll(readTelephony())
     }
 
-    /** То, что чекер обычно читает сразу после старта: Build, SSAID, SIM, GPS, Wi‑Fi. */
-    fun readVisibleToProcess(): List<IdentifierValue> = buildList {
-        addAll(readCommon())
-        addAll(readLocation())
-        addAll(readWifi())
-    }
-
     fun readDefinition(def: IdentifierDefinition): IdentifierValue? {
         val raw = when {
             def.systemProperty != null -> getprop(def.systemProperty)
@@ -361,7 +354,7 @@ object IdentifierReader {
         return values.values.toList()
     }
 
-    fun readWifi(): List<IdentifierValue> {
+    private fun readWifi(): List<IdentifierValue> {
         val dump = RootShell.execAndRead("dumpsys wifi 2>/dev/null | head -c 4000", timeoutSec = 8)
         val mac = firstNonEmpty(
             fieldFrom(dump, "mWifiInfo", "MacAddress", "MAC"),
