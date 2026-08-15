@@ -274,10 +274,18 @@ object FridaInstaller {
         if (nonce.isBlank()) return false
         repeat(25) {
             val dump = RootShell.execAndRead(
-                "logcat -d -t 200 -s AccessMonFrida:I 2>/dev/null",
+                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null",
                 timeoutSec = 6
             )
-            if (dump.contains(nonce) && dump.contains("frida.boot")) return true
+            for (line in dump.lineSequence()) {
+                val start = line.indexOf('{')
+                if (start < 0) continue
+                val json = runCatching { org.json.JSONObject(line.substring(start).trim()) }.getOrNull()
+                    ?: continue
+                if (json.optString("nonce") == nonce && json.optString("identifierId") == "frida.boot") {
+                    return true
+                }
+            }
             delay(200)
         }
         return false

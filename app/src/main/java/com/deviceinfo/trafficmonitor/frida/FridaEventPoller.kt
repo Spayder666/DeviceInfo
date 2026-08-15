@@ -23,36 +23,37 @@ class FridaEventPoller(
     private val scope: CoroutineScope
 ) {
     private var job: Job? = null
-    private var logJob: Job? = null
     private val lastSize = mutableMapOf<String, Long>()
     private val pending = mutableMapOf<String, String>()
+    private val seen = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     fun start() {
+        active = this
         job = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 for (path in FridaInstaller.eventFiles(packageName)) {
                     pollFile(path)
                 }
+                pullLogcatDump()
                 delay(400)
-            }
-        }
-        logJob = scope.launch(Dispatchers.IO) {
-            try {
-                RootShell.execStreaming(
-                    "logcat -v raw -T 1 AccessMonFrida:I *:S 2>&1"
-                ) { line ->
-                    if (isActive) scope.launch { ingestLogLine(line) }
-                }
-            } catch (_: Exception) {
             }
         }
     }
 
     fun stop() {
+        if (active == this) active = null
         job?.cancel()
-        logJob?.cancel()
         job = null
-        logJob = null
+    }
+
+    suspend fun pullLogcatDump() {
+        val dump = RootShell.execAndRead(
+            "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null",
+            timeoutSec = 8
+        )
+        for (line in dump.lineSequence()) {
+            ingestLogLine(line)
+        }
     }
 
     private suspend fun ingestLogLine(line: String) {
@@ -98,6 +99,13 @@ class FridaEventPoller(
             val pkg = json.optString("package", "")
             if (pkg.isNotEmpty() && pkg != packageName && pkg != "__TARGET_PACKAGE__") return
             val identifierId = json.optString("identifierId", "")
+            val seenKey = listOf(
+                json.optString("nonce"),
+                json.optLong("timestamp").toString(),
+                identifierId,
+                json.optString("action")
+            ).joinToString("|")
+            if (!seen.add(seenKey)) return
             val cached = json.optBoolean("cached", false)
 
             val action = json.optString("action", identifierId)
@@ -164,6 +172,12 @@ class FridaEventPoller(
     fun resetOffset() {
         lastSize.clear()
         pending.clear()
+        seen.clear()
+    }
+
+    companion object {
+        @Volatile
+        var active: FridaEventPoller? = null
     }
 
     private fun categoryFor(action: String, permission: String?, group: String?): AccessCategory {

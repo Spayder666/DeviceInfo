@@ -125,6 +125,10 @@ class AppOpsMonitor(
                 val mode = accessMatch.groupValues[1]
                 val accessTime = accessMatch.groupValues[2].trim().ifBlank { mode }
                 val stateKey = "$currentOp:$mode"
+                if (currentOp == "READ_PHONE_STATE") {
+                    lastState[stateKey] = accessTime
+                    continue
+                }
                 if (lastState.containsKey(stateKey)) continue
                 val shouldEmit = emit || isRecentAccess(accessTime)
                 if (shouldEmit) {

@@ -44,7 +44,7 @@ function writeAndroidLog(line) {
     if (!addr) return;
     var fn = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
     var text = line.length > 3500 ? line.substring(0, 3500) : line;
-    fn(4, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(text));
+    fn(5, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(text));
   } catch (e) {}
 }
 

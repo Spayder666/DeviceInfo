@@ -7,6 +7,7 @@ import com.deviceinfo.trafficmonitor.TrafficMonitorApp
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.frida.FridaEventPoller
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
 import com.deviceinfo.trafficmonitor.mitm.HttpsMitmController
 import com.deviceinfo.trafficmonitor.model.InstalledApp
@@ -505,6 +506,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             FridaInstaller.ensureReady(getApplication())
             FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
             val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = false)
+            if (ok) FridaEventPoller.active?.pullLogcatDump()
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
                 "Frida пишет события (источник Frida в фильтре)"
@@ -522,6 +524,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             FridaInstaller.ensureReady(getApplication())
             FridaInstaller.prepareHooksForPackage(_packageName.value, getApplication())
             val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = true)
+            if (ok) FridaEventPoller.active?.pullLogcatDump()
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
                 "Посредник активен: в фильтре должен появиться источник Frida"
