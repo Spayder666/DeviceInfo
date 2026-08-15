@@ -48,6 +48,9 @@ object FridaInstaller {
     @Volatile
     private var injectProcess: Process? = null
 
+    @Volatile
+    private var amsProcess: Process? = null
+
     enum class FridaStatus {
         NOT_INSTALLED,
         EXTRACTING,
@@ -281,32 +284,29 @@ object FridaInstaller {
     suspend fun injectManual(context: Context, packageName: String, restartApp: Boolean): Boolean =
         withContext(Dispatchers.IO) {
             if (!ensureReady(context)) return@withContext false
+            if (!ensureFridaInject(context)) return@withContext false
             prepareHooksForPackage(packageName, context)
             preparePtrace()
             stopInjector()
+
+            val amsOk = injectAmsBypass(packageName)
+            val amsErr = lastError
             RootShell.execAndRead("am set-debug-app ${RootShell.shellQuote(packageName)}")
 
-            val pids = if (restartApp) {
-                spawnAndWait(packageName) ?: run {
-                    lastError = lastError ?: "Приложение не запустилось (PID не найден)"
-                    return@withContext false
-                }
-            } else {
-                val live = RootShell.findAllPids(packageName)
-                if (live.isEmpty()) {
-                    lastError = "Приложение не запущено — сначала запустите его"
-                    return@withContext false
-                }
-                live
+            val pids = spawnAndWait(packageName) ?: run {
+                lastError = lastError ?: "Приложение не запустилось (PID не найден)"
+                return@withContext false
             }
 
             val pid = pickMainPid(packageName, pids) ?: pids.first()
-            if (ensureAmhooks(context) && attachJvmti(packageName) && waitForScriptBoot("early")) {
+            if (amsOk && ensureAmhooks(context) && attachJvmti(packageName) &&
+                waitForScriptBoot("early")
+            ) {
                 status = FridaStatus.INJECTED
                 lastError = null
                 return@withContext true
             }
-            val jvmtiErr = lastError
+            val jvmtiErr = lastError ?: amsErr
 
             if (ensureFridaInject(context) && attachScript(pid, packageName, BOOT_PATH) &&
                 waitForScriptBoot("canary")
@@ -452,8 +452,88 @@ object FridaInstaller {
     }
 
     private fun startKeptInjector(command: String) {
-        stopInjector()
+        runCatching { injectProcess?.destroyForcibly() }
         injectProcess = RootShell.execKeepAlive(command)
+    }
+
+    /** Хуки в system_server: FLAG_DEBUGGABLE для цели, иначе ART отвергнет attach-agent. */
+    private fun injectAmsBypass(packageName: String): Boolean {
+        val ss = RootShell.execAndRead("pidof system_server").trim()
+            .split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()
+        if (ss == null) {
+            lastError = "system_server не найден"
+            return false
+        }
+        val js = """
+            'use strict';
+            var TARGET = '$packageName';
+            function mark(info) {
+              try {
+                if (info && info.packageName.value === TARGET) {
+                  info.flags.value = info.flags.value | 0x2;
+                }
+              } catch (e) {}
+            }
+            Java.perform(function () {
+              try {
+                var AMS = Java.use('com.android.server.am.ActivityManagerService');
+                AMS.enforceDebuggable.overloads.forEach(function (o) {
+                  o.implementation = function () {};
+                });
+              } catch (e) {}
+              try {
+                var PR = Java.use('com.android.server.am.ProcessRecord');
+                var orig = PR.isDebuggable;
+                PR.isDebuggable.implementation = function () {
+                  try {
+                    if (this.info.value && this.info.value.packageName.value === TARGET) return true;
+                  } catch (e) {}
+                  return orig.call(this);
+                };
+              } catch (e) {}
+              ['com.android.server.pm.PackageManagerService${'$'}IPackageManagerImpl',
+               'com.android.server.pm.PackageManagerService',
+               'com.android.server.pm.ComputerEngine'].forEach(function (name) {
+                try {
+                  var C = Java.use(name);
+                  if (!C.getApplicationInfo) return;
+                  C.getApplicationInfo.overloads.forEach(function (o) {
+                    o.implementation = function () {
+                      var info = o.apply(this, arguments);
+                      mark(info);
+                      return info;
+                    };
+                  });
+                } catch (e) {}
+              });
+              console.log('AMF {"identifierId":"frida.boot","action":"AMS bypass","request":"' +
+                TARGET + '","response":"ams","package":"' + TARGET +
+                '","timestamp":' + Date.now() + ',"source":"frida","nonce":"$lastNonce"}');
+            });
+        """.trimIndent()
+        val local = File.createTempFile("am_ams", ".js")
+        local.writeText(js)
+        val script = "$BASE_DIR/ams_bypass.js"
+        RootShell.execAndRead("cp ${local.absolutePath} $script && chmod 644 $script")
+        local.delete()
+        val log = "$INJECT_LOG.ams"
+        RootShell.execAndRead("echo -n > $log")
+        runCatching { amsProcess?.destroyForcibly() }
+        amsProcess = RootShell.execKeepAlive("$INJECT_PATH -p $ss -s $script > $log 2>&1")
+        repeat(20) {
+            Thread.sleep(200)
+            val text = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null"))
+            if (text.contains("\"response\":\"ams\"") || text.contains("AMS bypass")) return true
+            if (looksLikeInjectFailure(text)) {
+                lastError = "system_server: ${text.take(180)}"
+                return false
+            }
+        }
+        val text = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null"))
+        lastError = "system_server: ${text.take(180).ifBlank { "хук не подтвердился" }}"
+        return text.contains("script") || RootShell.execAndRead(
+            "pgrep -f 'frida-inject -p $ss' 2>/dev/null"
+        ).trim().isNotEmpty()
     }
 
     private fun waitInjectorSettled(log: String): Boolean {
@@ -589,7 +669,6 @@ object FridaInstaller {
     private fun stopInjector() {
         runCatching { injectProcess?.destroyForcibly() }
         injectProcess = null
-        RootShell.execAndRead("pkill -f '$INJECT_PATH' 2>/dev/null")
     }
 
     private suspend fun ensureFridaInject(context: Context): Boolean = withContext(Dispatchers.IO) {
@@ -692,6 +771,9 @@ object FridaInstaller {
 
     fun clearInjection(packageName: String) {
         stopInjector()
+        runCatching { amsProcess?.destroyForcibly() }
+        amsProcess = null
+        RootShell.execAndRead("pkill -f '$INJECT_PATH' 2>/dev/null")
         RootShell.execAndRead("am clear-debug-app 2>/dev/null")
         if (status == FridaStatus.INJECTED) {
             status = FridaStatus.READY
