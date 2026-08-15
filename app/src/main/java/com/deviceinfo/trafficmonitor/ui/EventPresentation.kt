@@ -1,6 +1,5 @@
 package com.deviceinfo.trafficmonitor.ui
 
-import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
@@ -12,7 +11,7 @@ data class AskedGot(
 )
 
 private val INTERNAL_IDS = setOf(
-    "root.inject", "root.decision", "root.ports", "frida.init"
+    "root.inject", "root.decision", "root.ports", "frida.init", "frida.boot"
 )
 
 fun isInternalNoise(event: CaptureEvent): Boolean =
@@ -56,49 +55,47 @@ fun eventAsText(event: CaptureEvent): String = buildString {
     event.rawData?.let { appendLine("Raw:\n$it") }
 }
 
-fun buildAskedDigest(events: List<CaptureEvent>): List<AskedItem> {
+fun buildAskedDigest(events: List<CaptureEvent>): List<AskedItem> =
+    buildAskedSections(events).flatMap { it.items }
+
+fun buildAskedSections(events: List<CaptureEvent>): List<DigestSection> {
     val byKey = linkedMapOf<String, AskedItem>()
     for (event in events) {
         if (isInternalNoise(event)) continue
-        if (event.category != AccessCategory.IDENTIFIER) continue
-        if (event.responseDetails.isNullOrBlank()) continue
+        if (event.identifierName == "frida.boot" || event.identifierName == "frida.init") continue
+        if (event.action.startsWith("Frida:")) continue
         val io = describeAskedGot(event)
-        val key = event.identifierName ?: io.asked
+        if (io.asked.isBlank()) continue
+        val group = resolveEventGroup(event)
+        val key = event.identifierName?.takeIf { it.isNotBlank() } ?: "${group?.name}|${io.asked}"
         val existing = byKey[key]
-        val hasValue = io.got.isNotBlank()
+        val value = io.got.ifBlank { io.api.orEmpty() }
         if (existing == null) {
             byKey[key] = AskedItem(
                 id = key,
                 title = io.asked,
-                value = io.got.ifBlank { io.api.orEmpty() },
+                value = value,
                 api = io.api,
-                group = event.identifierGroup ?: IdentifierCatalog.findById(event.identifierName.orEmpty())?.group?.name,
-                count = 1
+                group = group?.name,
+                count = 1,
+                eventId = event.id
             )
         } else {
             byKey[key] = existing.copy(
                 count = existing.count + 1,
-                value = if (hasValue) io.got else existing.value
+                value = if (io.got.isNotBlank()) io.got else existing.value,
+                eventId = event.id
             )
         }
     }
-    val order = listOf(
-        IdentifierGroup.BUILD.name,
-        IdentifierGroup.OS_VERSION.name,
-        IdentifierGroup.SETTINGS.name,
-        IdentifierGroup.TELEPHONY.name,
-        IdentifierGroup.SUBSCRIPTION.name,
-        IdentifierGroup.WIFI.name,
-        IdentifierGroup.DRM.name,
-        IdentifierGroup.ADVERTISING.name,
-        IdentifierGroup.SYSTEM_PROPERTY.name
-    )
-    return byKey.values.sortedWith(
-        compareBy<AskedItem> { item ->
-            val i = order.indexOf(item.group)
-            if (i < 0) 100 else i
-        }.thenBy { it.title }
-    )
+    val buckets = linkedMapOf<IdentifierGroup?, MutableList<AskedItem>>()
+    for (item in byKey.values) {
+        val group = item.group?.let { runCatching { IdentifierGroup.valueOf(it) }.getOrNull() }
+        buckets.getOrPut(group) { mutableListOf() }.add(item)
+    }
+    return FINGERPRINT_GROUP_ORDER.mapNotNull { group ->
+        buckets.remove(group)?.let { DigestSection(group, it.sortedBy { item -> item.title }) }
+    } + buckets.map { (group, items) -> DigestSection(group, items.sortedBy { it.title }) }
 }
 
 private fun firstLine(text: String?): String? {

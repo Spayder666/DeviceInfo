@@ -237,7 +237,7 @@ fun IdentifierGroupFilterRow(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    if (group == null) "Все ID" else identifierGroupShort(group),
+                    if (group == null) "Все" else identifierGroupShort(group),
                     fontSize = 10.sp,
                     color = if (active) MaterialTheme.colorScheme.onSurface else TextMuted
                 )
@@ -337,6 +337,122 @@ private fun ToolPill(
         Column {
             Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tint, lineHeight = 12.sp)
             Text(hint, fontSize = 9.sp, color = TextMuted, lineHeight = 10.sp)
+        }
+    }
+}
+
+@Composable
+fun ListModeRow(selected: ListMode, onSelect: (ListMode) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        ListMode.entries.forEach { mode ->
+            val active = selected == mode
+            Text(
+                listModeLabel(mode),
+                fontSize = 12.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (active) MaterialTheme.colorScheme.onSurface else TextMuted,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (active) Accent.copy(alpha = 0.18f) else SurfaceLift)
+                    .clickable { onSelect(mode) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ClassSectionHeader(group: IdentifierGroup?, count: Int) {
+    val color = group?.let { identifierGroupColor(it) } ?: Accent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            group?.let { identifierGroupIcon(it) } ?: allIcon(),
+            null,
+            modifier = Modifier.size(14.dp),
+            tint = color
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            group?.label ?: "Без класса",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+            modifier = Modifier.weight(1f)
+        )
+        Text(count.toString(), fontSize = 11.sp, color = TextMuted)
+    }
+}
+
+@Composable
+fun DigestRow(item: AskedItem, onClick: () -> Unit) {
+    val group = item.group?.let { runCatching { IdentifierGroup.valueOf(it) }.getOrNull() }
+    val color = group?.let { identifierGroupColor(it) } ?: Accent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(color.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                group?.let { identifierGroupIcon(it) } ?: allIcon(),
+                null,
+                tint = color,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (item.api != null && item.api != item.title) {
+                Text(
+                    item.api,
+                    fontSize = 10.sp,
+                    color = TextMuted,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                item.value.ifBlank { "—" },
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = if (item.value.isBlank()) TextMuted else MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp)
+            )
+            if (item.count > 1) {
+                Text("×${item.count}", fontSize = 9.sp, color = TextMuted)
+            }
         }
     }
 }
@@ -479,6 +595,16 @@ fun EventRow(item: DisplayEvent, onClick: () -> Unit, onLongClick: () -> Unit = 
                 Text(time, fontSize = 10.sp, color = TextMuted)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val group = resolveEventGroup(event)
+                if (group != null) {
+                    Text(
+                        identifierGroupShort(group),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = identifierGroupColor(group),
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
+                }
                 Text(
                     text = preview,
                     fontSize = 11.sp,
@@ -492,9 +618,6 @@ fun EventRow(item: DisplayEvent, onClick: () -> Unit, onLongClick: () -> Unit = 
                 Icon(sourceIcon(event.source), null, modifier = Modifier.size(10.dp), tint = TextMuted)
                 Spacer(Modifier.width(2.dp))
                 Text(sourceLabel(event.source), fontSize = 9.sp, color = TextMuted)
-                event.identifierName?.let {
-                    Text(" · $it", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Accent, maxLines = 1)
-                }
             }
         }
     }
@@ -507,7 +630,7 @@ fun EmptyMonitorHint() {
         Spacer(Modifier.height(10.dp))
         Text("Пока тихо", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         Text(
-            "Посредник в реальном процессе, не виртуальный клон. «+ Frida» ставит Zygisk-модуль (один раз перезагрузка), затем хуки: API, запрос и ответ системы.",
+            "Сводка — что цель спросила и что получила, по классам. «+ Frida» включает хуки в процессе.",
             fontSize = 12.sp,
             color = TextMuted,
             modifier = Modifier.padding(top = 6.dp)

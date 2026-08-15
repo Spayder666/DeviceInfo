@@ -181,6 +181,20 @@ fun identifierGroupIcon(group: IdentifierGroup): ImageVector = when (group) {
     IdentifierGroup.BROWSER -> Icons.Outlined.Language
 }
 
+fun identifierGroupColor(group: IdentifierGroup): Color = when (group) {
+    IdentifierGroup.LOCATION -> categoryColor(AccessCategory.LOCATION)
+    IdentifierGroup.TELEPHONY, IdentifierGroup.SUBSCRIPTION -> categoryColor(AccessCategory.TELEPHONY)
+    IdentifierGroup.WIFI, IdentifierGroup.NETWORK -> categoryColor(AccessCategory.NETWORK)
+    IdentifierGroup.BLUETOOTH -> categoryColor(AccessCategory.BLUETOOTH)
+    IdentifierGroup.ROOT, IdentifierGroup.ATTESTATION, IdentifierGroup.FRAUD ->
+        categoryColor(AccessCategory.SECURITY)
+    IdentifierGroup.PERSONAL -> categoryColor(AccessCategory.CONTACTS)
+    IdentifierGroup.HARDWARE -> categoryColor(AccessCategory.CAMERA)
+    IdentifierGroup.ADVERTISING, IdentifierGroup.DRM, IdentifierGroup.IDENTITY, IdentifierGroup.ACCOUNT ->
+        categoryColor(AccessCategory.IDENTIFIER)
+    else -> categoryColor(AccessCategory.IDENTIFIER)
+}
+
 fun identifierGroupShort(group: IdentifierGroup): String = when (group) {
     IdentifierGroup.BUILD -> "Build"
     IdentifierGroup.OS_VERSION -> "ОС"

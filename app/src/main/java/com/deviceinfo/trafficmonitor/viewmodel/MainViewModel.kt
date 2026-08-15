@@ -16,15 +16,19 @@ import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
 import com.deviceinfo.trafficmonitor.mitm.MitmCaManager
 import com.deviceinfo.trafficmonitor.ui.AskedItem
+import com.deviceinfo.trafficmonitor.ui.DigestSection
 import com.deviceinfo.trafficmonitor.ui.DisplayEvent
+import com.deviceinfo.trafficmonitor.ui.ListMode
 import com.deviceinfo.trafficmonitor.ui.SessionStats
 import com.deviceinfo.trafficmonitor.ui.buildAskedDigest
+import com.deviceinfo.trafficmonitor.ui.buildAskedSections
 import com.deviceinfo.trafficmonitor.ui.buildSessionStats
 import com.deviceinfo.trafficmonitor.ui.collapseRepeats
 import com.deviceinfo.trafficmonitor.ui.eventMatchesCategory
 import com.deviceinfo.trafficmonitor.ui.eventMatchesQuery
 import com.deviceinfo.trafficmonitor.ui.isIdentifierEvent
 import com.deviceinfo.trafficmonitor.ui.pinKey
+import com.deviceinfo.trafficmonitor.ui.resolveEventGroup
 import com.deviceinfo.trafficmonitor.util.AppListLoader
 import com.deviceinfo.trafficmonitor.util.RecentApp
 import com.deviceinfo.trafficmonitor.util.SessionPrefs
@@ -115,6 +119,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val _packageName = MutableStateFlow("")
     private val _selectedCategory = MutableStateFlow<AccessCategory?>(null)
     private val _selectedIdentifierGroup = MutableStateFlow<String?>(null)
+    private val _listMode = MutableStateFlow(ListMode.DIGEST)
     private val _selectedSource = MutableStateFlow<EventSource?>(null)
     private val _searchQuery = MutableStateFlow("")
     private val _dedupEnabled = MutableStateFlow(true)
@@ -134,6 +139,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     val packageName: StateFlow<String> = _packageName.asStateFlow()
     val selectedCategory: StateFlow<AccessCategory?> = _selectedCategory.asStateFlow()
     val selectedIdentifierGroup: StateFlow<String?> = _selectedIdentifierGroup.asStateFlow()
+    val listMode: StateFlow<ListMode> = _listMode.asStateFlow()
     val selectedSource: StateFlow<EventSource?> = _selectedSource.asStateFlow()
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
     val dedupEnabled: StateFlow<Boolean> = _dedupEnabled.asStateFlow()
@@ -156,7 +162,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     ) { all, cat, idGroup, source, query ->
         all.filter { event ->
             eventMatchesCategory(event, cat) &&
-                (idGroup == null || event.identifierGroup == idGroup) &&
+                (idGroup == null || resolveEventGroup(event)?.name == idGroup) &&
                 (source == null || event.source == source) &&
                 eventMatchesQuery(event, query)
         }
@@ -185,8 +191,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         .map { buildSessionStats(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SessionStats())
 
-    val askedDigest: StateFlow<List<AskedItem>> = _allEvents
+    val askedDigest: StateFlow<List<AskedItem>> = pinnedFiltered
         .map { buildAskedDigest(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val askedSections: StateFlow<List<DigestSection>> = pinnedFiltered
+        .map { buildAskedSections(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val sourceCounts: StateFlow<Map<EventSource, Int>> = _allEvents
@@ -207,8 +217,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     val identifierGroupCounts: StateFlow<Map<String, Int>> = _allEvents
         .map { list ->
-            list.filter { it.category == AccessCategory.IDENTIFIER }
-                .mapNotNull { it.identifierGroup }
+            list.mapNotNull { resolveEventGroup(it)?.name }
                 .groupingBy { it }
                 .eachCount()
         }
@@ -228,6 +237,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         _selectedCategory.value = null
         _selectedSource.value = null
         _selectedIdentifierGroup.value = null
+        _listMode.value = runCatching { ListMode.valueOf(SessionPrefs.listMode(app)) }
+            .getOrDefault(ListMode.DIGEST)
         _sessionStartedAt.value = System.currentTimeMillis()
         _targetDied.value = false
         _targetRunning.value = false
@@ -281,11 +292,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setIdentifierGroupFilter(group: String?) {
-        _selectedIdentifierGroup.value = group
-        if (group != null) {
-            _selectedCategory.value = AccessCategory.IDENTIFIER
-        }
+        _selectedIdentifierGroup.value = if (_selectedIdentifierGroup.value == group) null else group
         persistFilters()
+    }
+
+    fun setListMode(mode: ListMode) {
+        _listMode.value = mode
+        SessionPrefs.setListMode(getApplication(), mode.name)
     }
 
     fun setSourceFilter(source: EventSource?) {
@@ -299,10 +312,22 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun filterByIdentifier(id: String) {
-        _selectedCategory.value = AccessCategory.IDENTIFIER
         _showSearch.value = true
         _searchQuery.value = id
         persistFilters()
+    }
+
+    fun selectAsked(item: AskedItem) {
+        val match = _allEvents.value.lastOrNull { event ->
+            event.id == item.eventId ||
+                event.identifierName == item.id ||
+                event.action == item.title
+        }
+        if (match != null) {
+            _selectedEvent.value = match
+        } else {
+            filterByIdentifier(item.title)
+        }
     }
 
     private fun persistFilters() {

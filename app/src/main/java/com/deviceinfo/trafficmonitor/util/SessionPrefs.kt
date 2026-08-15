@@ -20,6 +20,7 @@ object SessionPrefs {
     private const val KEY_LAST_CAT = "last_cat"
     private const val KEY_LAST_SRC = "last_src"
     private const val KEY_LAST_IDG = "last_idg"
+    private const val KEY_LIST_MODE = "list_mode"
     private const val MAX = 8
 
     fun recents(context: Context): List<RecentApp> {
@@ -103,6 +104,12 @@ object SessionPrefs {
     fun lastSource(context: Context): String? = prefs(context).getString(KEY_LAST_SRC, null)
 
     fun lastIdentifierGroup(context: Context): String? = prefs(context).getString(KEY_LAST_IDG, null)
+
+    fun listMode(context: Context): String = prefs(context).getString(KEY_LIST_MODE, "DIGEST") ?: "DIGEST"
+
+    fun setListMode(context: Context, mode: String) {
+        prefs(context).edit().putString(KEY_LIST_MODE, mode).apply()
+    }
 
     fun saveFilters(context: Context, category: String?, source: String?, identifierGroup: String?) {
         prefs(context).edit()

@@ -7,6 +7,7 @@ import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.categoryForIdentifierId
+import com.deviceinfo.trafficmonitor.identifiers.groupForIdentifierId
 import com.deviceinfo.trafficmonitor.identifiers.toAccessCategory
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
@@ -166,6 +167,7 @@ class FridaEventPoller(
                     rawData = line,
                     identifierName = def?.id ?: resolvedId.takeIf { it.isNotEmpty() },
                     identifierGroup = def?.group?.name
+                        ?: groupForIdentifierId(resolvedId)?.name
                 )
             )
         } catch (_: Exception) {

@@ -841,6 +841,39 @@ fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {
     else -> AccessCategory.IDENTIFIER
 }
 
+fun groupForIdentifierId(id: String?): IdentifierGroup? {
+    if (id.isNullOrBlank()) return null
+    IdentifierCatalog.findById(id)?.group?.let { return it }
+    return when (id.substringBefore('.')) {
+        "build" -> IdentifierGroup.BUILD
+        "version" -> IdentifierGroup.OS_VERSION
+        "prop", "sysprop" -> IdentifierGroup.SYSTEM_PROPERTY
+        "settings", "secure", "global", "gsf", "ssaid" -> IdentifierGroup.SETTINGS
+        "tel", "call" -> IdentifierGroup.TELEPHONY
+        "sub" -> IdentifierGroup.SUBSCRIPTION
+        "wifi" -> IdentifierGroup.WIFI
+        "bt", "nearby" -> IdentifierGroup.BLUETOOTH
+        "ad", "gaid", "appset", "asid" -> IdentifierGroup.ADVERTISING
+        "drm", "widevine", "mediadrm" -> IdentifierGroup.DRM
+        "pkg", "install" -> IdentifierGroup.INSTALL
+        "acct", "account" -> IdentifierGroup.ACCOUNT
+        "cp" -> IdentifierGroup.CONTENT_PROVIDER
+        "proc", "sys" -> IdentifierGroup.PROC_SYS
+        "net", "http", "https", "sni", "vpn" -> IdentifierGroup.NETWORK
+        "dpm", "mdm" -> IdentifierGroup.ENTERPRISE
+        "oem" -> IdentifierGroup.OEM
+        "attest", "ent" -> IdentifierGroup.ATTESTATION
+        "location", "cell", "gnss", "gps", "fused" -> IdentifierGroup.LOCATION
+        "root" -> IdentifierGroup.ROOT
+        "contacts", "sms", "mms", "calendar", "call_log" -> IdentifierGroup.PERSONAL
+        "camera", "mic", "sensor", "hw", "nfc", "usb", "display" -> IdentifierGroup.HARDWARE
+        "fcm", "cred", "identity", "play", "fido", "games" -> IdentifierGroup.IDENTITY
+        "fraud" -> IdentifierGroup.FRAUD
+        "browser", "webview" -> IdentifierGroup.BROWSER
+        else -> null
+    }
+}
+
 fun categoryForIdentifierId(id: String?): AccessCategory? {
     if (id.isNullOrBlank()) return null
     return IdentifierCatalog.findById(id)?.toAccessCategory()

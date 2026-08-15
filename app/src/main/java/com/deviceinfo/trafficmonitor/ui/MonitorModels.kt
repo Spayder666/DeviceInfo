@@ -3,6 +3,8 @@ package com.deviceinfo.trafficmonitor.ui
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
+import com.deviceinfo.trafficmonitor.identifiers.groupForIdentifierId
 
 data class DisplayEvent(
     val event: CaptureEvent,
@@ -10,13 +12,30 @@ data class DisplayEvent(
     val pinned: Boolean = false
 )
 
+enum class ListMode {
+    DIGEST,
+    BY_CLASS,
+    TIMELINE
+}
+
 data class AskedItem(
     val id: String,
     val title: String,
     val value: String,
     val api: String?,
     val group: String?,
-    val count: Int
+    val count: Int,
+    val eventId: Long = 0
+)
+
+data class DigestSection(
+    val group: IdentifierGroup?,
+    val items: List<AskedItem>
+)
+
+data class ClassSection(
+    val group: IdentifierGroup?,
+    val items: List<DisplayEvent>
 )
 
 data class SessionStats(
@@ -31,6 +50,71 @@ data class SessionStats(
     val durationMs: Long = 0L,
     val eventsPerMin: Double = 0.0
 )
+
+fun resolveEventGroup(event: CaptureEvent): IdentifierGroup? {
+    event.identifierGroup?.let { name ->
+        runCatching { IdentifierGroup.valueOf(name) }.getOrNull()?.let { return it }
+    }
+    groupForIdentifierId(event.identifierName)?.let { return it }
+    return when (event.category) {
+        AccessCategory.LOCATION -> IdentifierGroup.LOCATION
+        AccessCategory.TELEPHONY -> IdentifierGroup.TELEPHONY
+        AccessCategory.BLUETOOTH -> IdentifierGroup.BLUETOOTH
+        AccessCategory.NETWORK -> IdentifierGroup.NETWORK
+        AccessCategory.SECURITY -> IdentifierGroup.ROOT
+        AccessCategory.CONTACTS, AccessCategory.SMS, AccessCategory.CALENDAR -> IdentifierGroup.PERSONAL
+        AccessCategory.CAMERA, AccessCategory.MICROPHONE, AccessCategory.SENSOR, AccessCategory.CLIPBOARD ->
+            IdentifierGroup.HARDWARE
+        AccessCategory.IDENTIFIER -> IdentifierGroup.BUILD
+        else -> null
+    }
+}
+
+fun groupDisplayEvents(events: List<DisplayEvent>): List<ClassSection> {
+    if (events.isEmpty()) return emptyList()
+    val buckets = linkedMapOf<IdentifierGroup?, MutableList<DisplayEvent>>()
+    for (item in events) {
+        val group = resolveEventGroup(item.event)
+        buckets.getOrPut(group) { mutableListOf() }.add(item)
+    }
+    return FINGERPRINT_GROUP_ORDER.mapNotNull { group ->
+        buckets.remove(group)?.let { ClassSection(group, it) }
+    } + buckets.map { (group, items) -> ClassSection(group, items) }
+}
+
+val FINGERPRINT_GROUP_ORDER = listOf(
+    IdentifierGroup.BUILD,
+    IdentifierGroup.OS_VERSION,
+    IdentifierGroup.SETTINGS,
+    IdentifierGroup.TELEPHONY,
+    IdentifierGroup.SUBSCRIPTION,
+    IdentifierGroup.WIFI,
+    IdentifierGroup.NETWORK,
+    IdentifierGroup.ADVERTISING,
+    IdentifierGroup.DRM,
+    IdentifierGroup.ACCOUNT,
+    IdentifierGroup.IDENTITY,
+    IdentifierGroup.SYSTEM_PROPERTY,
+    IdentifierGroup.INSTALL,
+    IdentifierGroup.LOCATION,
+    IdentifierGroup.BLUETOOTH,
+    IdentifierGroup.ATTESTATION,
+    IdentifierGroup.ROOT,
+    IdentifierGroup.FRAUD,
+    IdentifierGroup.HARDWARE,
+    IdentifierGroup.PERSONAL,
+    IdentifierGroup.BROWSER,
+    IdentifierGroup.CONTENT_PROVIDER,
+    IdentifierGroup.PROC_SYS,
+    IdentifierGroup.ENTERPRISE,
+    IdentifierGroup.OEM
+)
+
+fun listModeLabel(mode: ListMode): String = when (mode) {
+    ListMode.DIGEST -> "Сводка"
+    ListMode.BY_CLASS -> "Классы"
+    ListMode.TIMELINE -> "Лента"
+}
 
 fun pinKey(event: CaptureEvent): String =
     "${event.source}|${event.action}|${event.identifierName.orEmpty()}"

@@ -7,6 +7,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,19 +81,23 @@ import com.deviceinfo.trafficmonitor.ui.formatDuration
 import com.deviceinfo.trafficmonitor.ui.pinKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.export.ExportHelper
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.ui.CategoryFilterRow
+import com.deviceinfo.trafficmonitor.ui.ClassSectionHeader
+import com.deviceinfo.trafficmonitor.ui.DigestRow
 import com.deviceinfo.trafficmonitor.ui.EmptyMonitorHint
 import com.deviceinfo.trafficmonitor.ui.EventDetailSheet
 import com.deviceinfo.trafficmonitor.ui.EventRow
 import com.deviceinfo.trafficmonitor.ui.EventSearchBar
 import com.deviceinfo.trafficmonitor.ui.IdentifierGroupFilterRow
+import com.deviceinfo.trafficmonitor.ui.ListMode
+import com.deviceinfo.trafficmonitor.ui.ListModeRow
 import com.deviceinfo.trafficmonitor.ui.SourceFilterRow
 import com.deviceinfo.trafficmonitor.ui.StatsSheet
 import com.deviceinfo.trafficmonitor.ui.ToolStrip
 import com.deviceinfo.trafficmonitor.ui.fridaStatusLabel
+import com.deviceinfo.trafficmonitor.ui.groupDisplayEvents
 import com.deviceinfo.trafficmonitor.ui.theme.Accent
 import com.deviceinfo.trafficmonitor.ui.theme.SurfaceDeep
 import com.deviceinfo.trafficmonitor.ui.theme.TextMuted
@@ -167,7 +172,7 @@ class MonitorActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MonitorScreen(
     appName: String,
@@ -181,6 +186,8 @@ fun MonitorScreen(
     val events by viewModel.events.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val selectedIdentifierGroup by viewModel.selectedIdentifierGroup.collectAsState()
+    val listMode by viewModel.listMode.collectAsState()
+    val askedSections by viewModel.askedSections.collectAsState()
     val selectedSource by viewModel.selectedSource.collectAsState()
     val selectedEvent by viewModel.selectedEvent.collectAsState()
     val eventCount by viewModel.eventCount.collectAsState()
@@ -400,24 +407,30 @@ fun MonitorScreen(
                     onClose = { viewModel.toggleSearch() }
                 )
             }
+            ListModeRow(
+                selected = listMode,
+                onSelect = viewModel::setListMode
+            )
             CategoryFilterRow(
                 selected = selectedCategory,
                 counts = categoryCounts,
                 total = eventCount,
                 onSelect = viewModel::setCategoryFilter
             )
-            if (selectedCategory == AccessCategory.IDENTIFIER || selectedIdentifierGroup != null) {
+            if (identifierGroupCounts.isNotEmpty() || selectedIdentifierGroup != null) {
                 IdentifierGroupFilterRow(
                     selected = selectedIdentifierGroup,
                     counts = identifierGroupCounts,
                     onSelect = viewModel::setIdentifierGroupFilter
                 )
             }
-            SourceFilterRow(
-                selected = selectedSource,
-                counts = sourceCounts,
-                onSelect = viewModel::setSourceFilter
-            )
+            if (listMode == ListMode.TIMELINE) {
+                SourceFilterRow(
+                    selected = selectedSource,
+                    counts = sourceCounts,
+                    onSelect = viewModel::setSourceFilter
+                )
+            }
             ToolStrip(
                 fridaStatus = fridaStatus,
                 isInjecting = isFridaInjecting,
@@ -443,13 +456,48 @@ fun MonitorScreen(
                     onDismiss = { fridaHintDismissed = true }
                 )
             }
-            // Как в v32: список событий, без сводки dumpsys/logcat.
-            if (events.isEmpty()) {
+            val digestEmpty = askedSections.all { it.items.isEmpty() }
+            if (eventCount == 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (eventCount > 0) {
-                        Text(if (pinnedOnly) "Нет закреплённых" else "Нет совпадений", color = TextMuted, fontSize = 13.sp)
-                    } else {
-                        EmptyMonitorHint()
+                    EmptyMonitorHint()
+                }
+            } else if (events.isEmpty() && (listMode != ListMode.DIGEST || digestEmpty)) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(if (pinnedOnly) "Нет закреплённых" else "Нет совпадений", color = TextMuted, fontSize = 13.sp)
+                }
+            } else if (listMode == ListMode.DIGEST) {
+                if (digestEmpty) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Нет классифицированных запросов — откройте «Лента»", color = TextMuted, fontSize = 13.sp)
+                    }
+                } else {
+                    LazyColumn(state = listState) {
+                        askedSections.forEach { section ->
+                            stickyHeader(key = "d-${section.group?.name ?: "none"}") {
+                                ClassSectionHeader(section.group, section.items.size)
+                            }
+                            items(section.items, key = { "ask-${it.id}" }) { item ->
+                                DigestRow(item) { viewModel.selectAsked(item) }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                            }
+                        }
+                    }
+                }
+            } else if (listMode == ListMode.BY_CLASS) {
+                val sections = groupDisplayEvents(events)
+                LazyColumn(state = listState) {
+                    sections.forEach { section ->
+                        stickyHeader(key = "c-${section.group?.name ?: "none"}") {
+                            ClassSectionHeader(section.group, section.items.size)
+                        }
+                        items(section.items, key = { it.event.id }) { item ->
+                            EventRow(
+                                item = item,
+                                onClick = { viewModel.selectEvent(item.event) },
+                                onLongClick = { contextEvent = item }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                        }
                     }
                 }
             } else {
