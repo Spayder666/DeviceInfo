@@ -10,7 +10,7 @@ interface CaptureEventDao {
     @Insert
     suspend fun insert(event: CaptureEvent): Long
 
-    @Query("SELECT * FROM capture_events WHERE targetPackage = :packageName ORDER BY timestamp DESC LIMIT 5000")
+    @Query("SELECT * FROM capture_events WHERE targetPackage = :packageName ORDER BY timestamp DESC LIMIT 800")
     fun observeByPackage(packageName: String): Flow<List<CaptureEvent>>
 
     @Query("SELECT * FROM capture_events WHERE targetPackage = :packageName AND category = :category ORDER BY timestamp DESC LIMIT 5000")

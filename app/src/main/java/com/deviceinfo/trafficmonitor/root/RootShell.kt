@@ -60,9 +60,8 @@ object RootShell {
             .split("\\s+".toRegex())
             .mapNotNull { it.toIntOrNull() }
             .forEach { pids.add(it) }
+        if (pids.isNotEmpty()) return pids.toList()
 
-        // Only PID + process name. A full `ps` line can include our own su/sh
-        // commands that mention the package and must not count as the app.
         val ps = execAndRead("ps -A -o PID,NAME 2>/dev/null")
         for (line in ps.lines()) {
             val parts = line.trim().split("\\s+".toRegex())

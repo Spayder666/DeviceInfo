@@ -70,6 +70,11 @@ fun eventMatchesCategory(event: CaptureEvent, category: AccessCategory?): Boolea
 fun eventMatchesQuery(event: CaptureEvent, query: String): Boolean {
     if (query.isBlank()) return true
     val q = query.trim()
+    if (event.action.contains(q, ignoreCase = true) ||
+        event.identifierName?.contains(q, ignoreCase = true) == true ||
+        event.requestDetails?.contains(q, ignoreCase = true) == true ||
+        event.responseDetails?.contains(q, ignoreCase = true) == true
+    ) return true
     val io = describeAskedGot(event)
     return event.action.contains(q, ignoreCase = true) ||
         io.asked.contains(q, ignoreCase = true) ||

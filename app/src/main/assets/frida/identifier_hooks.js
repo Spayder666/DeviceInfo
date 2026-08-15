@@ -47,11 +47,50 @@ function flushLine(line) {
   } catch (e) {}
 }
 
-function writeLineAsync(line) {
+var writeQueue = [];
+var flushScheduled = false;
+
+function flushQueue() {
+  if (!writeQueue.length) return;
+  var io = initNativeIo();
+  if (!io) {
+    writeQueue = [];
+    return;
+  }
   try {
-    setTimeout(function () { flushLine(line); }, 0);
+    var path = Memory.allocUtf8String(EVENT_FILE);
+    var mode = Memory.allocUtf8String('a');
+    var fp = io.fopen(path, mode);
+    if (fp.isNull()) {
+      writeQueue = [];
+      return;
+    }
+    for (var i = 0; i < writeQueue.length; i++) {
+      var payload = writeQueue[i] + '\n';
+      var buf = Memory.allocUtf8String(payload);
+      io.fwrite(buf, 1, payload.length, fp);
+    }
+    io.fclose(fp);
+  } catch (e) {}
+  writeQueue = [];
+}
+
+function writeLineAsync(line) {
+  writeQueue.push(line);
+  if (writeQueue.length >= 24) {
+    flushQueue();
+    return;
+  }
+  if (flushScheduled) return;
+  flushScheduled = true;
+  try {
+    setTimeout(function () {
+      flushScheduled = false;
+      flushQueue();
+    }, 60);
   } catch (e) {
-    flushLine(line);
+    flushScheduled = false;
+    flushQueue();
   }
 }
 
@@ -70,8 +109,7 @@ function writeEvent(identifierId, action, request, response, permission, opts) {
     ',"source":"frida"';
   if (opts.cached) line += ',"cached":true';
   line += '}';
-  if (opts.async) writeLineAsync(line);
-  else flushLine(line);
+  writeLineAsync(line);
 }
 
 var lastReq = {};
@@ -265,7 +303,7 @@ function hookTelephonyManager() {
           var args = [];
           for (var i = 0; i < arguments.length; i++) args.push(arguments[i]);
           var result = overload.apply(this, arguments);
-          writeEvent(id, 'TelephonyManager.' + method, JSON.stringify(args), safeStr(result), perm);
+          writeEvent(id, 'TelephonyManager.' + method, summarizeArgs(args), summarizeResult(result), perm);
           return result;
         };
       });
@@ -456,44 +494,6 @@ function hookBuild() {
         return result;
       };
     }
-  } catch (e) {}
-}
-
-function hookBuildFieldAccess() {
-  try {
-    var Field = Java.use('java.lang.reflect.Field');
-    var origGet = Field.get.overload('java.lang.Object');
-    origGet.implementation = function (obj) {
-      var result = origGet.call(this, obj);
-      try {
-        var cls = this.getDeclaringClass().getName();
-        var name = this.getName();
-        if (cls === 'android.os.Build' || cls === 'android.os.Build$VERSION') {
-          writeOnce(
-            cls.indexOf('VERSION') >= 0 ? mapBuildField(name) : mapBuildField(name),
-            'Build.' + name,
-            cls + '.' + name,
-            safeStr(result),
-            null
-          );
-        }
-      } catch (e) {}
-      return result;
-    };
-  } catch (e) {}
-  try {
-    var Cls = Java.use('java.lang.Class');
-    var origGetField = Cls.getField;
-    origGetField.implementation = function (name) {
-      var field = origGetField.call(this, name);
-      try {
-        var cn = this.getName();
-        if (cn === 'android.os.Build' || cn === 'android.os.Build$VERSION') {
-          writeOnce(mapBuildField(name), 'Class.getField', cn + '.' + name, '', null);
-        }
-      } catch (e) {}
-      return field;
-    };
   } catch (e) {}
 }
 
@@ -2260,21 +2260,6 @@ function hookRootDetection() {
 
 function hookRequestSurface() {
   try {
-    var Field = Java.use('java.lang.reflect.Field');
-    var origGet = Field.get.overload('java.lang.Object');
-    origGet.implementation = function (obj) {
-      var result = origGet.call(this, obj);
-      try {
-        var cls = this.getDeclaringClass().getName();
-        var name = this.getName();
-        if (cls === 'android.os.Build' || cls === 'android.os.Build$VERSION') {
-          writeOnce(mapBuildField(name), 'Build.' + name, cls + '.' + name, safeStr(result), null);
-        }
-      } catch (e) {}
-      return result;
-    };
-  } catch (e) {}
-  try {
     var USM = Java.use('android.app.usage.UsageStatsManager');
     ['queryUsageStats', 'queryEvents', 'queryConfigurations'].forEach(function (m) {
       try {
@@ -3007,72 +2992,48 @@ function hookBrowserApis() {
 function installEarlyJavaHooks() {
   writeEvent('frida.init', 'Frida: хуки Java API включены', TARGET_PKG, 'Build / Settings / Telephony', null);
   hookBuild();
-  hookBuildFieldAccess();
   hookSystemProperties();
   hookSettings();
   hookTelephonyManager();
   snapshotBuildFields();
 }
 
-function installJavaHooks() {
-  hookSubscriptionManager();
-  hookWifiAndBluetooth();
-  hookMediaDrm();
-  hookAdvertisingId();
-  hookAccounts();
-  hookNetworkInterface();
-  hookPackageManager();
-  hookContentResolver();
-  hookLocation();
-  hookCamera();
-  hookAudio();
-  hookSensors();
-  hookClipboard();
-  hookSms();
-  hookNetworkDeep();
-  hookBiometric();
-  hookMediaProjection();
-  hookOkHttp();
-  hookHttpUrlConnection();
-  hookWebView();
-  hookSqlite();
-  hookSharedPrefs();
-  hookSensitiveFiles();
-  hookWorkAndGeofence();
-  hookCronetVolleyRetrofit();
-  hookHmsAndFlutter();
-  hookSniAndIntent();
-  hookRequestSurface();
-  hookMissedRequestApis();
-  hookFraudFingerprint();
-  hookFraudSdks();
-  hookBrowserApis();
-  hookMissedSurface();
-  hookRootDetection();
-}
-
-function runJava(fn) {
-  if (typeof Java.performNow === 'function') {
-    try {
-      Java.performNow(fn);
-      return;
-    } catch (e) {}
+function installJavaHookBatches() {
+  var batches = [
+    function () { hookSubscriptionManager(); hookWifiAndBluetooth(); hookMediaDrm(); },
+    function () { hookAdvertisingId(); hookAccounts(); hookNetworkInterface(); },
+    function () { hookPackageManager(); hookContentResolver(); hookLocation(); },
+    function () { hookCamera(); hookAudio(); hookSensors(); hookClipboard(); hookSms(); },
+    function () { hookNetworkDeep(); hookBiometric(); hookMediaProjection(); },
+    function () { hookOkHttp(); hookHttpUrlConnection(); hookWebView(); },
+    function () { hookSqlite(); hookSharedPrefs(); hookWorkAndGeofence(); },
+    function () { hookCronetVolleyRetrofit(); hookHmsAndFlutter(); hookSniAndIntent(); },
+    function () { hookRequestSurface(); hookMissedRequestApis(); },
+    function () { hookFraudFingerprint(); hookFraudSdks(); hookBrowserApis(); },
+    function () { hookMissedSurface(); hookRootDetection(); }
+  ];
+  var i = 0;
+  function next() {
+    if (i >= batches.length) return;
+    try { batches[i++](); } catch (e) {}
+    setTimeout(next, 90);
   }
-  Java.perform(fn);
+  next();
 }
 
-// Build/Settings/Telephony — сразу, иначе чекер успевает прочитать модель до хуков.
-if (Java.available) {
-  runJava(function () {
-    try { installEarlyJavaHooks(); } catch (e) {}
-  });
-}
-
-// Остальные Java-хуки и native file I/O — после старта, чтобы не блокировать запуск.
+// Не трогаем процесс в первые сотни мс — иначе чекер падает и ID не пишутся.
 setTimeout(function () {
   if (Java.available) {
-    runJava(function () {
-      try { installJavaHooks(); } catch (e) {}
+    Java.perform(function () {
+      try { installEarlyJavaHooks(); } catch (e) {}
+    });
+  }
+}, 450);
+
+setTimeout(function () {
+  if (Java.available) {
+    Java.perform(function () {
+      try { installJavaHookBatches(); } catch (e) {}
     });
   }
   try { hookNativeProperties(); } catch (e) {}
@@ -3082,7 +3043,7 @@ setTimeout(function () {
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
-}, 1500);
+}, 2000);
 
 function truncateHttp(buf, maxLen) {
   maxLen = maxLen || 1800;

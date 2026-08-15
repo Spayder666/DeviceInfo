@@ -32,6 +32,7 @@ class AccessMonitorService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var pidWatchJob: Job? = null
     private var notifyJob: Job? = null
+    private var delayedStartJob: Job? = null
 
     private var appOpsMonitor: AppOpsMonitor? = null
     private var logcatMonitor: LogcatMonitor? = null
@@ -120,40 +121,29 @@ class AccessMonitorService : Service() {
             fridaMonitor = FridaMonitor(applicationContext, targetPackage, repository, serviceScope)
                 .also { it.start() }
 
-            locationDumpMonitor = LocationDumpMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            systemLogcatMonitor = SystemLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            comprehensiveDumpMonitor = ComprehensiveDumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            extraChannelMonitor = ExtraChannelMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            extraLogcatMonitor = ExtraLogcatMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            kernelAuditMonitor = KernelAuditMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            cmdApiMonitor = CmdApiMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            inotifyDataMonitor = InotifyDataMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            perfettoMonitor = PerfettoMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            tcpdumpMonitor = TcpdumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            statsdMonitor = StatsdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            ebpfMonitor = EbpfMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            gmsInternalsMonitor = GmsInternalsMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            workManagerMonitor = WorkManagerMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            halGnssMonitor = HalGnssMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            binderIpcMonitor = BinderIpcMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            unixNetdMonitor = UnixNetdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            privacyFgsMonitor = PrivacyFgsMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            syncPushMonitor = SyncPushMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            securityKeystoreMonitor = SecurityKeystoreMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            oemIndoorMonitor = OemIndoorMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            telephonyAccessMonitor = TelephonyAccessMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            rootDetectionMonitor = RootDetectionMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            environmentAnalysisMonitor = EnvironmentAnalysisMonitor(targetPackage, repository, serviceScope).also { it.start() }
-            networkEnvMonitor = NetworkEnvMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-            decisionTracker = DecisionTracker(targetPackage, repository, serviceScope).also { it.start() }
             appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+            locationDumpMonitor = LocationDumpMonitor(targetPackage, repository, serviceScope).also { it.start() }
+            telephonyAccessMonitor = TelephonyAccessMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
             if (targetUid > 0 || targetPid > 0) {
                 logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
             }
-            startStraceForPids(repository)
             if (targetPid > 0) {
                 procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
+            }
+
+            delayedStartJob = serviceScope.launch {
+                repeat(30) {
+                    delay(400)
+                    if (!isActive) return@launch
+                    if (TargetPresence.isAliveNow()) {
+                        delay(2500)
+                        if (isActive && TargetPresence.isAliveNow()) {
+                            startHeavyMonitors(repository)
+                        }
+                        return@launch
+                    }
+                }
             }
 
             pidWatchJob = serviceScope.launch {
@@ -169,9 +159,75 @@ class AccessMonitorService : Service() {
                         targetPid = -1
                         stopProcessMonitors()
                     }
-                    delay(500)
+                    delay(1500)
                 }
             }
+        }
+    }
+
+    private fun startHeavyMonitors(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
+        if (systemLogcatMonitor == null) {
+            systemLogcatMonitor = SystemLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (comprehensiveDumpMonitor == null) {
+            comprehensiveDumpMonitor = ComprehensiveDumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (extraChannelMonitor == null) {
+            extraChannelMonitor = ExtraChannelMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (extraLogcatMonitor == null) {
+            extraLogcatMonitor = ExtraLogcatMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (kernelAuditMonitor == null) {
+            kernelAuditMonitor = KernelAuditMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (cmdApiMonitor == null) {
+            cmdApiMonitor = CmdApiMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (inotifyDataMonitor == null) {
+            inotifyDataMonitor = InotifyDataMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (statsdMonitor == null) {
+            statsdMonitor = StatsdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (gmsInternalsMonitor == null) {
+            gmsInternalsMonitor = GmsInternalsMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (workManagerMonitor == null) {
+            workManagerMonitor = WorkManagerMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (halGnssMonitor == null) {
+            halGnssMonitor = HalGnssMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (unixNetdMonitor == null) {
+            unixNetdMonitor = UnixNetdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (privacyFgsMonitor == null) {
+            privacyFgsMonitor = PrivacyFgsMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (syncPushMonitor == null) {
+            syncPushMonitor = SyncPushMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (securityKeystoreMonitor == null) {
+            securityKeystoreMonitor = SecurityKeystoreMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (oemIndoorMonitor == null) {
+            oemIndoorMonitor = OemIndoorMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (rootDetectionMonitor == null) {
+            rootDetectionMonitor = RootDetectionMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (environmentAnalysisMonitor == null) {
+            environmentAnalysisMonitor = EnvironmentAnalysisMonitor(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (networkEnvMonitor == null) {
+            networkEnvMonitor = NetworkEnvMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (decisionTracker == null) {
+            decisionTracker = DecisionTracker(targetPackage, repository, serviceScope).also { it.start() }
+        }
+        if (FridaInstaller.status != FridaInstaller.FridaStatus.INJECTED) {
+            startStraceForPids(repository)
         }
     }
 
@@ -181,7 +237,9 @@ class AccessMonitorService : Service() {
         if (logcatMonitor == null && (targetUid > 0 || targetPid > 0)) {
             logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
         }
-        startStraceForPids(repository)
+        if (FridaInstaller.status != FridaInstaller.FridaStatus.INJECTED) {
+            startStraceForPids(repository)
+        }
         if (targetPid > 0) {
             procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
         }
@@ -211,6 +269,7 @@ class AccessMonitorService : Service() {
         TargetPresence.end()
         pidWatchJob?.cancel()
         notifyJob?.cancel()
+        delayedStartJob?.cancel()
         appOpsMonitor?.stop()
         logcatMonitor?.stop()
         straceMonitors.forEach { it.stop() }
