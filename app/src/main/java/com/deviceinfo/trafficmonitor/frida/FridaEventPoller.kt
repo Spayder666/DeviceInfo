@@ -75,7 +75,7 @@ class FridaEventPoller(
             val pkg = json.optString("package", "")
             if (pkg.isNotEmpty() && pkg != packageName) return
             val identifierId = json.optString("identifierId", "")
-            if (identifierId == "frida.init") return
+            val cached = json.optBoolean("cached", false)
 
             val action = json.optString("action", identifierId)
             val request = json.optString("request").takeIf { it.isNotEmpty() }
@@ -100,21 +100,33 @@ class FridaEventPoller(
 
             if (repository.isDuplicate(packageName, action, line, sinceMs = 800)) return
 
+            val category = when {
+                resolvedId == "frida.init" -> AccessCategory.SYSTEM_API
+                else -> def?.toAccessCategory()
+                    ?: categoryForIdentifierId(resolvedId)
+                    ?: categoryFor(action, permission, def?.group?.name)
+            }
+
             repository.insert(
                 CaptureEvent(
                     timestamp = timestamp,
                     targetPackage = packageName,
-                    category = def?.toAccessCategory()
-                        ?: categoryForIdentifierId(resolvedId)
-                        ?: categoryFor(action, permission, def?.group?.name),
+                    category = category,
                     source = EventSource.FRIDA,
-                    action = if (verdict != null && resolvedId == "ent.verdict") {
-                        "Integrity verdict: $verdict"
-                    } else {
-                        def?.displayName ?: action
+                    action = when {
+                        resolvedId == "frida.init" -> "Frida: хуки Java API включены"
+                        verdict != null && resolvedId == "ent.verdict" -> "Integrity verdict: $verdict"
+                        else -> def?.displayName ?: action
                     },
                     permission = permission ?: def?.permission,
-                    requestDetails = request?.takeIf { it.isNotEmpty() } ?: def?.api,
+                    requestDetails = when {
+                        cached -> listOfNotNull(
+                            request?.takeIf { it.isNotEmpty() } ?: def?.api,
+                            "уже в памяти процесса"
+                        ).joinToString(" · ")
+                        !request.isNullOrEmpty() -> request
+                        else -> def?.api
+                    },
                     responseDetails = enriched,
                     rawData = line,
                     identifierName = def?.id ?: resolvedId.takeIf { it.isNotEmpty() },

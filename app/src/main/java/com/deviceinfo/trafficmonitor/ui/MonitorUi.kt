@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Link
@@ -45,6 +46,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -336,13 +341,94 @@ private fun ToolPill(
     }
 }
 
+@Composable
+fun AskedDigestCard(items: List<AskedItem>, onSelectId: (String) -> Unit = {}) {
+    if (items.isEmpty()) return
+    var expanded by remember { mutableStateOf(true) }
+    val visible = if (expanded) items.take(14) else items.take(4)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceLift)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Outlined.Devices, null, tint = Accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Что спросили",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text("${items.size}", fontSize = 11.sp, color = Accent, fontWeight = FontWeight.Bold)
+            Icon(
+                if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                null,
+                tint = TextMuted,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        visible.forEach { item ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelectId(item.id) }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    item.title,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.widthIn(max = 150.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(" → ", fontSize = 11.sp, color = Accent)
+                Text(
+                    item.value,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (item.count > 1) {
+                    Text(" ×${item.count}", fontSize = 9.sp, color = TextMuted)
+                }
+            }
+        }
+        if (items.size > visible.size) {
+            Text(
+                "ещё ${items.size - visible.size}",
+                fontSize = 10.sp,
+                color = Accent,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clickable { expanded = true }
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EventRow(item: DisplayEvent, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     val event = item.event
     val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(event.timestamp))
     val color = categoryColor(event.category)
-    val preview = event.responseDetails ?: event.requestDetails ?: event.action
+    val title = eventTitle(event)
+    val preview = eventPreviewLine(event)
     val risk = isHighRisk(event.category)
     Row(
         modifier = Modifier
@@ -371,7 +457,7 @@ fun EventRow(item: DisplayEvent, onClick: () -> Unit, onLongClick: () -> Unit = 
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = event.action,
+                    text = title,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
                     maxLines = 1,
@@ -484,7 +570,7 @@ fun EventDetailSheet(
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(event.action, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                Text(eventTitle(event), style = MaterialTheme.typography.titleMedium, maxLines = 2)
                 Text(categoryFullLabel(event.category), style = MaterialTheme.typography.bodySmall)
             }
             IconButton(onClick = onPrev, enabled = canPrev, modifier = Modifier.size(32.dp)) {
@@ -523,8 +609,8 @@ fun EventDetailSheet(
         event.permission?.let { DetailRow("Право", it, Icons.Outlined.Bolt) }
         event.processId?.let { DetailRow("PID", it.toString()) }
 
-        event.requestDetails?.let { CopySection("Запрос", it) }
-        event.responseDetails?.let { CopySection("Ответ", it, Accent.copy(alpha = 0.12f)) }
+        event.requestDetails?.let { CopySection("Что спросили", it) }
+        event.responseDetails?.let { CopySection("Какое значение", it, Accent.copy(alpha = 0.12f)) }
 
         Button(
             onClick = onProbe,

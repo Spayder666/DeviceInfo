@@ -94,7 +94,7 @@ class SystemLogcatMonitor(
         val permission: String? = null,
         val identifierId: String? = null,
         val group: String? = null,
-        val requirePackage: Boolean = false
+        val requirePackage: Boolean = true
     )
 
     companion object {

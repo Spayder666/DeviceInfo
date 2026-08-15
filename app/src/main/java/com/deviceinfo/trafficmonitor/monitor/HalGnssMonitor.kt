@@ -48,7 +48,9 @@ class HalGnssMonitor(
             "lshal 2>/dev/null | grep -E -i 'gnss|gps|geofence|measurement' | head -n 25",
             timeoutSec = 8
         )
-        emit("GNSS HAL (lshal)", dump)
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("GNSS HAL (lshal)", dump)
+        }
     }
 
     private suspend fun pollHalDump() {
@@ -58,7 +60,9 @@ class HalGnssMonitor(
                 "dumpsys vendor.qti.gnss 2>/dev/null | head -c 6000",
             timeoutSec = 10
         )
-        emit("GNSS HAL dumpsys", dump)
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("GNSS HAL dumpsys", dump)
+        }
     }
 
     private suspend fun pollDevNodes() {
@@ -67,7 +71,9 @@ class HalGnssMonitor(
                 "lsof /dev/gnss0 /dev/gps 2>/dev/null | head -n 15",
             timeoutSec = 8
         )
-        emit("GNSS /dev", dump)
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("GNSS /dev", dump)
+        }
     }
 
     private suspend fun pollVendorFiles() {
@@ -77,7 +83,9 @@ class HalGnssMonitor(
                 "find /data/vendor/gps /data/system/location -type f -mmin -3 2>/dev/null | head -n 20",
             timeoutSec = 8
         )
-        emit("vendor GPS files", dump)
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("vendor GPS files", dump)
+        }
     }
 
     private suspend fun emit(action: String, dump: String) {

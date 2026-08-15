@@ -76,7 +76,7 @@ object FridaInstaller {
 
     private fun prepareDirectory() {
         RootShell.execAndRead("mkdir -p $BASE_DIR && chmod 711 $BASE_DIR")
-        RootShell.execAndRead("touch $EVENTS_PATH && chmod 600 $EVENTS_PATH")
+        RootShell.execAndRead("touch $EVENTS_PATH && chmod 666 $EVENTS_PATH")
     }
 
     private fun tightenEventFilePerms(packageName: String) {
@@ -84,7 +84,7 @@ object FridaInstaller {
         RootShell.execAndRead(
             "touch $EVENTS_PATH $HTTPS_LOG && " +
                 "chown $uid:$uid $EVENTS_PATH $HTTPS_LOG && " +
-                "chmod 711 $BASE_DIR && chmod 660 $EVENTS_PATH $HTTPS_LOG"
+                "chmod 711 $BASE_DIR && chmod 666 $EVENTS_PATH $HTTPS_LOG"
         )
     }
 

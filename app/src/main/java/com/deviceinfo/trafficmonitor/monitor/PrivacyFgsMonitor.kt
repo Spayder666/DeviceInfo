@@ -87,7 +87,7 @@ class PrivacyFgsMonitor(
     }
 
     private suspend fun emit(category: AccessCategory, action: String, dump: String, id: String?) {
-        if (dump.isBlank()) return
+        if (dump.isBlank() || isUselessDump(dump) || !dumpMentionsTarget(dump, packageName)) return
         val snippet = dump.lineSequence().filter { it.isNotBlank() }.take(10).joinToString("\n")
         if (snippet.isBlank()) return
         val key = "$action:${snippet.hashCode()}"

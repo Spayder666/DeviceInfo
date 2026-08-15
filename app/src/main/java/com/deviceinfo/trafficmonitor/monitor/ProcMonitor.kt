@@ -139,6 +139,8 @@ class ProcMonitor(
             val key = "$local->$remote:$state"
             if (knownConnections.put(key, state) != null) continue
 
+            if (isNoiseConnection(local, remote, state)) continue
+
             val dest = "$local $remote".lowercase()
             val locationNet = listOf(":7275", ":7276", ":1883", ":8883", ":5683", "supl").any { it in dest }
             record(
@@ -170,6 +172,16 @@ class ProcMonitor(
             "/data/" in lower || "/storage/" in lower -> AccessCategory.STORAGE
             else -> AccessCategory.OTHER
         }
+    }
+
+    private fun isNoiseConnection(local: String, remote: String, state: String): Boolean {
+        if (state.startsWith("UNKNOWN")) return true
+        val r = remote.substringBefore('%')
+        val wildcard = r.startsWith("0.0.0.0:") || r.startsWith("[::]:") ||
+            r.startsWith(":::0") || r == "0.0.0.0:0" || r.endsWith(":0") && r.startsWith("0.")
+        if (wildcard && state != "LISTEN") return true
+        if (state == "CLOSE" || state == "CLOSING") return true
+        return false
     }
 
     private fun decodeAddress(hex: String): String {

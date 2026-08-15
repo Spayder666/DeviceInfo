@@ -42,16 +42,12 @@ class ExtraLogcatMonitor(
         val mentions = line.contains(packageName) || (uid > 0 && line.contains("uid=$uid"))
         val radio = line.contains("RIL") || line.contains("GSM") || line.contains("UMTS") ||
             line.contains("LTE") || line.contains("NR_") || line.contains("IMS")
-        val sim = Regex("(?i)sim.?state|imsi|iccid|operator|mccmnc|subscriber|iphonesubinfo|getSim").containsMatchIn(line)
         val loc = line.contains("location", ignoreCase = true) || line.contains("gps", ignoreCase = true) ||
             Regex("(?i)GnssAntenna|PlacesClient|Awareness|IZat|findCurrentPlace|AltitudeConverter").containsMatchIn(line)
         val security = Regex("(?i)RootBeer|SafetyNet|PlayIntegrity|IntegrityService|StandardIntegrity|MEETS_DEVICE|Magisk|Xposed|LSPosed|LSPatch|isRooted|frida-server|handleHookedMethod|Talsec|Shamiko|JailMonkey|CertificatePinner").containsMatchIn(line)
         val fraud = Regex("(?i)TMXProfiling|TrustDefender|ThreatMetrix|Tongdun|TrustDecision|Fingerprinter|SeonBuilder|ForterMobile|iovation|SmAntiFraud|siftscience|AppsFlyerLib").containsMatchIn(line)
         val browser = Regex("(?i)SafeBrowsing|CustomTabs|userAgentData|Sec-CH-UA|GeckoView|AwSettings|addJavascriptInterface|FingerprintJS|creepjs|getHighEntropyValues").containsMatchIn(line)
-        if (!mentions && !radio && !loc && !sim && !security && !fraud && !browser) return
-        if (!mentions && radio && !sim && !line.contains("imei", ignoreCase = true) &&
-            !line.contains("cell", ignoreCase = true)
-        ) return
+        if (!mentions) return
 
         val category = when {
             browser -> AccessCategory.IDENTIFIER

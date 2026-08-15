@@ -14,8 +14,10 @@ import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
 import com.deviceinfo.trafficmonitor.probe.IdentifierProbe
 import com.deviceinfo.trafficmonitor.root.RootShell
 import com.deviceinfo.trafficmonitor.mitm.MitmCaManager
+import com.deviceinfo.trafficmonitor.ui.AskedItem
 import com.deviceinfo.trafficmonitor.ui.DisplayEvent
 import com.deviceinfo.trafficmonitor.ui.SessionStats
+import com.deviceinfo.trafficmonitor.ui.buildAskedDigest
 import com.deviceinfo.trafficmonitor.ui.buildSessionStats
 import com.deviceinfo.trafficmonitor.ui.collapseRepeats
 import com.deviceinfo.trafficmonitor.ui.eventMatchesCategory
@@ -182,6 +184,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         .map { buildSessionStats(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SessionStats())
 
+    val askedDigest: StateFlow<List<AskedItem>> = _allEvents
+        .map { buildAskedDigest(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val sourceCounts: StateFlow<Map<EventSource, Int>> = _allEvents
         .map { list -> list.groupingBy { it.source }.eachCount() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -284,6 +290,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun filterByAction(action: String) {
         _showSearch.value = true
         _searchQuery.value = action
+    }
+
+    fun filterByIdentifier(id: String) {
+        _selectedCategory.value = AccessCategory.IDENTIFIER
+        _showSearch.value = true
+        _searchQuery.value = id
+        persistFilters()
     }
 
     private fun persistFilters() {

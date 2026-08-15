@@ -61,19 +61,23 @@ class TelephonyAccessMonitor(
             "dumpsys telephony.registry 2>/dev/null | grep -n -i -E '$packageName|uid=$uid' | head -n 20",
             timeoutSec = 8
         )
-        emitDump("telephony.registry", "tel.sim_state", registry)
+        if (dumpMentionsTarget(registry, packageName, uid)) {
+            emitDump("telephony.registry", "tel.sim_state", registry)
+        }
 
         val isub = RootShell.execAndRead(
             "dumpsys isub 2>/dev/null | grep -n -i -E '$packageName|uid=$uid' | head -n 20",
             timeoutSec = 8
         )
-        emitDump("subscription / isub", "sub.subscription_id", isub)
+        if (dumpMentionsTarget(isub, packageName, uid)) {
+            emitDump("subscription / isub", "sub.subscription_id", isub)
+        }
 
         val appops = RootShell.execAndRead(
             "cmd appops get $packageName 2>/dev/null | grep -i -E 'PHONE|SMS|CALL|ICC'",
             timeoutSec = 6
         )
-        emitDump("appops phone", "tel.imei", appops)
+        emitRecentPhoneOps(appops)
     }
 
     private suspend fun parseLog(line: String) {
@@ -101,6 +105,28 @@ class TelephonyAccessMonitor(
             identifierId = id,
             source = EventSource.LOGCAT
         )
+    }
+
+    private suspend fun emitRecentPhoneOps(dump: String) {
+        if (dump.isBlank() || isUselessDump(dump)) return
+        for (line in dump.lineSequence()) {
+            if (line.isBlank() || !isRecentAccessStamp(line)) continue
+            val op = Regex("""([A-Z_]+)""").find(line)?.groupValues?.get(1) ?: continue
+            val id = when {
+                op.contains("IMEI") || op.contains("DEVICE_IDENTIFIER") || op == "READ_PHONE_STATE" -> "tel.imei"
+                op.contains("PHONE_NUMBER") || op.contains("SMS") -> "tel.line1_number"
+                op.contains("ICC") -> "tel.sim_serial"
+                else -> "tel.phone_interface"
+            }
+            emit(
+                action = op,
+                request = "AppOps $op",
+                response = line.trim().take(200),
+                raw = line.trim(),
+                identifierId = id,
+                source = EventSource.DUMPSYS
+            )
+        }
     }
 
     private suspend fun emitDump(action: String, identifierId: String, dump: String) {

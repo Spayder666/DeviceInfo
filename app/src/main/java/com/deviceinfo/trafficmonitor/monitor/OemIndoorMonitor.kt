@@ -51,7 +51,9 @@ class OemIndoorMonitor(
                 "dumpsys vendor.qti.gnss 2>/dev/null | grep -A3 -F '$packageName' | head -n 16",
             timeoutSec = 10
         )
-        emit("OEM location (IZat/HMS/SEM)", dump, "location.gms")
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("OEM location (IZat/HMS/SEM)", dump, "location.gms")
+        }
     }
 
     private suspend fun pollRtt() {
@@ -60,9 +62,8 @@ class OemIndoorMonitor(
                 "dumpsys wifi 2>/dev/null | grep -A4 -E -i 'RTT|ranging|$packageName' | head -n 20",
             timeoutSec = 10
         )
-        if (!dump.contains(packageName) && !dump.contains("Ranging", ignoreCase = true) &&
-            !dump.contains("RTT")
-        ) return
+        if (!dumpMentionsTarget(dump, packageName)) return
+        if (isUselessDump(dump)) return
         emit("Wi‑Fi RTT / ranging", dump, "location.wifi_rtt")
     }
 
@@ -72,7 +73,9 @@ class OemIndoorMonitor(
                 "cmd uwb 2>/dev/null | head -n 15",
             timeoutSec = 8
         )
-        emit("UWB ranging", dump, "location.uwb")
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("UWB ranging", dump, "location.uwb")
+        }
     }
 
     private suspend fun pollAware() {
@@ -81,11 +84,13 @@ class OemIndoorMonitor(
                 "dumpsys wifiscanner 2>/dev/null | grep -A3 -F '$packageName' | head -n 16",
             timeoutSec = 8
         )
-        emit("Wi‑Fi Aware / scanner", dump, "location.wifi_scan")
+        if (dumpMentionsTarget(dump, packageName)) {
+            emit("Wi‑Fi Aware / scanner", dump, "location.wifi_scan")
+        }
     }
 
     private suspend fun emit(action: String, dump: String, id: String) {
-        if (dump.isBlank()) return
+        if (dump.isBlank() || isUselessDump(dump)) return
         val snippet = dump.lineSequence().filter { it.isNotBlank() }.take(10).joinToString("\n")
         if (snippet.isBlank()) return
         val key = "$action:${snippet.hashCode()}"

@@ -68,7 +68,7 @@ class BinderIpcMonitor(
     }
 
     private suspend fun emit(action: String, dump: String) {
-        if (dump.isBlank() || dump.contains("Unknown command", ignoreCase = true)) return
+        if (dump.isBlank() || isUselessDump(dump) || !dumpMentionsTarget(dump, packageName, uid)) return
         val snippet = dump.lineSequence().filter { it.isNotBlank() }.take(12).joinToString("\n")
         if (snippet.isBlank()) return
         val key = "$action:${snippet.hashCode()}"

@@ -169,11 +169,7 @@ class AppOpsMonitor(
         seeded = true
     }
 
-    private fun isRecentAccess(accessTime: String): Boolean {
-        val seconds = Regex("""\+(\d+)s""").find(accessTime)?.groupValues?.get(1)?.toIntOrNull()
-        if (seconds != null) return seconds <= 180
-        return Regex("""\+\d+ms""").containsMatchIn(accessTime)
-    }
+    private fun isRecentAccess(accessTime: String): Boolean = isRecentAccessStamp(accessTime)
 
     private suspend fun record(
         category: AccessCategory,

@@ -49,10 +49,7 @@ class CmdApiMonitor(
     private suspend fun poll(cmd: CmdTarget) {
         val raw = RootShell.execAndRead(cmd.command, timeoutSec = 8).trim()
         if (raw.isBlank()) return
-        if (raw.contains("Unknown command", ignoreCase = true) ||
-            raw.contains("Can't find service", ignoreCase = true) ||
-            raw.contains("Permission Denial", ignoreCase = true)
-        ) return
+        if (isUselessDump(raw)) return
 
         val mentions = raw.contains(packageName) ||
             (uid > 0 && (raw.contains("uid=$uid") || raw.contains("u0a${uid % 100000}")))
@@ -104,69 +101,78 @@ class CmdApiMonitor(
             "cmd location enabled",
             AccessCategory.LOCATION,
             "location.gps",
-            "LOCATION"
+            "LOCATION",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd location get-last-location 2>/dev/null",
             "cmd location last",
             AccessCategory.LOCATION,
             "location.gps",
-            "LOCATION"
+            "LOCATION",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd location providers 2>/dev/null || cmd location list-providers 2>/dev/null",
             "cmd location providers",
             AccessCategory.LOCATION,
             "location.gps",
-            "LOCATION"
+            "LOCATION",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd wifi status 2>/dev/null",
             "cmd wifi status",
             AccessCategory.NETWORK,
             "wifi.ssid",
-            "WIFI"
+            "WIFI",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd wifi get-ipaddress 2>/dev/null",
             "cmd wifi IP",
             AccessCategory.NETWORK,
             "net.link_addresses",
-            "NETWORK"
+            "NETWORK",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd bluetooth_manager get-address 2>/dev/null",
             "cmd bluetooth address",
             AccessCategory.BLUETOOTH,
             "bt.local_mac",
-            "BLUETOOTH"
+            "BLUETOOTH",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd bluetooth_manager get-name 2>/dev/null",
             "cmd bluetooth name",
             AccessCategory.BLUETOOTH,
             "bt.local_name",
-            "BLUETOOTH"
+            "BLUETOOTH",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd connectivity get-active-network 2>/dev/null",
             "cmd connectivity",
             AccessCategory.NETWORK,
             "net.link_addresses",
-            "NETWORK"
+            "NETWORK",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd phone has-icc-card 2>/dev/null",
             "cmd phone SIM",
             AccessCategory.TELEPHONY,
             "tel.imei",
-            "TELEPHONY"
+            "TELEPHONY",
+            requirePackage = true
         ),
         CmdTarget(
             "cmd appops get $packageName 2>/dev/null | head -n 40",
             "cmd appops",
             AccessCategory.PERMISSION,
-            requirePackage = false
+            requirePackage = true
         ),
         CmdTarget(
             "cmd activity get-uid-state $packageName 2>/dev/null",
@@ -183,7 +189,8 @@ class CmdApiMonitor(
             "cmd device_policy",
             AccessCategory.IDENTIFIER,
             "ent.esid",
-            "ENTERPRISE"
+            "ENTERPRISE",
+            requirePackage = true
         )
     )
 }

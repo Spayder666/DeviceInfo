@@ -47,7 +47,7 @@ function flushLine(line) {
   } catch (e) {}
 }
 
-function writeLine(line) {
+function writeLineAsync(line) {
   try {
     setTimeout(function () { flushLine(line); }, 0);
   } catch (e) {
@@ -55,7 +55,8 @@ function writeLine(line) {
   }
 }
 
-function writeEvent(identifierId, action, request, response, permission) {
+function writeEvent(identifierId, action, request, response, permission, opts) {
+  opts = opts || {};
   var ts = Date.now();
   var line = '{"identifierId":"' + jsonEscape(identifierId || '') +
     '","action":"' + jsonEscape(action || '') +
@@ -64,25 +65,28 @@ function writeEvent(identifierId, action, request, response, permission) {
     '","permission":"' + jsonEscape(permission || '') +
     '","package":"' + jsonEscape(TARGET_PKG) +
     '","timestamp":' + ts +
-    ',"source":"frida"}';
-  writeLine(line);
+    ',"source":"frida"';
+  if (opts.cached) line += ',"cached":true';
+  line += '}';
+  if (opts.async) writeLineAsync(line);
+  else flushLine(line);
 }
 
 var lastReq = {};
-function writeReq(identifierId, action, request, response, permission) {
+function writeReq(identifierId, action, request, response, permission, opts) {
   var key = (identifierId || '') + '|' + (action || '') + '|' + (request || '');
   var now = Date.now();
   if (lastReq[key] && now - lastReq[key] < 800) return;
   lastReq[key] = now;
-  writeEvent(identifierId, action, request, response, permission);
+  writeEvent(identifierId, action, request, response, permission, opts);
 }
 
 var onceReq = {};
-function writeOnce(identifierId, action, request, response, permission) {
+function writeOnce(identifierId, action, request, response, permission, opts) {
   var key = (identifierId || '') + '|' + (action || '') + '|' + (request || '');
   if (onceReq[key]) return;
   onceReq[key] = 1;
-  writeEvent(identifierId, action, request, response, permission);
+  writeEvent(identifierId, action, request, response, permission, opts);
 }
 
 function classifyBrowserJs(script) {
@@ -353,7 +357,10 @@ function hookSystemProperties() {
 
 function isInterestingProperty(key) {
   if (!key) return false;
-  return key.indexOf('ro.serial') === 0 ||
+  return key.indexOf('ro.product.') === 0 ||
+    key.indexOf('ro.build.') === 0 ||
+    key.indexOf('ro.soc.') === 0 ||
+    key.indexOf('ro.serial') === 0 ||
     key.indexOf('ro.boot.serial') === 0 ||
     key.indexOf('persist.radio') === 0 ||
     key.indexOf('gsm.') === 0 ||
@@ -437,6 +444,126 @@ function hookBuild() {
       writeEvent('build.serial', 'Build.getSerial()', '', safeStr(result), 'READ_PRIVILEGED_PHONE_STATE');
       return result;
     };
+  } catch (e) {}
+  try {
+    var Build2 = Java.use('android.os.Build');
+    if (Build2.getRadioVersion) {
+      Build2.getRadioVersion.implementation = function () {
+        var result = this.getRadioVersion();
+        writeEvent('build.radio', 'Build.getRadioVersion()', '', safeStr(result), null);
+        return result;
+      };
+    }
+  } catch (e) {}
+}
+
+function hookBuildFieldAccess() {
+  try {
+    var Field = Java.use('java.lang.reflect.Field');
+    var origGet = Field.get.overload('java.lang.Object');
+    origGet.implementation = function (obj) {
+      var result = origGet.call(this, obj);
+      try {
+        var cls = this.getDeclaringClass().getName();
+        var name = this.getName();
+        if (cls === 'android.os.Build' || cls === 'android.os.Build$VERSION') {
+          writeOnce(
+            cls.indexOf('VERSION') >= 0 ? mapBuildField(name) : mapBuildField(name),
+            'Build.' + name,
+            cls + '.' + name,
+            safeStr(result),
+            null
+          );
+        }
+      } catch (e) {}
+      return result;
+    };
+  } catch (e) {}
+  try {
+    var Cls = Java.use('java.lang.Class');
+    var origGetField = Cls.getField;
+    origGetField.implementation = function (name) {
+      var field = origGetField.call(this, name);
+      try {
+        var cn = this.getName();
+        if (cn === 'android.os.Build' || cn === 'android.os.Build$VERSION') {
+          writeOnce(mapBuildField(name), 'Class.getField', cn + '.' + name, '', null);
+        }
+      } catch (e) {}
+      return field;
+    };
+  } catch (e) {}
+}
+
+function snapshotBuildFields() {
+  var pairs = [
+    ['MODEL', 'build.model'], ['MANUFACTURER', 'build.manufacturer'],
+    ['BRAND', 'build.brand'], ['DEVICE', 'build.device'],
+    ['PRODUCT', 'build.product'], ['HARDWARE', 'build.hardware'],
+    ['BOARD', 'build.board'], ['FINGERPRINT', 'build.fingerprint'],
+    ['DISPLAY', 'build.display'], ['ID', 'build.id'],
+    ['HOST', 'build.host'], ['TAGS', 'build.tags'],
+    ['TYPE', 'build.type'], ['USER', 'build.user'],
+    ['BOOTLOADER', 'build.bootloader']
+  ];
+  try {
+    var Build = Java.use('android.os.Build');
+    pairs.forEach(function (pair) {
+      try {
+        var val = safeStr(Build[pair[0]].value);
+        if (!val) return;
+        writeOnce(
+          pair[1],
+          'Build.' + pair[0],
+          'android.os.Build.' + pair[0],
+          val,
+          null,
+          { cached: true }
+        );
+      } catch (e) {}
+    });
+    try {
+      var abis = Build.SUPPORTED_ABIS.value;
+      if (abis) {
+        writeOnce(
+          'build.supported_abis',
+          'Build.SUPPORTED_ABIS',
+          'android.os.Build.SUPPORTED_ABIS',
+          safeStr(abis),
+          null,
+          { cached: true }
+        );
+      }
+    } catch (e) {}
+  } catch (e) {}
+  try {
+    var Version = Java.use('android.os.Build$VERSION');
+    writeOnce(
+      'version.release',
+      'Build.VERSION.RELEASE',
+      'android.os.Build.VERSION.RELEASE',
+      safeStr(Version.RELEASE.value),
+      null,
+      { cached: true }
+    );
+    writeOnce(
+      'version.sdk',
+      'Build.VERSION.SDK_INT',
+      'android.os.Build.VERSION.SDK_INT',
+      safeStr(Version.SDK_INT.value),
+      null,
+      { cached: true }
+    );
+    try {
+      writeOnce(
+        'version.security_patch',
+        'Build.VERSION.SECURITY_PATCH',
+        'android.os.Build.VERSION.SECURITY_PATCH',
+        safeStr(Version.SECURITY_PATCH.value),
+        null,
+        { cached: true }
+      );
+    } catch (e) {}
   } catch (e) {}
 }
 
@@ -835,7 +962,7 @@ function hookNativeProperties() {
         } else {
           response = '(ошибка, код=' + len + ')';
         }
-        writeEvent(mapPropertyToId(this.key), '__system_property_get', this.key, response, null);
+        writeEvent(mapPropertyToId(this.key), '__system_property_get', this.key, response, null, { async: true });
       }
     });
   } catch (e) {}
@@ -2139,7 +2266,7 @@ function hookRequestSurface() {
         var cls = this.getDeclaringClass().getName();
         var name = this.getName();
         if (cls === 'android.os.Build' || cls === 'android.os.Build$VERSION') {
-          writeOnce(cls.indexOf('VERSION') >= 0 ? 'version.release' : mapBuildField(name), 'Build.' + name + ' (reflect)', cls, safeStr(result), null);
+          writeOnce(mapBuildField(name), 'Build.' + name, cls + '.' + name, safeStr(result), null);
         }
       } catch (e) {}
       return result;
@@ -2804,12 +2931,17 @@ function hookBrowserApis() {
   } catch (e) {}
 }
 
-function installJavaHooks() {
-  writeEvent('frida.init', 'Frida hooks loaded', TARGET_PKG, '', null);
+function installEarlyJavaHooks() {
+  writeEvent('frida.init', 'Frida: хуки Java API включены', TARGET_PKG, 'Build / Settings / Telephony', null);
   hookBuild();
+  hookBuildFieldAccess();
   hookSystemProperties();
   hookSettings();
   hookTelephonyManager();
+  snapshotBuildFields();
+}
+
+function installJavaHooks() {
   hookSubscriptionManager();
   hookWifiAndBluetooth();
   hookMediaDrm();
@@ -2846,10 +2978,27 @@ function installJavaHooks() {
   hookRootDetection();
 }
 
-// Хуки ставим после старта приложения, чтобы не блокировать запуск.
+function runJava(fn) {
+  if (typeof Java.performNow === 'function') {
+    try {
+      Java.performNow(fn);
+      return;
+    } catch (e) {}
+  }
+  Java.perform(fn);
+}
+
+// Build/Settings/Telephony — сразу, иначе чекер успевает прочитать модель до хуков.
+if (Java.available) {
+  runJava(function () {
+    try { installEarlyJavaHooks(); } catch (e) {}
+  });
+}
+
+// Остальные Java-хуки и native file I/O — после старта, чтобы не блокировать запуск.
 setTimeout(function () {
   if (Java.available) {
-    Java.perform(function () {
+    runJava(function () {
       try { installJavaHooks(); } catch (e) {}
     });
   }

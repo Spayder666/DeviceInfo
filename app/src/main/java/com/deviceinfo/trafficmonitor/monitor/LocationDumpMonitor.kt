@@ -149,7 +149,7 @@ class LocationDumpMonitor(
             interval?.let { "interval=${it}ms" },
             ttff?.let { "TTFF=$it" }
         ).joinToString(" ")
-        if (summary.isBlank()) return
+        if (summary.isBlank() || !dump.contains(packageName)) return
         val key = "gnss:$summary"
         if (seen.put(key, summary) != null) return
         record(
@@ -175,7 +175,7 @@ class LocationDumpMonitor(
             val stamp = access?.groupValues?.get(2)?.trim()
                 ?: inline?.groupValues?.get(2)?.trim()
                 ?: continue
-            if (stamp.isBlank()) continue
+            if (stamp.isBlank() || !isRecentAccessStamp(stamp)) continue
             val key = "op:$op:$stamp"
             if (seen.put(key, stamp) != null) continue
             val delivered = op.startsWith("MONITOR")
