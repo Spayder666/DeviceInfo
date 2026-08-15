@@ -3028,7 +3028,7 @@ function installJavaHooks() {
   hookRootDetection();
 }
 
-// Пишем boot сразу — если этого нет в логе, файл недоступен процессу цели.
+// Boot only — no Java.perform / Interceptor at parse time (that Aborts zygote children).
 try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
 
 function tryInstallIdentifierHooks() {
@@ -3040,15 +3040,16 @@ function tryInstallIdentifierHooks() {
   return identifierHooksInstalled;
 }
 
-try { tryInstallIdentifierHooks(); } catch (e) {}
-try { hookNativeProperties(); } catch (e) {}
-
+var nativePropsHooked = false;
 var installTries = 0;
 var installTimer = setInterval(function () {
   installTries++;
   try { tryInstallIdentifierHooks(); } catch (e) {}
+  if (!nativePropsHooked) {
+    try { hookNativeProperties(); nativePropsHooked = true; } catch (e) {}
+  }
   if (identifierHooksInstalled || installTries > 40) clearInterval(installTimer);
-}, 100);
+}, 150);
 
 setTimeout(function () {
   if (Java.available) {

@@ -252,9 +252,11 @@ object FridaInstaller {
                 live
             }
 
-            val already = isInjectorRunning()
-            val injected = if (already) pids.size else pids.take(6).count { startInjector(it) }
-            if (injected == 0 && !already) {
+            if (injectLogsFailed()) {
+                stopInjector()
+            }
+            val injected = pids.take(6).count { startInjector(it, packageName) }
+            if (injected == 0) {
                 return@withContext false
             }
 
@@ -274,7 +276,7 @@ object FridaInstaller {
     private suspend fun waitForScriptBoot(): Boolean {
         val nonce = lastNonce
         if (nonce.isBlank()) return false
-        repeat(25) {
+        repeat(40) {
             val dump = RootShell.execAndRead(
                 "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null; " +
                     "cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null",
@@ -299,8 +301,8 @@ object FridaInstaller {
     }
 
     /**
-     * Посредник с первого PID: крутим pidof ещё до am start и инжектим сразу,
-     * не клонируя приложение в виртуальный контейнер.
+     * Ждём PID и конец specialize (не zygote). Инжект делает startInjector —
+     * слишком ранний ptrace даёт только «Aborted».
      */
     private suspend fun spawnAndInject(packageName: String): List<Int>? {
         RootShell.execAndRead("am force-stop $packageName")
@@ -308,20 +310,19 @@ object FridaInstaller {
         installSpawnWaiter()
         RootShell.execAndRead("rm -f $SPAWN_FLAG")
         RootShell.execDetached(
-            "sh $SPAWN_WAIT ${RootShell.shellQuote(packageName)} " +
-                "$INJECT_PATH $HOOKS_PATH $BASE_DIR"
+            "sh $SPAWN_WAIT ${RootShell.shellQuote(packageName)} $BASE_DIR"
         )
         delay(30)
         if (!RootShell.launchApp(packageName)) {
             lastError = "Не удалось запустить приложение"
             return null
         }
-        repeat(50) {
+        repeat(100) {
             val flag = RootShell.execAndRead("cat $SPAWN_FLAG 2>/dev/null").trim()
             if (flag == "ok" || flag == "timeout") {
                 return RootShell.findAllPids(packageName).takeIf { it.isNotEmpty() }
             }
-            delay(40)
+            delay(100)
         }
         return RootShell.findAllPids(packageName).takeIf { it.isNotEmpty() }
     }
@@ -330,16 +331,32 @@ object FridaInstaller {
         val script = """
             #!/system/bin/sh
             pkg="${'$'}1"
-            inject="${'$'}2"
-            script="${'$'}3"
-            dir="${'$'}4"
+            dir="${'$'}2"
             i=0
             while [ ${'$'}i -lt 400 ]; do
               pids=`pidof "${'$'}pkg" 2>/dev/null`
               if [ -n "${'$'}pids" ]; then
                 for p in ${'$'}pids; do
-                  echo -n > "${'$'}dir/inject.log.${'$'}p"
-                  "${'$'}inject" -p "${'$'}p" -s "${'$'}script" -e > "${'$'}dir/inject.log.${'$'}p" 2>&1 &
+                  n=0
+                  while [ ${'$'}n -lt 200 ]; do
+                    comm=`cat /proc/${'$'}p/comm 2>/dev/null`
+                    case "${'$'}comm" in zygote|zygote64|"") n=$((n+1)); usleep 30000 2>/dev/null || sleep 0.03; continue ;; esac
+                    if grep -q "/data/app/" /proc/${'$'}p/maps 2>/dev/null && grep -q "${'$'}pkg" /proc/${'$'}p/maps 2>/dev/null; then
+                      usleep 200000 2>/dev/null || sleep 0.2
+                      break
+                    fi
+                    ctx=`cat /proc/${'$'}p/attr/current 2>/dev/null`
+                    case "${'$'}ctx" in *untrusted_app*|*priv_app*)
+                      usleep 200000 2>/dev/null || sleep 0.2
+                      break
+                    ;; esac
+                    if cat /proc/${'$'}p/task/*/comm 2>/dev/null | grep -q HeapTaskDaemon; then
+                      usleep 200000 2>/dev/null || sleep 0.2
+                      break
+                    fi
+                    n=$((n+1))
+                    usleep 30000 2>/dev/null || sleep 0.03
+                  done
                 done
                 echo ok > "${'$'}dir/spawn.ok"
                 exit 0
@@ -356,34 +373,66 @@ object FridaInstaller {
         local.delete()
     }
 
-    private fun isInjectorRunning(): Boolean =
-        RootShell.execAndRead("pgrep -f '$INJECT_PATH' 2>/dev/null").trim().isNotEmpty()
-
     private fun preparePtrace() {
         RootShell.execAndRead("setenforce 0 2>/dev/null")
         RootShell.execAndRead("echo 0 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null")
         RootShell.execAndRead("chmod 711 $BASE_DIR && chmod 644 $HOOKS_PATH 2>/dev/null")
     }
 
-    private fun startInjector(pid: Int): Boolean {
+    /**
+     * libart.so is already mapped in zygote children — that is not "ready".
+     * Wait until the app finished specialize (apk mapped / app SELinux / ART threads).
+     */
+    private fun isProcessReady(pid: Int, packageName: String): Boolean {
+        val comm = RootShell.execAndRead("cat /proc/$pid/comm 2>/dev/null").trim()
+        if (comm.isEmpty() || comm.startsWith("zygote")) return false
+        val maps = RootShell.execAndRead("grep -E '/data/app/|$packageName' /proc/$pid/maps 2>/dev/null | head -n 3")
+        if (maps.contains("/data/app/") && maps.contains(packageName)) return true
+        val ctx = RootShell.execAndRead("cat /proc/$pid/attr/current 2>/dev/null")
+        if (ctx.contains("untrusted_app") || ctx.contains("priv_app")) return true
+        val threads = RootShell.execAndRead("cat /proc/$pid/task/*/comm 2>/dev/null")
+        return threads.contains("HeapTaskDaemon") || threads.contains("Jit thread pool")
+    }
+
+    private fun waitForProcessReady(pid: Int, packageName: String): Boolean {
+        repeat(100) {
+            if (isProcessReady(pid, packageName)) {
+                Thread.sleep(200)
+                return true
+            }
+            Thread.sleep(80)
+        }
+        return RootShell.execAndRead("kill -0 $pid 2>/dev/null && echo ok").trim() == "ok"
+    }
+
+    private fun injectLogsFailed(): Boolean {
+        val log = RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")
+        return looksLikeInjectFailure(log)
+    }
+
+    private fun startInjector(pid: Int, packageName: String): Boolean {
+        if (!waitForProcessReady(pid, packageName)) {
+            lastError = "Процесс $pid ещё не специализирован (zygote) — инжект прерван"
+            return false
+        }
         val log = "$INJECT_LOG.$pid"
         RootShell.execAndRead("echo -n > $log")
-        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH -e"
+        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH -e --runtime=qjs"
         RootShell.execDetached("$cmd > $log 2>&1")
 
         var lastLog = ""
         repeat(16) {
             Thread.sleep(150)
             lastLog = RootShell.execAndRead("cat $log 2>/dev/null").trim()
-            val running = RootShell.execAndRead(
-                "pgrep -f '$INJECT_PATH' 2>/dev/null"
-            ).trim().isNotEmpty()
-            if (!looksLikeInjectFailure(lastLog) && (running || looksLikeInjectSuccess(lastLog))) {
-                return true
-            }
             if (looksLikeInjectFailure(lastLog)) {
                 lastError = "frida-inject: ${lastLog.take(220)}"
                 return false
+            }
+            val running = RootShell.execAndRead(
+                "pgrep -f '$INJECT_PATH' 2>/dev/null"
+            ).trim().isNotEmpty()
+            if (running || looksLikeInjectSuccess(lastLog)) {
+                return true
             }
         }
 
@@ -398,8 +447,9 @@ object FridaInstaller {
     private fun looksLikeInjectFailure(log: String): Boolean {
         if (log.isBlank()) return false
         val lower = log.lowercase()
-        return listOf("unable to", "failed", "error:", "permission denied", "not found", "cannot")
-            .any { it in lower }
+        return listOf(
+            "unable to", "failed", "error:", "permission denied", "not found", "cannot", "aborted"
+        ).any { it in lower }
     }
 
     private fun looksLikeInjectSuccess(log: String): Boolean {
