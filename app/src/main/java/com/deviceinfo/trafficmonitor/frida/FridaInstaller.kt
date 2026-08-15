@@ -352,7 +352,7 @@ object FridaInstaller {
             val isolated = cmd.contains(":") || cmd.contains("isolated")
             pid to Pair(cmd, isolated)
         }
-        scored.firstOrNull { (pid, info) ->
+        scored.firstOrNull { (_, info) ->
             !info.second && (info.first == packageName || info.first.startsWith("$packageName "))
         }?.let { return it.first }
         scored.firstOrNull { !it.second.second }?.let { return it.first }
