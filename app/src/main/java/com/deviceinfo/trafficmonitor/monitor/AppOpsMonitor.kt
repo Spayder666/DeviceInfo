@@ -125,7 +125,7 @@ class AppOpsMonitor(
                 val mode = accessMatch.groupValues[1]
                 val accessTime = accessMatch.groupValues[2].trim().ifBlank { mode }
                 val stateKey = "$currentOp:$mode"
-                if (stateKey in lastState) continue
+                if (lastState.containsKey(stateKey)) continue
                 val shouldEmit = emit || isRecentAccess(accessTime)
                 if (shouldEmit) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
@@ -147,7 +147,7 @@ class AppOpsMonitor(
             if (rejectMatch != null) {
                 val rejectTime = rejectMatch.groupValues[1]
                 val stateKey = "reject:$currentOp"
-                if (stateKey in lastState) continue
+                if (lastState.containsKey(stateKey)) continue
                 val shouldEmit = emit || isRecentAccess(rejectTime)
                 if (shouldEmit) {
                     val ok = record(

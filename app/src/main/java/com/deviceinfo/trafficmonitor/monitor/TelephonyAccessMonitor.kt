@@ -150,7 +150,7 @@ class TelephonyAccessMonitor(
         source: EventSource = EventSource.DUMPSYS
     ) {
         val key = "$action:${raw.hashCode()}"
-        if (key in seen) return
+        if (seen.containsKey(key)) return
         if (repository.isDuplicate(packageName, action, raw, sinceMs = 4000)) {
             seen[key] = "1"
             return

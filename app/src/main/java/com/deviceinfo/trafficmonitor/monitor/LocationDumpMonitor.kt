@@ -70,7 +70,7 @@ class LocationDumpMonitor(
             val extra = match.groupValues[4]
             val acc = Regex("hAcc=([^\\s\\]]+)").find(extra)?.groupValues?.get(1)
             val key = "last:$provider:$lat:$lon"
-            if (key in seen) continue
+            if (seen.containsKey(key)) continue
 
             val id = when (provider.lowercase()) {
                 "gps", "gnss" -> "location.gps"
@@ -106,7 +106,7 @@ class LocationDumpMonitor(
             ?: Regex("(?i)provider[=:]\\s*(\\w+)").find(window)?.groupValues?.get(1)
 
         val key = "reg:$packageName:${request ?: window.hashCode()}"
-        if (key in seen) return
+        if (seen.containsKey(key)) return
 
         val ok = record(
             action = "Приложение подписано на локацию",
@@ -133,7 +133,7 @@ class LocationDumpMonitor(
             ) continue
             if (!line.contains(packageName) && !line.contains("request")) continue
             val key = "hist:${line.trim()}"
-            if (key in seen) continue
+            if (seen.containsKey(key)) continue
             if (!line.contains(packageName)) continue
             val ok = record(
                 action = "Запрос локации (история LMS)",
@@ -160,7 +160,7 @@ class LocationDumpMonitor(
         ).joinToString(" ")
         if (summary.isBlank() || !dump.contains(packageName)) return
         val key = "gnss:$summary"
-        if (key in seen) return
+        if (seen.containsKey(key)) return
         val ok = record(
             action = "GNSS HAL",
             request = "dumpsys gnss",
@@ -187,7 +187,7 @@ class LocationDumpMonitor(
                 ?: continue
             if (stamp.isBlank() || !isRecentAccessStamp(stamp)) continue
             val key = "op:$op"
-            if (key in seen) continue
+            if (seen.containsKey(key)) continue
             val delivered = op.startsWith("MONITOR")
             val ok = record(
                 action = if (delivered) "Доставка локации ($op)" else "Доступ к $op",
@@ -220,7 +220,7 @@ class LocationDumpMonitor(
         }.joinToString("\n").take(400)
         if (snippet.isBlank()) return
         val fgsKey = "fgs:$packageName:${snippet.take(80)}"
-        if (fgsKey in seen) return
+        if (seen.containsKey(fgsKey)) return
         val ok = record(
             action = "Foreground service (location)",
             request = "dumpsys activity services $packageName",
