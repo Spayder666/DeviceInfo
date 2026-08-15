@@ -405,6 +405,7 @@ object FridaInstaller {
         val ok = try {
             startKeptInjector("$INJECT_PATH -p $pid -s $scriptPath > $log 2>&1")
             if (waitInjectorSettled(log)) return true
+            RootShell.execAndRead("echo -n > $log")
             startKeptInjector(
                 "$INJECT_PATH -n ${RootShell.shellQuote(packageName)} -s $scriptPath > $log 2>&1"
             )
