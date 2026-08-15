@@ -331,6 +331,8 @@ object FridaInstaller {
             lastError = when {
                 zlog.contains("dlopen=ok") ->
                     "Gadget в процессе есть, но скрипт не ответил. $zlog ${gadgetLog.take(160)}"
+                "scheduled=1" in zlog ->
+                    "Zygisk отложил загрузку, но скрипт не ответил. Перезапустите цель ещё раз. ${gadgetLog.take(160)}"
                 zlog.isBlank() ->
                     "Zygisk не загрузился в цель. Zygisk включён? Приложение не в DenyList? После установки модуля была перезагрузка? ${gadgetLog.take(160)}"
                 else ->
@@ -343,7 +345,7 @@ object FridaInstaller {
         val nonce = lastNonce
         if (nonce.isBlank()) return false
         val pkg = lastTargetPackage
-        repeat(60) {
+        repeat(90) {
             val eventCats = if (pkg.isNotBlank()) {
                 eventFiles(pkg).joinToString(" ")
             } else {

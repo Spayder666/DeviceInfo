@@ -3,6 +3,7 @@
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -166,27 +167,64 @@ class AccessMonitor : public zygisk::ModuleBase {
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *) override {
         if (!inject) return;
-        doInject();
-        if (gadgetFd >= 0) close(gadgetFd);
-        if (hooksFd >= 0) close(hooksFd);
+        // Do not dlopen gadget on the specialize thread: Frida parses the
+        // whole script in its constructor and freezes many apps at startup.
+        // Keep this .so mapped (no DLCLOSE) so the delayed thread stays valid.
+        std::string base = dataDir;
+        if (base.empty() && !package.empty()) {
+            base = "/data/user/0/" + package;
+        }
+        if (!base.empty()) {
+            mkdir((base + "/cache").c_str(), 0700);
+            writeText((base + "/cache/access_monitor_zygisk.log").c_str(), "scheduled=1\n", 0644);
+        }
+        auto *job = new InjectJob();
+        job->gadgetFd = gadgetFd;
+        job->hooksFd = hooksFd;
+        job->package = package;
+        job->dataDir = base;
         gadgetFd = hooksFd = -1;
-        if (api) api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+        pthread_t th{};
+        pthread_attr_t attr{};
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (pthread_create(&th, &attr, injectThread, job) != 0) {
+            LOGE("thread failed, injecting inline");
+            doInject(*job);
+            if (job->gadgetFd >= 0) close(job->gadgetFd);
+            if (job->hooksFd >= 0) close(job->hooksFd);
+            delete job;
+        }
+        pthread_attr_destroy(&attr);
     }
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs *) override {
         api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
 
-    void doInject() {
-        std::string base = dataDir;
-        if (base.empty() && !package.empty()) {
-            base = "/data/user/0/" + package;
-        }
-        if (base.empty()) {
+    struct InjectJob {
+        int gadgetFd = -1;
+        int hooksFd = -1;
+        std::string package;
+        std::string dataDir;
+    };
+
+    static void *injectThread(void *arg) {
+        auto *job = static_cast<InjectJob *>(arg);
+        usleep(2 * 1000 * 1000);
+        doInject(*job);
+        if (job->gadgetFd >= 0) close(job->gadgetFd);
+        if (job->hooksFd >= 0) close(job->hooksFd);
+        delete job;
+        return nullptr;
+    }
+
+    static void doInject(const InjectJob &job) {
+        if (job.dataDir.empty()) {
             LOGE("no data dir");
             return;
         }
-        std::string cache = base + "/cache";
+        std::string cache = job.dataDir + "/cache";
         mkdir(cache.c_str(), 0700);
 
         std::string hooksPath = cache + "/access_monitor_hooks.js";
@@ -194,13 +232,21 @@ class AccessMonitor : public zygisk::ModuleBase {
         std::string configPath = cache + "/libfrida-gadget.config.so";
         std::string logPath = cache + "/access_monitor_zygisk.log";
 
-        if (hooksFd >= 0) {
-            copyFdToPath(hooksFd, hooksPath.c_str(), 0644);
+        if (job.hooksFd >= 0) {
+            copyFdToPath(job.hooksFd, hooksPath.c_str(), 0644);
         }
         std::string cfg = std::string("{\"interaction\":{\"type\":\"script\",\"path\":\"") +
             hooksPath + "\"}}";
         writeText(configPath.c_str(), cfg, 0644);
-        if (!copyFdToPath(gadgetFd, gadgetPath.c_str(), 0700)) {
+
+        off_t expected = 0;
+        if (job.gadgetFd >= 0) {
+            struct stat src{};
+            if (fstat(job.gadgetFd, &src) == 0) expected = src.st_size;
+        }
+        struct stat have{};
+        bool needCopy = stat(gadgetPath.c_str(), &have) != 0 || have.st_size != expected || expected < 4096;
+        if (needCopy && !copyFdToPath(job.gadgetFd, gadgetPath.c_str(), 0700)) {
             writeText(logPath.c_str(), "copy_gadget=fail\n", 0644);
             LOGE("copy gadget failed");
             return;
@@ -214,10 +260,10 @@ class AccessMonitor : public zygisk::ModuleBase {
 
         void *handle = dlopen(gadgetPath.c_str(), RTLD_NOW);
         const char *err = handle ? "ok" : dlerror();
-        std::string line = std::string("pkg=") + package + " dlopen=" + (err ? err : "ok") + "\n";
+        std::string line = std::string("pkg=") + job.package + " dlopen=" + (err ? err : "ok") + "\n";
         writeText(logPath.c_str(), line, 0644);
         if (handle) {
-            LOGI("gadget loaded in %s", package.c_str());
+            LOGI("gadget loaded in %s", job.package.c_str());
         } else {
             LOGE("dlopen failed: %s", err ? err : "?");
         }

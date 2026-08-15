@@ -9,14 +9,6 @@ var MITM_ENABLED = __MITM_ENABLED__;
     TARGET_PKG + '","response":"early","package":"' + TARGET_PKG +
     '","timestamp":' + Date.now() + ',"source":"frida","nonce":"' + INJECT_NONCE + '"}';
   try { console.log('AMF ' + line); } catch (e) {}
-  try {
-    var addr = Module.findExportByName('liblog.so', '__android_log_write');
-    if (!addr) addr = Module.findExportByName(null, '__android_log_write');
-    if (addr) {
-      var fn = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
-      fn(4, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(line));
-    }
-  } catch (e) {}
 })();
 var EVENT_FILES = [
   '/data/user/0/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',
@@ -52,20 +44,26 @@ function jsonEscape(s) {
     });
 }
 
+var logWrite = null;
+var logTag = null;
+var inNativeHook = 0;
+var fileQueue = [];
+
 function writeAndroidLog(line) {
   try {
-    var addr = Module.findExportByName('liblog.so', '__android_log_write');
-    if (!addr) addr = Module.findExportByName(null, '__android_log_write');
-    if (!addr) return;
-    var fn = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
+    if (!logWrite) {
+      var addr = Module.findExportByName('liblog.so', '__android_log_write');
+      if (!addr) addr = Module.findExportByName(null, '__android_log_write');
+      if (!addr) return;
+      logWrite = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
+      logTag = Memory.allocUtf8String('AccessMonFrida');
+    }
     var text = line.length > 3500 ? line.substring(0, 3500) : line;
-    fn(5, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(text));
+    logWrite(4, logTag, Memory.allocUtf8String(text));
   } catch (e) {}
 }
 
-function writeLine(line) {
-  try { console.log('AMF ' + line); } catch (e) {}
-  writeAndroidLog(line);
+function appendEventFile(line) {
   var io = initNativeIo();
   if (!io) return;
   var payload = line + '\n';
@@ -83,6 +81,24 @@ function writeLine(line) {
   }
 }
 
+function writeLine(line, forceQueue) {
+  try { console.log('AMF ' + line); } catch (e) {}
+  writeAndroidLog(line);
+  if (forceQueue || inNativeHook > 0) {
+    if (fileQueue.length < 250) fileQueue.push(line);
+    return;
+  }
+  appendEventFile(line);
+}
+
+setInterval(function () {
+  if (inNativeHook > 0 || fileQueue.length === 0) return;
+  var batch = fileQueue.splice(0, 30);
+  for (var i = 0; i < batch.length; i++) {
+    try { appendEventFile(batch[i]); } catch (e) {}
+  }
+}, 500);
+
 function writeEvent(identifierId, action, request, response, permission, opts) {
   opts = opts || {};
   var ts = Date.now();
@@ -99,7 +115,7 @@ function writeEvent(identifierId, action, request, response, permission, opts) {
     ',"nonce":"' + jsonEscape(INJECT_NONCE) + '"';
   if (opts.cached) line += ',"cached":true';
   line += '}';
-  writeLine(line);
+  writeLine(line, !!(opts && opts.async));
 }
 
 var lastReq = {};
@@ -895,6 +911,7 @@ function hookNativeProperties() {
   try {
     Interceptor.attach(addr, {
       onEnter: function (args) {
+        inNativeHook++;
         try {
           this.key = Memory.readUtf8String(args[0]);
           this.valueBuf = args[1];
@@ -903,17 +920,21 @@ function hookNativeProperties() {
         }
       },
       onLeave: function (retval) {
-        if (!isInterestingProperty(this.key)) return;
-        var response;
-        var len = retval.toInt32();
-        if (len > 0 && this.valueBuf) {
-          response = Memory.readUtf8String(this.valueBuf);
-        } else if (len === 0) {
-          response = '(пусто — не найдено или access denied)';
-        } else {
-          response = '(ошибка, код=' + len + ')';
+        try {
+          if (!isInterestingProperty(this.key)) return;
+          var response;
+          var len = retval.toInt32();
+          if (len > 0 && this.valueBuf) {
+            response = Memory.readUtf8String(this.valueBuf);
+          } else if (len === 0) {
+            response = '(пусто — не найдено или access denied)';
+          } else {
+            response = '(ошибка, код=' + len + ')';
+          }
+          writeEvent(mapPropertyToId(this.key), '__system_property_get', this.key, response, null, { async: true });
+        } finally {
+          inNativeHook--;
         }
-        writeEvent(mapPropertyToId(this.key), '__system_property_get', this.key, response, null, { async: true });
       }
     });
   } catch (e) {}
@@ -1379,20 +1400,6 @@ function hookSniAndIntent() {
     };
   } catch (e) {}
   try {
-    var Intent = Java.use('android.content.Intent');
-    Intent.getParcelableExtra.overloads.forEach(function (overload) {
-      overload.implementation = function () {
-        var result = overload.apply(this, arguments);
-        try {
-          if (result && result.getClass && ('' + result.getClass().getName()).indexOf('Location') >= 0) {
-            writeEvent('location.gps', 'Intent.getParcelableExtra(Location)', safeStr(arguments[0]), formatLocation(result), 'ACCESS_FINE_LOCATION');
-          }
-        } catch (e) {}
-        return result;
-      };
-    });
-  } catch (e) {}
-  try {
     var WR = Java.use('android.net.wifi.rtt.WifiRttManager');
     WR.startRanging.overloads.forEach(function (overload) {
       overload.implementation = function () {
@@ -1409,12 +1416,15 @@ function hookNativeNetMeta() {
     if (getaddr) {
       Interceptor.attach(getaddr, {
         onEnter: function (args) {
+          inNativeHook++;
           try { this.host = Memory.readUtf8String(args[0]); } catch (e) { this.host = ''; }
         },
         onLeave: function () {
-          if (this.host && looksSensitive(this.host)) {
-            writeEvent('net.dns', 'getaddrinfo', this.host, '', null);
-          }
+          try {
+            if (this.host && looksSensitive(this.host)) {
+              writeEvent('net.dns', 'getaddrinfo', this.host, '', null, { async: true });
+            }
+          } finally { inNativeHook--; }
         }
       });
     }
@@ -1425,28 +1435,12 @@ function hookNativeNetMeta() {
     if (sni) {
       Interceptor.attach(sni, {
         onLeave: function (retval) {
+          inNativeHook++;
           try {
             var name = Memory.readUtf8String(retval);
-            if (name) writeEvent('net.sni', 'SSL_get_servername', name, '', null);
+            if (name) writeEvent('net.sni', 'SSL_get_servername', name, '', null, { async: true });
           } catch (e) {}
-        }
-      });
-    }
-  } catch (e) {}
-  try {
-    var dlopen = Module.findExportByName(null, 'android_dlopen_ext') || Module.findExportByName('libdl.so', 'dlopen');
-    if (dlopen) {
-      Interceptor.attach(dlopen, {
-        onEnter: function (args) {
-          try { this.path = Memory.readUtf8String(args[0]); } catch (e) { this.path = ''; }
-        },
-        onLeave: function () {
-          if (this.path && /loc|gps|gnss|map|cronet|okhttp|mqtt/i.test(this.path)) {
-            writeEvent('location.hal', 'dlopen', this.path, 'loaded', null);
-          }
-          if (this.path && /magisk|zygisk|xposed|lsposed|frida|gadget|riru|substrate/i.test(this.path)) {
-            writeRoot('root.maps', 'dlopen', this.path, 'loaded');
-          }
+          inNativeHook--;
         }
       });
     }
@@ -1460,7 +1454,7 @@ function writeRoot(id, action, req, resp) {
   var now = Date.now();
   if (lastRoot[key] && now - lastRoot[key] < 1200) return;
   lastRoot[key] = now;
-  writeEvent(id, action, req, resp, null);
+  writeEvent(id, action, req, resp, null, { async: true });
 }
 
 function isRootPath(p) {
@@ -1958,6 +1952,8 @@ function hookInjectEnvAndLoad() {
 }
 
 function hookNativeRootAccess() {
+  return;
+  /* libc open/stat/access hooks deadlock apps that fopen from writeLine. */
   ['access', 'faccessat', 'stat', 'lstat'].forEach(function (fn) {
     try {
       var addr = Module.findExportByName('libc.so', fn);
@@ -2025,6 +2021,8 @@ function hookNativeRootAccess() {
 }
 
 function hookNativeSyscall() {
+  return;
+  /* syscall interceptor on the hot path freezes some processes. */
   try {
     var addr = Module.findExportByName('libc.so', 'syscall');
     if (!addr) return;
@@ -3030,7 +3028,7 @@ function installJavaHooks() {
 
 setTimeout(function () {
   try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
-}, 50);
+}, 200);
 
 function tryInstallIdentifierHooks() {
   if (identifierHooksInstalled) return true;
@@ -3043,14 +3041,17 @@ function tryInstallIdentifierHooks() {
 
 var nativePropsHooked = false;
 var installTries = 0;
-var installTimer = setInterval(function () {
-  installTries++;
-  try { tryInstallIdentifierHooks(); } catch (e) {}
-  if (!nativePropsHooked) {
-    try { hookNativeProperties(); nativePropsHooked = true; } catch (e) {}
-  }
-  if (identifierHooksInstalled || installTries > 40) clearInterval(installTimer);
-}, 150);
+var installTimer = null;
+
+setTimeout(function () {
+  installTimer = setInterval(function () {
+    installTries++;
+    try { tryInstallIdentifierHooks(); } catch (e) {}
+    if (identifierHooksInstalled || installTries > 20) {
+      if (installTimer) clearInterval(installTimer);
+    }
+  }, 400);
+}, 1800);
 
 setTimeout(function () {
   if (Java.available) {
@@ -3058,13 +3059,14 @@ setTimeout(function () {
       try { installJavaHooks(); } catch (e) {}
     });
   }
+  if (!nativePropsHooked) {
+    try { hookNativeProperties(); nativePropsHooked = true; } catch (e) {}
+  }
   try { hookNativeNetMeta(); } catch (e) {}
-  try { hookNativeRootAccess(); } catch (e) {}
-  try { hookNativeSyscall(); } catch (e) {}
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
-}, 1200);
+}, 3500);
 
 function truncateHttp(buf, maxLen) {
   maxLen = maxLen || 1800;
@@ -3167,7 +3169,7 @@ function hookSslReadWrite() {
               try { text = Memory.readUtf8String(this.buf); } catch (e2) { return; }
             }
             if (!looksHttpish(text) && text.indexOf('http') < 0) return;
-            writeEvent('net.https', this.fn, TARGET_PKG, truncateHttp(text), null);
+            writeEvent('net.https', this.fn, TARGET_PKG, truncateHttp(text), null, { async: true });
           }
         });
       } catch (e) {}
