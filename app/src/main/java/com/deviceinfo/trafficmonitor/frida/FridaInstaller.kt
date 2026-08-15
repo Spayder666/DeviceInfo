@@ -515,7 +515,6 @@ object FridaInstaller {
     }
 
     private fun injectGadget(context: Context, pid: Int, packageName: String): Boolean {
-        if (!ensureReady(context)) return false
         if (!ensureKitty(context)) return false
         writeGadgetConfig(packageName)
         val log = "$INJECT_LOG.gadget"
