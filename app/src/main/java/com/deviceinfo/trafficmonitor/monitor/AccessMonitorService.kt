@@ -129,7 +129,7 @@ class AccessMonitorService : Service() {
                 logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
             }
             if (targetPid > 0) {
-                procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
+                procMonitor = ProcMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
             }
 
             delayedStartJob = serviceScope.launch {
@@ -166,66 +166,7 @@ class AccessMonitorService : Service() {
     }
 
     private fun startHeavyMonitors(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
-        if (systemLogcatMonitor == null) {
-            systemLogcatMonitor = SystemLogcatMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (comprehensiveDumpMonitor == null) {
-            comprehensiveDumpMonitor = ComprehensiveDumpMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (extraChannelMonitor == null) {
-            extraChannelMonitor = ExtraChannelMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (extraLogcatMonitor == null) {
-            extraLogcatMonitor = ExtraLogcatMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (kernelAuditMonitor == null) {
-            kernelAuditMonitor = KernelAuditMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (cmdApiMonitor == null) {
-            cmdApiMonitor = CmdApiMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (inotifyDataMonitor == null) {
-            inotifyDataMonitor = InotifyDataMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (statsdMonitor == null) {
-            statsdMonitor = StatsdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (gmsInternalsMonitor == null) {
-            gmsInternalsMonitor = GmsInternalsMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (workManagerMonitor == null) {
-            workManagerMonitor = WorkManagerMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (halGnssMonitor == null) {
-            halGnssMonitor = HalGnssMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (unixNetdMonitor == null) {
-            unixNetdMonitor = UnixNetdMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (privacyFgsMonitor == null) {
-            privacyFgsMonitor = PrivacyFgsMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (syncPushMonitor == null) {
-            syncPushMonitor = SyncPushMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (securityKeystoreMonitor == null) {
-            securityKeystoreMonitor = SecurityKeystoreMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (oemIndoorMonitor == null) {
-            oemIndoorMonitor = OemIndoorMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (rootDetectionMonitor == null) {
-            rootDetectionMonitor = RootDetectionMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (environmentAnalysisMonitor == null) {
-            environmentAnalysisMonitor = EnvironmentAnalysisMonitor(targetPackage, repository, serviceScope).also { it.start() }
-        }
-        if (networkEnvMonitor == null) {
-            networkEnvMonitor = NetworkEnvMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
-        }
-        if (decisionTracker == null) {
-            decisionTracker = DecisionTracker(targetPackage, repository, serviceScope).also { it.start() }
-        }
+        // dumpsys / events-buffer / maps / statsd не пишем как «цель спросила».
         if (FridaInstaller.status != FridaInstaller.FridaStatus.INJECTED) {
             startStraceForPids(repository)
         }
@@ -241,7 +182,7 @@ class AccessMonitorService : Service() {
             startStraceForPids(repository)
         }
         if (targetPid > 0) {
-            procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
+            procMonitor = ProcMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
         }
     }
 

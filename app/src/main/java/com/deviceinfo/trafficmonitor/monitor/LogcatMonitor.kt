@@ -82,7 +82,7 @@ class LogcatMonitor(
     }
 
     private suspend fun parseLine(line: String) {
-        if (line.isBlank()) return
+        if (line.isBlank() || isNoiseLine(line)) return
 
         if (parseLibcPropertyLine(line)) return
 
@@ -155,6 +155,21 @@ class LogcatMonitor(
                 identifierGroup = def?.group?.name ?: "SYSTEM_PROPERTY"
             )
         )
+    }
+
+    private fun isNoiseLine(line: String): Boolean {
+        val noise = arrayOf(
+            "GraphicsEnvironment", "Choreographer", "OpenGLRenderer", "AdrenoGLES",
+            "RenderThread", "concurrent copying GC", "StrictMode",
+            "ProxyAndroidLoggerBackend", "CompatibilityChangeReporter",
+            "TrafficStats: tagSocket", "Skipped ", "Davey!",
+            "ClassLoaderContext", "ClassLoader referenced",
+            "\tat ", "Caused by:", "ClientParamsBlocking",
+            "CheetahMediaDrm: install_hooks", "CheetahMediaDrm: hooked",
+            "CheetahMediaDrm: late RegisterNatives", "CheetahProcStealth",
+            "ANGLE ", "NetworkSecurityConfig: No Network Security Config"
+        )
+        return noise.any { line.contains(it) }
     }
 
     private suspend fun recordIdentifier(def: IdentifierDefinition, line: String) {

@@ -4,9 +4,6 @@ import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.data.EventSource
-import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
-import com.deviceinfo.trafficmonitor.identifiers.toAccessCategory
-import com.deviceinfo.trafficmonitor.probe.IdentifierReader
 import com.deviceinfo.trafficmonitor.root.RootShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,16 +82,6 @@ class AppOpsMonitor(
         "MOCK_LOCATION" to AccessCategory.LOCATION
     )
 
-    private val opIdentifierMap = mapOf(
-        "READ_DEVICE_IDENTIFIERS" to "build.serial",
-        "READ_PHONE_STATE" to "tel.imei",
-        "READ_PHONE_NUMBERS" to "tel.line1_number",
-        "GET_ACCOUNTS" to "account.list",
-        "WIFI_SCAN" to "wifi.scan_results",
-        "BLUETOOTH_CONNECT" to "bt.local_mac",
-        "BLUETOOTH_SCAN" to "bt.local_mac"
-    )
-
     fun start() {
         job = scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -129,23 +116,18 @@ class AppOpsMonitor(
 
             val accessMatch = Regex("Access:\\s*\\[([^\\]]+)]\\s*(.*)").find(line)
             if (accessMatch != null) {
-                val accessTime = accessMatch.groupValues[2].trim().ifBlank { accessMatch.groupValues[1] }
-                val stateKey = "$currentOp:$accessTime"
+                val mode = accessMatch.groupValues[1]
+                val accessTime = accessMatch.groupValues[2].trim().ifBlank { mode }
+                val stateKey = "$currentOp:$mode"
                 if (lastState.put(stateKey, accessTime) == null && (emit || isRecentAccess(accessTime))) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
-                    val identifierId = opIdentifierMap[currentOp]
-                    val value = identifierId
-                        ?.let { IdentifierCatalog.findById(it) }
-                        ?.let { IdentifierReader.readDefinition(it)?.value }
                     record(
                         category = category,
                         action = currentOp,
                         permission = currentOp,
                         requestDetails = "AppOps: доступ к $currentOp",
-                        responseDetails = value?.let { "Значение: $it" }
-                            ?: "Статус: разрешено, время=$accessTime",
-                        raw = line.trim(),
-                        identifierId = identifierId
+                        responseDetails = "разрешено ($mode), $accessTime",
+                        raw = line.trim()
                     )
                 }
             }
@@ -177,23 +159,19 @@ class AppOpsMonitor(
         permission: String?,
         requestDetails: String?,
         responseDetails: String?,
-        raw: String,
-        identifierId: String? = null
+        raw: String
     ) {
         if (repository.isDuplicate(packageName, action, raw)) return
-        val def = identifierId?.let { IdentifierCatalog.findById(it) }
         repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
-                category = def?.toAccessCategory() ?: category,
+                category = category,
                 source = EventSource.APPOPS,
-                action = def?.displayName ?: action,
+                action = action,
                 permission = permission,
                 requestDetails = requestDetails,
                 responseDetails = responseDetails,
-                rawData = raw,
-                identifierName = def?.id,
-                identifierGroup = def?.group?.name
+                rawData = raw
             )
         )
     }

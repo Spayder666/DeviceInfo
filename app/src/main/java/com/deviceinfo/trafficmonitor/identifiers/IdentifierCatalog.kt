@@ -144,7 +144,7 @@ object IdentifierCatalog {
         id("prop.boot.qemu", "QEMU/emulator", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.boot.qemu"),
         id("prop.gms.version", "GMS version", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.com.google.gmsversion"),
         id("prop.bootimage.fingerprint", "Bootimage fingerprint", IdentifierGroup.SYSTEM_PROPERTY, systemProp = "ro.bootimage.build.fingerprint", logcat = listOf("ro\\.bootimage\\.build\\.fingerprint"), strace = listOf("bootimage\\.build\\.fingerprint")),
-        id("getprop.shell", "getprop (shell)", IdentifierGroup.SYSTEM_PROPERTY, api = "Runtime.exec(getprop)", logcat = listOf("getprop", "execve.*getprop", "__system_property_get", "Access denied finding property"))
+        id("getprop.shell", "getprop (shell)", IdentifierGroup.SYSTEM_PROPERTY, api = "Runtime.exec(getprop)", logcat = listOf("\\bgetprop\\b", "execve.*getprop", "__system_property_get", "Access denied finding property"))
     )
 
     private fun settingsIdentifiers() = listOf(
@@ -271,10 +271,10 @@ object IdentifierCatalog {
     )
 
     private fun drmIdentifiers() = listOf(
-        id("drm.widevine_id", "Widevine Device ID", IdentifierGroup.DRM, "MediaDrm.getPropertyByteArray(deviceUniqueId)", logcat = listOf("deviceUniqueId", "MediaDrm", "widevine"), strace = listOf("/dev/mediadrm", "mediadrm")),
+        id("drm.widevine_id", "Widevine Device ID", IdentifierGroup.DRM, "MediaDrm.getPropertyByteArray(deviceUniqueId)", logcat = listOf("deviceUniqueId", "MediaDrm\\.getProperty"), strace = listOf("/dev/mediadrm", "mediadrm")),
         id("drm.vendor", "MediaDrm vendor", IdentifierGroup.DRM, "MediaDrm.getPropertyString(vendor)", logcat = listOf("MediaDrm.*vendor")),
         id("drm.version", "MediaDrm version", IdentifierGroup.DRM, "MediaDrm.getPropertyString(version)", logcat = listOf("MediaDrm.*version")),
-        id("drm.security_level", "Widevine security level", IdentifierGroup.DRM, logcat = listOf("securityLevel", "L1", "L3")),
+        id("drm.security_level", "Widevine security level", IdentifierGroup.DRM, logcat = listOf("securityLevel", "Widevine L1", "Widevine L3")),
         id("drm.playready", "PlayReady ID", IdentifierGroup.DRM, logcat = listOf("playready", "PlayReady")),
         id("drm.legacy", "DrmManagerClient (legacy)", IdentifierGroup.DRM, "DrmManagerClient.getUniqueId()", logcat = listOf("DrmManagerClient", "getUniqueId"))
     )
@@ -333,7 +333,7 @@ object IdentifierCatalog {
         id("net.inet6", "IPv6 address", IdentifierGroup.NETWORK, logcat = listOf("inet6", "Inet6Address")),
         id("net.http", "HTTP URL (OkHttp / HttpURLConnection)", IdentifierGroup.NETWORK, "OkHttp / HttpURLConnection", logcat = listOf("OkHttp", "HttpURLConnection", "okhttp3")),
         id("net.webview", "WebView URL", IdentifierGroup.NETWORK, "WebView.loadUrl", logcat = listOf("WebView.loadUrl", "chromium")),
-        id("net.dns", "DNS QNAME (tcpdump)", IdentifierGroup.NETWORK, "tcpdump port 53", logcat = listOf("A?", "AAAA?")),
+        id("net.dns", "DNS QNAME (tcpdump)", IdentifierGroup.NETWORK, "tcpdump port 53", logcat = listOf("\\bA\\?", "\\bAAAA\\?")),
         id("net.pcap", "pcap заголовки", IdentifierGroup.NETWORK, "tcpdump -s 96"),
         id("net.sni", "TLS SNI (имя хоста)", IdentifierGroup.NETWORK, "SSL_get_servername / SSLSocket.getPeerHost"),
         id("net.https", "HTTPS plaintext (MITM)", IdentifierGroup.NETWORK, "SSL_read/write + local CA proxy"),
@@ -408,7 +408,7 @@ object IdentifierCatalog {
         id("root.lsposed", "LSPosed / lspd", IdentifierGroup.ROOT, "Class.forName(LSPosedBridge) / /data/adb/lspd", file = "/data/adb/lspd", logcat = listOf("LSPosed", "LSPosedBridge", "LSPosedContext", "liblspd", "lsplant"), strace = listOf("/data/adb/lspd", "zygisk_lsposed", "riru_lsposed", "liblspd", "liblsplant")),
         id("root.lspatch", "LSPatch / VirtualXposed", IdentifierGroup.ROOT, "org.lsposed.lspatch / me.weishu.exp", logcat = listOf("LSPatch", "VirtualXposed", "TaiChi", "io.va.exposed")),
         id("root.frida_detect", "Детект Frida", IdentifierGroup.ROOT, "frida-server / :27042 / gum-js-loop", logcat = listOf("frida-server", "27042", "gum-js-loop", "LIBFRIDA", "frida-agent", "libfrida-gadget")),
-        id("root.inject", "Инжект в память / maps / rwx", IdentifierGroup.ROOT, "/proc/self/maps memfd rwxp sandhook/dobby", file = "/proc/self/maps", logcat = listOf("rwxp", "memfd", "sandhook", "yahfa", "dobby", "libwhale"), strace = listOf("/proc/self/maps", "/proc/self/smaps", "memfd:")),
+        id("root.inject", "Инжект в память / maps / rwx", IdentifierGroup.ROOT, "/proc/self/maps memfd rwxp sandhook/dobby", file = "/proc/self/maps", logcat = listOf("sandhook", "yahfa", "dobby", "libwhale"), strace = listOf("/proc/self/maps", "/proc/self/smaps", "memfd:")),
         id("root.threads", "Потоки gum-js / linjector", IdentifierGroup.ROOT, "/proc/self/task/*/comm", logcat = listOf("gum-js-loop", "gmain", "gdbus", "pool-frida", "linjector")),
         id("root.ports", "Порты Frida 27042/27043", IdentifierGroup.ROOT, "Socket.connect(127.0.0.1:27042)", logcat = listOf("27042", "27043", "23946")),
         id("root.dlsym", "dlsym frida/xposed символы", IdentifierGroup.ROOT, "dlsym(frida_agent_main / MSHookFunction)", logcat = listOf("frida_agent_main", "gum_interceptor", "MSHookFunction", "xposedCallHandler")),
@@ -788,11 +788,24 @@ object IdentifierCatalog {
         api = api,
         systemProperty = systemProp,
         filePath = file,
-        logcatPatterns = logcat.map { Regex(it, RegexOption.IGNORE_CASE) },
-        stracePathPatterns = strace.map { Regex(it, RegexOption.IGNORE_CASE) },
+        logcatPatterns = logcat.map { compilePattern(it) },
+        stracePathPatterns = strace.map { compilePattern(it) },
         permission = perm,
         description = description
     )
+
+    /** Короткий литерал вроде A? не должен становиться regex «любая строка». */
+    private fun compilePattern(pattern: String): Regex {
+        val asRegex = pattern.contains(".*") ||
+            pattern.contains("\\") ||
+            pattern.startsWith("(") ||
+            pattern.contains("[")
+        return if (asRegex) {
+            Regex(pattern, RegexOption.IGNORE_CASE)
+        } else {
+            Regex(Regex.escape(pattern), RegexOption.IGNORE_CASE)
+        }
+    }
 }
 
 fun IdentifierDefinition.toAccessCategory(): AccessCategory = when (group) {

@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 class ProcMonitor(
     private val packageName: String,
     private val pid: Int,
+    private val uid: Int,
     private val repository: CaptureRepository,
     private val scope: CoroutineScope
 ) {
@@ -89,7 +90,11 @@ class ProcMonitor(
             lower.endsWith(".odex") ||
             lower.endsWith(".vdex") ||
             lower.endsWith(".art") ||
-            lower.endsWith(".so")
+            lower.endsWith(".so") ||
+            lower.startsWith("/dev/kgsl") ||
+            "diskcache" in lower ||
+            lower.endsWith(".db-wal") ||
+            lower.endsWith(".db-shm")
     }
 
     companion object {
@@ -136,6 +141,9 @@ class ProcMonitor(
             val local = decodeAddress(parts[1])
             val remote = decodeAddress(parts[2])
             val state = if (parts.size > 3) tcpStateName(parts[3]) else "UDP"
+            val ownerUid = parts.getOrNull(7)?.toIntOrNull()
+            if (uid > 0 && ownerUid != null && ownerUid != uid) continue
+            if (state != "ESTABLISHED" && state != "SYN_SENT" && state != "LISTEN") continue
             val key = "$local->$remote:$state"
             if (knownConnections.put(key, state) != null) continue
 
@@ -166,7 +174,7 @@ class ProcMonitor(
             "radio" in lower || "telephony" in lower -> AccessCategory.TELEPHONY
             "contacts" in lower -> AccessCategory.CONTACTS
             "sms" in lower -> AccessCategory.SMS
-            "socket:" in lower -> AccessCategory.NETWORK
+            "socket:" in lower -> AccessCategory.OTHER
             "anon_inode" in lower && "sync" in lower -> AccessCategory.SYSTEM_API
             "/dev/" in lower -> AccessCategory.SYSTEM_API
             "/data/" in lower || "/storage/" in lower -> AccessCategory.STORAGE

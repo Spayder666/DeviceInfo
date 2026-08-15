@@ -166,7 +166,7 @@ class SystemLogcatMonitor(
             Rule(Regex("(?i)WifiService|WifiScan|getScanResults|BSSID|SSID"), AccessCategory.NETWORK, "Wi‑Fi", "ACCESS_FINE_LOCATION", "wifi.scan_results", "WIFI"),
             Rule(Regex("(?i)ConnectivityService|NetworkMonitor|DnsManager|HttpURLConnection|OkHttp"), AccessCategory.NETWORK, "Network"),
             Rule(Regex("(?i)AccountManager"), AccessCategory.IDENTIFIER, "Accounts", "GET_ACCOUNTS", "account.list", "ACCOUNT"),
-            Rule(Regex("(?i)MediaDrm|widevine|deviceUniqueId"), AccessCategory.IDENTIFIER, "DRM", null, "drm.widevine_id", "DRM"),
+            Rule(Regex("(?i)MediaDrm\\.getProperty|deviceUniqueId"), AccessCategory.IDENTIFIER, "DRM", null, "drm.widevine_id", "DRM"),
             Rule(Regex("(?i)MediaProjection|VirtualDisplay|screencast"), AccessCategory.SYSTEM_API, "Screen capture"),
             Rule(Regex("(?i)Biometric|Fingerprint|FaceService"), AccessCategory.SYSTEM_API, "Biometric"),
             Rule(Regex("(?i)NfcService|NfcAdapter"), AccessCategory.SYSTEM_API, "NFC"),
