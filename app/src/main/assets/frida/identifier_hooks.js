@@ -1,8 +1,12 @@
 'use strict';
 
-var EVENT_FILE = '/data/local/tmp/access_monitor/events.jsonl';
 var TARGET_PKG = '__TARGET_PACKAGE__';
 var MITM_ENABLED = __MITM_ENABLED__;
+var EVENT_FILES = [
+  '/data/user/0/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',
+  '/data/data/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',
+  '/data/local/tmp/access_monitor/events.jsonl'
+];
 
 var nativeIo = null;
 
@@ -35,16 +39,19 @@ function jsonEscape(s) {
 function writeLine(line) {
   var io = initNativeIo();
   if (!io) return;
-  try {
-    var path = Memory.allocUtf8String(EVENT_FILE);
-    var mode = Memory.allocUtf8String('a');
-    var fp = io.fopen(path, mode);
-    if (fp.isNull()) return;
-    var payload = line + '\n';
-    var buf = Memory.allocUtf8String(payload);
-    io.fwrite(buf, 1, payload.length, fp);
-    io.fclose(fp);
-  } catch (e) {}
+  var payload = line + '\n';
+  var mode = Memory.allocUtf8String('a');
+  var buf = Memory.allocUtf8String(payload);
+  for (var i = 0; i < EVENT_FILES.length; i++) {
+    try {
+      var path = Memory.allocUtf8String(EVENT_FILES[i]);
+      var fp = io.fopen(path, mode);
+      if (fp.isNull()) continue;
+      io.fwrite(buf, 1, payload.length, fp);
+      io.fclose(fp);
+      return;
+    } catch (e) {}
+  }
 }
 
 function writeEvent(identifierId, action, request, response, permission, opts) {
@@ -184,6 +191,7 @@ function classifySettingsKey(key) {
   if (k.indexOf('mock_location') >= 0) return 'settings.mock_location';
   if (k.indexOf('location') >= 0) return 'settings.location_mode';
   if (k.indexOf('http_proxy') >= 0) return 'net.proxy';
+  if (k === 'advertising_id' || k === 'ad_aaid' || k === 'ads_aaid' || k.indexOf('aaid') >= 0) return 'ad.gaid';
   return 'settings.secure';
 }
 
@@ -507,7 +515,7 @@ function hookMediaDrm() {
     MD.getPropertyByteArray.implementation = function (key) {
       var result = this.getPropertyByteArray(key);
       var id = key === 'deviceUniqueId' ? 'drm.widevine_id' : 'drm.vendor';
-      writeEvent(id, 'MediaDrm.getPropertyByteArray', safeStr(key), 'bytes=' + result.length, null);
+      writeEvent(id, 'MediaDrm.getPropertyByteArray', safeStr(key), bytesToHex(result), null);
       return result;
     };
     MD.getPropertyString.implementation = function (key) {
@@ -521,14 +529,24 @@ function hookMediaDrm() {
 function hookAdvertisingId() {
   try {
     var AIC = Java.use('com.google.android.gms.ads.identifier.AdvertisingIdClient');
-    AIC.getAdvertisingIdInfo.overload('android.content.Context').implementation = function (ctx) {
-      var result = this.getAdvertisingIdInfo(ctx);
-      try {
-        var id = result.getId();
-        var limited = result.isLimitAdTrackingEnabled();
-        writeEvent('ad.gaid', 'AdvertisingIdClient.getAdvertisingIdInfo', '', safeStr(id) + ' limited=' + limited, 'AD_ID');
-      } catch (e) {}
-      return result;
+    AIC.getAdvertisingIdInfo.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var result = overload.apply(this, arguments);
+        try {
+          var id = result.getId();
+          var limited = result.isLimitAdTrackingEnabled();
+          writeEvent('ad.gaid', 'AdvertisingIdClient.getAdvertisingIdInfo', '', safeStr(id) + ' limited=' + limited, 'AD_ID');
+        } catch (e) {}
+        return result;
+      };
+    });
+  } catch (e) {}
+  try {
+    var Info = Java.use('com.google.android.gms.ads.identifier.AdvertisingIdClient$Info');
+    Info.getId.implementation = function () {
+      var r = this.getId();
+      writeEvent('ad.gaid', 'AdvertisingIdClient.Info.getId', '', safeStr(r), 'AD_ID');
+      return r;
     };
   } catch (e) {}
   try {
@@ -549,6 +567,14 @@ function hookAdvertisingId() {
       };
     });
   } catch (e) {}
+  try {
+    var ASI = Java.use('com.google.android.gms.appset.AppSetIdInfo');
+    ASI.getId.implementation = function () {
+      var r = this.getId();
+      writeEvent('ad.app_set_id', 'AppSetIdInfo.getId', '', safeStr(r), null);
+      return r;
+    };
+  } catch (e) {}
 }
 
 function hookAccounts() {
@@ -559,7 +585,19 @@ function hookAccounts() {
         AM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeEvent('account.list', 'AccountManager.' + m, safeStr(arguments[0]), 'count=' + (result ? result.length : 0), 'GET_ACCOUNTS');
+            var names = [];
+            try {
+              if (result) {
+                for (var i = 0; i < result.length; i++) names.push(safeStr(result[i].name));
+              }
+            } catch (e) {}
+            writeEvent(
+              'account.list',
+              'AccountManager.' + m,
+              safeStr(arguments[0]),
+              names.length ? names.join(', ') : ('count=' + (result ? result.length : 0)),
+              'GET_ACCOUNTS'
+            );
             return result;
           };
         });
@@ -2870,18 +2908,61 @@ function hookBrowserApis() {
   } catch (e) {}
 }
 
+function hookGsfAndSettingsQuery() {
+  try {
+    var CR = Java.use('android.content.ContentResolver');
+    CR.query.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var uri = safeStr(arguments[0]);
+        var result = overload.apply(this, arguments);
+        if (/gservices|settings\/secure|settings\/global|settings\/system/i.test(uri)) {
+          writeEvent(
+            /gservices/i.test(uri) ? 'ad.gsf_id' : 'settings.secure',
+            'ContentResolver.query',
+            uri.substring(0, 180),
+            result ? 'cursor' : 'null',
+            null
+          );
+        }
+        return result;
+      };
+    });
+  } catch (e) {}
+}
+
+function hookVpnAndProxy() {
+  try {
+    var CM = Java.use('android.net.ConnectivityManager');
+    CM.getNetworkCapabilities.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        var r = overload.apply(this, arguments);
+        var vpn = false;
+        try { vpn = !!(r && r.hasTransport(4)); } catch (e) {}
+        writeOnce('net.vpn', 'ConnectivityManager.getNetworkCapabilities', '', 'vpn=' + vpn, null);
+        return r;
+      };
+    });
+  } catch (e) {}
+}
+
 var identifierHooksInstalled = false;
 function installIdentifierHooks() {
   if (identifierHooksInstalled) return;
   identifierHooksInstalled = true;
-  writeEvent('frida.init', 'Frida: хуки идентификаторов включены', TARGET_PKG, 'перехват вызовов Settings / Telephony / Location / Wi-Fi', null);
+  writeEvent('frida.init', 'Frida: хуки идентификаторов включены', TARGET_PKG, 'перехват вызовов цели', null);
   hookBuild();
   hookSystemProperties();
   hookSettings();
+  hookGsfAndSettingsQuery();
   hookTelephonyManager();
   hookSubscriptionManager();
   hookLocation();
   hookWifiAndBluetooth();
+  hookNetworkInterface();
+  hookMediaDrm();
+  hookAdvertisingId();
+  hookAccounts();
+  hookVpnAndProxy();
 }
 
 var remainingHooksInstalled = false;
@@ -2889,10 +2970,6 @@ function installJavaHooks() {
   if (remainingHooksInstalled) return;
   remainingHooksInstalled = true;
   installIdentifierHooks();
-  hookMediaDrm();
-  hookAdvertisingId();
-  hookAccounts();
-  hookNetworkInterface();
   hookPackageManager();
   hookContentResolver();
   hookCamera();
@@ -2921,14 +2998,27 @@ function installJavaHooks() {
   hookRootDetection();
 }
 
-// Сразу перехватываем вызовы ID/GPS/Wi‑Fi. Не читаем поля сами.
-// Без Field.get и без File I/O хуков (они вешали старт цели).
-if (Java.available) {
+// Пишем boot сразу — если этого нет в логе, файл недоступен процессу цели.
+try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
+
+function tryInstallIdentifierHooks() {
+  if (identifierHooksInstalled) return true;
+  if (!Java.available) return false;
   Java.perform(function () {
     try { installIdentifierHooks(); } catch (e) {}
   });
+  return identifierHooksInstalled;
 }
+
+try { tryInstallIdentifierHooks(); } catch (e) {}
 try { hookNativeProperties(); } catch (e) {}
+
+var installTries = 0;
+var installTimer = setInterval(function () {
+  installTries++;
+  try { tryInstallIdentifierHooks(); } catch (e) {}
+  if (identifierHooksInstalled || installTries > 40) clearInterval(installTimer);
+}, 100);
 
 setTimeout(function () {
   if (Java.available) {

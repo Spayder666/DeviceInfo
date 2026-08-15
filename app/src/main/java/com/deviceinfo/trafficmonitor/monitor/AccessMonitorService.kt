@@ -152,11 +152,14 @@ class AccessMonitorService : Service() {
                     val alive = live.isNotEmpty()
                     TargetPresence.setAlive(alive)
                     val newPid = live.firstOrNull()
-                    if (alive && newPid != null && newPid != targetPid) {
+                    if (alive && newPid != null && (targetPid <= 0 || targetPid !in live)) {
+                        val restarted = targetPid > 0
                         targetPid = newPid
-                        appOpsMonitor?.resetForNewProcess()
-                        locationDumpMonitor?.resetForNewProcess()
-                        telephonyAccessMonitor?.resetForNewProcess()
+                        if (restarted) {
+                            appOpsMonitor?.resetForNewProcess()
+                            locationDumpMonitor?.resetForNewProcess()
+                            telephonyAccessMonitor?.resetForNewProcess()
+                        }
                         restartProcessMonitors(repository)
                     } else if (!alive && targetPid > 0) {
                         targetPid = -1

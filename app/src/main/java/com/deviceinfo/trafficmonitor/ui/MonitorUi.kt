@@ -507,7 +507,7 @@ fun EmptyMonitorHint() {
         Spacer(Modifier.height(10.dp))
         Text("Пока тихо", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         Text(
-            "В списке только то, что цель реально вызвала: какой API, куда обратилась и какой ответ получила. Каталог — справочник, не выгрузка. Запусти цель и нажми Frida / + Frida.",
+            "В списке только вызовы цели: API, запрос и ответ. Нажми «+ Frida», открой в цели те же экраны (ID / SIM / Wi‑Fi) — без Frida видны только AppOps, не IMEI и не Android ID.",
             fontSize = 12.sp,
             color = TextMuted,
             modifier = Modifier.padding(top = 6.dp)

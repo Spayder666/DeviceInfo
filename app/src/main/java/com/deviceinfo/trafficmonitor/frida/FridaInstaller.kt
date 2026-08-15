@@ -105,6 +105,31 @@ object FridaInstaller {
         local.writeText(template)
         RootShell.execAndRead("cp ${local.absolutePath} $HOOKS_PATH && chmod 644 $HOOKS_PATH")
         RootShell.execAndRead("touch $HTTPS_LOG")
+        prepareEventSink(packageName)
+    }
+
+    fun eventFiles(packageName: String): List<String> = listOf(
+        EVENTS_PATH,
+        "/data/user/0/$packageName/cache/access_monitor_events.jsonl",
+        "/data/data/$packageName/cache/access_monitor_events.jsonl"
+    ).distinct()
+
+    fun prepareEventSink(packageName: String) {
+        val uid = RootShell.getUid(packageName)
+        val cacheFiles = eventFiles(packageName).filter { it != EVENTS_PATH }
+        val mkdirs = cacheFiles.map { it.substringBeforeLast('/') }.distinct()
+            .joinToString(" ") { "mkdir -p $it" }
+        val touches = eventFiles(packageName).joinToString(" ") { "touch $it" }
+        val chmods = eventFiles(packageName).joinToString(" ") { "chmod 666 $it" }
+        val chowns = if (uid != null) {
+            cacheFiles.joinToString(" ") { "chown $uid:$uid $it" }
+        } else {
+            "true"
+        }
+        RootShell.execAndRead(
+            "$mkdirs && $touches && chmod 711 $BASE_DIR && $chmods && $chowns && " +
+                "chmod 666 $HTTPS_LOG 2>/dev/null"
+        )
         tightenEventFilePerms(packageName)
     }
 
@@ -205,25 +230,28 @@ object FridaInstaller {
             preparePtrace()
             stopInjector()
 
-            val pid = if (restartApp) {
+            val pids = if (restartApp) {
                 RootShell.execAndRead("am force-stop $packageName")
-                delay(400)
+                delay(200)
                 if (!RootShell.launchApp(packageName)) {
                     lastError = "Не удалось запустить приложение"
                     return@withContext false
                 }
-                waitForPid(packageName) ?: run {
+                waitForPids(packageName) ?: run {
                     lastError = "Приложение не запустилось (PID не найден)"
                     return@withContext false
                 }
             } else {
-                RootShell.findPid(packageName) ?: run {
+                val live = RootShell.findAllPids(packageName)
+                if (live.isEmpty()) {
                     lastError = "Приложение не запущено — сначала запустите его"
                     return@withContext false
                 }
+                live
             }
 
-            if (!startInjector(pid)) {
+            val injected = pids.take(6).count { startInjector(it) }
+            if (injected == 0) {
                 return@withContext false
             }
 
@@ -232,10 +260,11 @@ object FridaInstaller {
             true
         }
 
-    private suspend fun waitForPid(packageName: String, attempts: Int = 20): Int? {
+    private suspend fun waitForPids(packageName: String, attempts: Int = 40): List<Int>? {
         repeat(attempts) {
-            RootShell.findPid(packageName)?.let { return it }
-            delay(250)
+            val live = RootShell.findAllPids(packageName)
+            if (live.isNotEmpty()) return live
+            delay(50)
         }
         return null
     }
@@ -247,14 +276,15 @@ object FridaInstaller {
     }
 
     private fun startInjector(pid: Int): Boolean {
-        RootShell.execAndRead("echo -n > $INJECT_LOG")
-        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH -e --runtime=qjs"
-        RootShell.execDetached("$cmd > $INJECT_LOG 2>&1")
+        val log = "$INJECT_LOG.$pid"
+        RootShell.execAndRead("echo -n > $log")
+        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH -e"
+        RootShell.execDetached("$cmd > $log 2>&1")
 
         var lastLog = ""
-        repeat(12) {
-            Thread.sleep(400)
-            lastLog = RootShell.execAndRead("cat $INJECT_LOG 2>/dev/null").trim()
+        repeat(16) {
+            Thread.sleep(150)
+            lastLog = RootShell.execAndRead("cat $log 2>/dev/null").trim()
             val running = RootShell.execAndRead(
                 "pgrep -f '$INJECT_PATH' 2>/dev/null"
             ).trim().isNotEmpty()
@@ -397,8 +427,11 @@ object FridaInstaller {
         }
     }
 
-    fun clearEvents() {
-        RootShell.execAndRead("truncate -s 0 $EVENTS_PATH 2>/dev/null || echo -n > $EVENTS_PATH")
+    fun clearEvents(packageName: String? = null) {
+        val files = if (packageName.isNullOrBlank()) listOf(EVENTS_PATH) else eventFiles(packageName)
+        for (path in files) {
+            RootShell.execAndRead("truncate -s 0 $path 2>/dev/null || echo -n > $path")
+        }
     }
 
     fun statusLabel(): String = when (status) {

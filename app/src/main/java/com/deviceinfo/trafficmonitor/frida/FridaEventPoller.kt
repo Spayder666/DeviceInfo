@@ -23,13 +23,15 @@ class FridaEventPoller(
     private val scope: CoroutineScope
 ) {
     private var job: Job? = null
-    private var lastSize = 0L
-    private var pending = ""
+    private val lastSize = mutableMapOf<String, Long>()
+    private val pending = mutableMapOf<String, String>()
 
     fun start() {
         job = scope.launch(Dispatchers.IO) {
             while (isActive) {
-                pollEvents()
+                for (path in FridaInstaller.eventFiles(packageName)) {
+                    pollFile(path)
+                }
                 delay(400)
             }
         }
@@ -40,29 +42,31 @@ class FridaEventPoller(
         job = null
     }
 
-    private suspend fun pollEvents() {
+    private suspend fun pollFile(path: String) {
         val sizeStr = RootShell.execAndRead(
-            "wc -c < ${FridaInstaller.EVENTS_PATH} 2>/dev/null"
+            "wc -c < $path 2>/dev/null"
         ).trim().toLongOrNull() ?: return
 
-        if (sizeStr < lastSize) {
-            lastSize = 0L
-            pending = ""
+        var offset = lastSize[path] ?: 0L
+        var leftover = pending[path].orEmpty()
+        if (sizeStr < offset) {
+            offset = 0L
+            leftover = ""
         }
-        if (sizeStr <= lastSize) return
+        if (sizeStr <= offset) return
 
         val newContent = RootShell.execAndRead(
-            "tail -c +${lastSize + 1} ${FridaInstaller.EVENTS_PATH} 2>/dev/null",
+            "tail -c +${offset + 1} $path 2>/dev/null",
             timeoutSec = 5
         )
-        lastSize = sizeStr
-        val combined = pending + newContent
+        lastSize[path] = sizeStr
+        val combined = leftover + newContent
         val lastNl = combined.lastIndexOf('\n')
         if (lastNl < 0) {
-            pending = combined
+            pending[path] = combined
             return
         }
-        pending = combined.substring(lastNl + 1)
+        pending[path] = combined.substring(lastNl + 1)
         for (line in combined.substring(0, lastNl).split('\n')) {
             if (line.isBlank()) continue
             parseLine(line.trim())
@@ -99,7 +103,7 @@ class FridaEventPoller(
             if (repository.isDuplicate(packageName, action, line, sinceMs = 800)) return
 
             val category = when {
-                resolvedId == "frida.init" -> AccessCategory.SYSTEM_API
+                resolvedId == "frida.init" || resolvedId == "frida.boot" -> AccessCategory.SYSTEM_API
                 else -> def?.toAccessCategory()
                     ?: categoryForIdentifierId(resolvedId)
                     ?: categoryFor(action, permission, def?.group?.name)
@@ -112,6 +116,7 @@ class FridaEventPoller(
                     category = category,
                     source = EventSource.FRIDA,
                     action = when {
+                        resolvedId == "frida.boot" -> "Frida: скрипт загружен"
                         resolvedId == "frida.init" -> "Frida: хуки Java API включены"
                         verdict != null && resolvedId == "ent.verdict" -> "Integrity verdict: $verdict"
                         else -> def?.displayName ?: action
@@ -138,8 +143,8 @@ class FridaEventPoller(
     }
 
     fun resetOffset() {
-        lastSize = 0L
-        pending = ""
+        lastSize.clear()
+        pending.clear()
     }
 
     private fun categoryFor(action: String, permission: String?, group: String?): AccessCategory {

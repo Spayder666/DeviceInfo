@@ -20,7 +20,7 @@ class FridaMonitor(
             if (!FridaInstaller.ensureReady(context)) return@launch
 
             FridaInstaller.prepareHooksForPackage(packageName, context)
-            FridaInstaller.clearEvents()
+            FridaInstaller.clearEvents(packageName)
 
             poller = FridaEventPoller(packageName, repository, scope).also {
                 it.resetOffset()
