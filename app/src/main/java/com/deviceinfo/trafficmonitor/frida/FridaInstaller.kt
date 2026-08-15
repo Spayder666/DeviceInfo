@@ -16,6 +16,10 @@ object FridaInstaller {
     const val BASE_DIR = "/data/local/tmp/access_monitor"
     const val GADGET_PATH = "$BASE_DIR/libfrida-gadget.so"
     const val CONFIG_PATH = "$BASE_DIR/libfrida-gadget.config.so"
+    const val AMCORE_PATH = "$BASE_DIR/libamcore.so"
+    const val AMCORE_CONFIG = "$BASE_DIR/libamcore.config.so"
+    const val AMHOOKS_PATH = "$BASE_DIR/libamhooks.so"
+    const val BOOT_META = "$BASE_DIR/boot.meta"
     const val HOOKS_PATH = "$BASE_DIR/identifier_hooks.js"
     const val BOOT_PATH = "$BASE_DIR/boot.js"
     const val EVENTS_PATH = "$BASE_DIR/events.jsonl"
@@ -121,6 +125,10 @@ object FridaInstaller {
         writeBootScript(packageName)
         writeGadgetConfig(packageName)
         lastTargetPackage = packageName
+        RootShell.execAndRead(
+            "printf '%s %s\\n' ${RootShell.shellQuote(lastNonce)} " +
+                "${RootShell.shellQuote(packageName)} > $BOOT_META"
+        )
         RootShell.execAndRead("touch $HTTPS_LOG")
         prepareEventSink(packageName)
     }
@@ -136,9 +144,10 @@ object FridaInstaller {
         val local = File.createTempFile("am_gadget", ".json")
         local.writeText(json)
         RootShell.execAndRead(
-            "cp ${local.absolutePath} $CONFIG_PATH && chmod 644 $CONFIG_PATH && " +
-                "chcon u:object_r:apk_data_file:s0 $GADGET_PATH $CONFIG_PATH $hookInApp 2>/dev/null; " +
-                "chmod 755 $GADGET_PATH"
+            "cp $GADGET_PATH $AMCORE_PATH && chmod 755 $AMCORE_PATH $GADGET_PATH && " +
+                "cp ${local.absolutePath} $CONFIG_PATH && cp ${local.absolutePath} $AMCORE_CONFIG && " +
+                "chmod 644 $CONFIG_PATH $AMCORE_CONFIG && " +
+                "chcon u:object_r:apk_data_file:s0 $GADGET_PATH $AMCORE_PATH $CONFIG_PATH $AMCORE_CONFIG $hookInApp 2>/dev/null"
         )
         local.delete()
     }
@@ -272,11 +281,10 @@ object FridaInstaller {
     suspend fun injectManual(context: Context, packageName: String, restartApp: Boolean): Boolean =
         withContext(Dispatchers.IO) {
             if (!ensureReady(context)) return@withContext false
-            if (!ensureFridaInject(context)) return@withContext false
-
             prepareHooksForPackage(packageName, context)
             preparePtrace()
             stopInjector()
+            RootShell.execAndRead("am set-debug-app ${RootShell.shellQuote(packageName)}")
 
             val pids = if (restartApp) {
                 spawnAndWait(packageName) ?: run {
@@ -293,39 +301,28 @@ object FridaInstaller {
             }
 
             val pid = pickMainPid(packageName, pids) ?: pids.first()
-            if (!attachScript(pid, packageName, BOOT_PATH)) {
-                val injectErr = lastError
-                if (injectGadget(context, pid, packageName) && waitForScriptBoot("early")) {
+            if (ensureAmhooks(context) && attachJvmti(packageName) && waitForScriptBoot("early")) {
+                status = FridaStatus.INJECTED
+                lastError = null
+                return@withContext true
+            }
+            val jvmtiErr = lastError
+
+            if (ensureFridaInject(context) && attachScript(pid, packageName, BOOT_PATH) &&
+                waitForScriptBoot("canary")
+            ) {
+                stopInjector()
+                delay(250)
+                if (attachScript(pid, packageName, HOOKS_PATH) && waitForScriptBoot("early")) {
                     status = FridaStatus.INJECTED
                     lastError = null
                     return@withContext true
                 }
-                status = FridaStatus.ERROR
-                lastError = "Canary: ${injectErr ?: "Aborted"}. Gadget: ${lastError ?: "нет"}. ${attachDiagnostics(pid)}"
-                return@withContext false
-            }
-            if (!waitForScriptBoot("canary")) {
-                status = FridaStatus.ERROR
-                lastError = "Canary: скрипт не шлёт события. ${attachDiagnostics(pid)}"
-                return@withContext false
             }
 
-            stopInjector()
-            delay(250)
-            if (!attachScript(pid, packageName, HOOKS_PATH)) {
-                status = FridaStatus.ERROR
-                lastError = "Хуки: ${lastError ?: "Aborted"} (canary был ок). ${attachDiagnostics(pid)}"
-                return@withContext false
-            }
-            if (!waitForScriptBoot("early")) {
-                status = FridaStatus.ERROR
-                lastError = "Хуки не шлют события (canary был ок). ${attachDiagnostics(pid)}"
-                return@withContext false
-            }
-
-            status = FridaStatus.INJECTED
-            lastError = null
-            true
+            status = FridaStatus.ERROR
+            lastError = "JVMTI: ${jvmtiErr ?: "нет"}. Inject: ${lastError ?: "Aborted"}. ${attachDiagnostics(pid)}"
+            return@withContext false
         }
 
     private suspend fun waitForScriptBoot(expectedResponse: String? = null): Boolean {
@@ -514,6 +511,44 @@ object FridaInstaller {
         ).any { it in lower }
     }
 
+    private fun attachJvmti(packageName: String): Boolean {
+        val out = RootShell.execAndRead(
+            "am attach-agent ${RootShell.shellQuote(packageName)} $AMHOOKS_PATH 2>&1",
+            timeoutSec = 10
+        )
+        val lower = out.lowercase()
+        if (listOf("exception", "error", "not debuggable", "unable", "failed", "denied")
+                .any { it in lower }
+        ) {
+            lastError = "attach-agent: ${out.trim().take(200).ifBlank { "отклонено" }}"
+            return false
+        }
+        return true
+    }
+
+    private fun ensureAmhooks(context: Context): Boolean {
+        if (RootShell.execAndRead("test -x $AMHOOKS_PATH && echo ok").trim() == "ok") {
+            return true
+        }
+        val abiFolder = resolveAssetAbiFolder()
+        val assetPath = "frida/$abiFolder/libamhooks.so"
+        val cacheFile = File(context.filesDir, "libamhooks-$abiFolder.so")
+        return try {
+            if (!cacheFile.exists() || cacheFile.length() == 0L) {
+                context.assets.open(assetPath).use { input ->
+                    cacheFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+            RootShell.execAndRead(
+                "cp ${cacheFile.absolutePath} $AMHOOKS_PATH && chmod 755 $AMHOOKS_PATH && " +
+                    "chcon u:object_r:apk_data_file:s0 $AMHOOKS_PATH 2>/dev/null; echo ok"
+            ).trim().endsWith("ok")
+        } catch (e: Exception) {
+            lastError = "libamhooks: ${e.message}"
+            false
+        }
+    }
+
     private fun injectGadget(context: Context, pid: Int, packageName: String): Boolean {
         if (!ensureKitty(context)) return false
         writeGadgetConfig(packageName)
@@ -657,6 +692,7 @@ object FridaInstaller {
 
     fun clearInjection(packageName: String) {
         stopInjector()
+        RootShell.execAndRead("am clear-debug-app 2>/dev/null")
         if (status == FridaStatus.INJECTED) {
             status = FridaStatus.READY
         }
