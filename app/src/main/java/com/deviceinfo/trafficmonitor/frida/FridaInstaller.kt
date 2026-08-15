@@ -17,13 +17,12 @@ object FridaInstaller {
     const val GADGET_PATH = "$BASE_DIR/libfrida-gadget.so"
     const val CONFIG_PATH = "$BASE_DIR/libfrida-gadget.config.so"
     const val HOOKS_PATH = "$BASE_DIR/identifier_hooks.js"
+    const val BOOT_PATH = "$BASE_DIR/boot.js"
     const val EVENTS_PATH = "$BASE_DIR/events.jsonl"
     const val SERVER_PATH = "$BASE_DIR/frida-server"
     const val INJECT_PATH = "$BASE_DIR/frida-inject"
     const val INJECT_LOG = "$BASE_DIR/inject.log"
     const val HTTPS_LOG = "$BASE_DIR/https.jsonl"
-    const val SPAWN_WAIT = "$BASE_DIR/spawn_wait.sh"
-    const val SPAWN_FLAG = "$BASE_DIR/spawn.ok"
 
     @Volatile
     var mitmEnabled: Boolean = false
@@ -112,8 +111,22 @@ object FridaInstaller {
         val local = File(context.filesDir, "identifier_hooks_active.js")
         local.writeText(template)
         RootShell.execAndRead("cp ${local.absolutePath} $HOOKS_PATH && chmod 644 $HOOKS_PATH")
+        writeBootScript(packageName)
         RootShell.execAndRead("touch $HTTPS_LOG")
         prepareEventSink(packageName)
+    }
+
+    /** Только console.log — без Module/Java. Если и это Aborted, виноват attach, не хуки. */
+    private fun writeBootScript(packageName: String) {
+        val js = """
+            'use strict';
+            var line = '{"identifierId":"frida.boot","action":"Frida: скрипт загружен","request":"$packageName","response":"canary","package":"$packageName","timestamp":' + Date.now() + ',"source":"frida","nonce":"$lastNonce"}';
+            console.log('AMF ' + line);
+        """.trimIndent()
+        val local = File.createTempFile("am_boot", ".js")
+        local.writeText(js)
+        RootShell.execAndRead("cp ${local.absolutePath} $BOOT_PATH && chmod 644 $BOOT_PATH")
+        local.delete()
     }
 
     fun eventFiles(packageName: String): List<String> = listOf(
@@ -239,7 +252,7 @@ object FridaInstaller {
             stopInjector()
 
             val pids = if (restartApp) {
-                spawnAndInject(packageName) ?: run {
+                spawnAndWait(packageName) ?: run {
                     lastError = lastError ?: "Приложение не запустилось (PID не найден)"
                     return@withContext false
                 }
@@ -252,19 +265,28 @@ object FridaInstaller {
                 live
             }
 
-            if (injectLogsFailed()) {
-                stopInjector()
+            val pid = pickMainPid(packageName, pids) ?: pids.first()
+            if (!attachScript(pid, packageName, BOOT_PATH)) {
+                status = FridaStatus.ERROR
+                lastError = "Canary: ${lastError ?: "не загрузился"}. ${attachDiagnostics(pid)}"
+                return@withContext false
             }
-            val injected = pids.take(6).count { startInjector(it, packageName) }
-            if (injected == 0) {
+            if (!waitForScriptBoot("canary")) {
+                status = FridaStatus.ERROR
+                lastError = "Canary: скрипт не шлёт события. ${attachDiagnostics(pid)}"
                 return@withContext false
             }
 
-            if (!waitForScriptBoot()) {
+            stopInjector()
+            delay(250)
+            if (!attachScript(pid, packageName, HOOKS_PATH)) {
                 status = FridaStatus.ERROR
-                if (lastError.isNullOrBlank()) {
-                    lastError = "Frida зависла на процессе, но скрипт не шлёт события. Перехват не активен."
-                }
+                lastError = "Хуки: ${lastError ?: "Aborted"} (canary был ок). ${attachDiagnostics(pid)}"
+                return@withContext false
+            }
+            if (!waitForScriptBoot("early")) {
+                status = FridaStatus.ERROR
+                lastError = "Хуки не шлют события (canary был ок). ${attachDiagnostics(pid)}"
                 return@withContext false
             }
 
@@ -273,7 +295,7 @@ object FridaInstaller {
             true
         }
 
-    private suspend fun waitForScriptBoot(): Boolean {
+    private suspend fun waitForScriptBoot(expectedResponse: String? = null): Boolean {
         val nonce = lastNonce
         if (nonce.isBlank()) return false
         repeat(40) {
@@ -287,7 +309,9 @@ object FridaInstaller {
                 if (start < 0) continue
                 val json = runCatching { org.json.JSONObject(line.substring(start).trim()) }.getOrNull()
                     ?: continue
-                if (json.optString("nonce") == nonce && json.optString("identifierId") == "frida.boot") {
+                if (json.optString("nonce") != nonce) continue
+                if (json.optString("identifierId") != "frida.boot") continue
+                if (expectedResponse == null || json.optString("response") == expectedResponse) {
                     return true
                 }
             }
@@ -302,77 +326,37 @@ object FridaInstaller {
         return false
     }
 
-    /**
-     * Ждём PID и конец specialize (не zygote). Инжект делает startInjector —
-     * слишком ранний ptrace даёт только «Aborted».
-     */
-    private suspend fun spawnAndInject(packageName: String): List<Int>? {
+    /** Запуск цели и пауза: агент Frida на Android 13 абортится, если цепляться в первые сотни мс. */
+    private suspend fun spawnAndWait(packageName: String): List<Int>? {
         RootShell.execAndRead("am force-stop $packageName")
-        delay(150)
-        installSpawnWaiter()
-        RootShell.execAndRead("rm -f $SPAWN_FLAG")
-        RootShell.execDetached(
-            "sh $SPAWN_WAIT ${RootShell.shellQuote(packageName)} $BASE_DIR"
-        )
-        delay(30)
+        delay(250)
         if (!RootShell.launchApp(packageName)) {
             lastError = "Не удалось запустить приложение"
             return null
         }
-        repeat(100) {
-            val flag = RootShell.execAndRead("cat $SPAWN_FLAG 2>/dev/null").trim()
-            if (flag == "ok" || flag == "timeout") {
-                return RootShell.findAllPids(packageName).takeIf { it.isNotEmpty() }
+        repeat(40) {
+            val live = RootShell.findAllPids(packageName)
+            if (live.isNotEmpty()) {
+                delay(2_500)
+                return RootShell.findAllPids(packageName).ifEmpty { live }
             }
-            delay(100)
+            delay(150)
         }
-        return RootShell.findAllPids(packageName).takeIf { it.isNotEmpty() }
+        lastError = "PID не найден после запуска"
+        return null
     }
 
-    private fun installSpawnWaiter() {
-        val script = """
-            #!/system/bin/sh
-            pkg="${'$'}1"
-            dir="${'$'}2"
-            i=0
-            while [ ${'$'}i -lt 400 ]; do
-              pids=`pidof "${'$'}pkg" 2>/dev/null`
-              if [ -n "${'$'}pids" ]; then
-                for p in ${'$'}pids; do
-                  n=0
-                  while [ ${'$'}n -lt 200 ]; do
-                    comm=`cat /proc/${'$'}p/comm 2>/dev/null`
-                    case "${'$'}comm" in zygote|zygote64|"") n=$((n+1)); usleep 30000 2>/dev/null || sleep 0.03; continue ;; esac
-                    if grep -q "/data/app/" /proc/${'$'}p/maps 2>/dev/null && grep -q "${'$'}pkg" /proc/${'$'}p/maps 2>/dev/null; then
-                      usleep 200000 2>/dev/null || sleep 0.2
-                      break
-                    fi
-                    ctx=`cat /proc/${'$'}p/attr/current 2>/dev/null`
-                    case "${'$'}ctx" in *untrusted_app*|*priv_app*)
-                      usleep 200000 2>/dev/null || sleep 0.2
-                      break
-                    ;; esac
-                    if cat /proc/${'$'}p/task/*/comm 2>/dev/null | grep -q HeapTaskDaemon; then
-                      usleep 200000 2>/dev/null || sleep 0.2
-                      break
-                    fi
-                    n=$((n+1))
-                    usleep 30000 2>/dev/null || sleep 0.03
-                  done
-                done
-                echo ok > "${'$'}dir/spawn.ok"
-                exit 0
-              fi
-              i=$((i+1))
-              usleep 2000 2>/dev/null || sleep 0.01
-            done
-            echo timeout > "${'$'}dir/spawn.ok"
-            exit 1
-        """.trimIndent()
-        val local = File.createTempFile("spawn_wait", ".sh")
-        local.writeText(script)
-        RootShell.execAndRead("cp ${local.absolutePath} $SPAWN_WAIT && chmod 755 $SPAWN_WAIT")
-        local.delete()
+    private fun pickMainPid(packageName: String, pids: List<Int>): Int? {
+        val scored = pids.map { pid ->
+            val cmd = RootShell.execAndRead("tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null").trim()
+            val isolated = cmd.contains(":") || cmd.contains("isolated")
+            pid to Pair(cmd, isolated)
+        }
+        scored.firstOrNull { (pid, info) ->
+            !info.second && (info.first == packageName || info.first.startsWith("$packageName "))
+        }?.let { return it.first }
+        scored.firstOrNull { !it.second.second }?.let { return it.first }
+        return pids.firstOrNull()
     }
 
     private fun preparePtrace() {
@@ -407,45 +391,60 @@ object FridaInstaller {
         return RootShell.execAndRead("kill -0 $pid 2>/dev/null && echo ok").trim() == "ok"
     }
 
-    private fun injectLogsFailed(): Boolean {
-        val log = RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")
-        return looksLikeInjectFailure(log)
-    }
-
-    private fun startInjector(pid: Int, packageName: String): Boolean {
+    private fun attachScript(pid: Int, packageName: String, scriptPath: String): Boolean {
         if (!waitForProcessReady(pid, packageName)) {
-            lastError = "Процесс $pid ещё не специализирован (zygote) — инжект прерван"
+            lastError = "Процесс $pid ещё не специализирован (zygote)"
             return false
         }
+        stopInjector()
         val log = "$INJECT_LOG.$pid"
-        RootShell.execAndRead("echo -n > $log")
-        // -e = eternalize AND EXIT. That teardown prints "Aborted" and kills console.log.
-        // Keep frida-inject resident so the session and inject.log stay alive.
-        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH"
-        RootShell.execDetached("$cmd > $log 2>&1")
+        RootShell.execAndRead("rm -f $INJECT_LOG $INJECT_LOG.*; echo -n > $log")
+        val byPid = "$INJECT_PATH -p $pid -s $scriptPath"
+        RootShell.execDetached("$byPid > $log 2>&1")
+        if (waitInjectorSettled(log)) return true
 
+        stopInjector()
+        RootShell.execAndRead("echo -n > $log")
+        val byName = "$INJECT_PATH -n ${RootShell.shellQuote(packageName)} -s $scriptPath"
+        RootShell.execDetached("$byName > $log 2>&1")
+        return waitInjectorSettled(log)
+    }
+
+    private fun waitInjectorSettled(log: String): Boolean {
         var lastLog = ""
-        repeat(20) {
+        var stable = 0
+        repeat(24) {
             Thread.sleep(150)
             lastLog = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null")).trim()
-            if (looksLikeInjectFailure(lastLog) && !logHasBoot(lastLog)) {
+            if (logHasBoot(lastLog)) return true
+            if (looksLikeInjectFailure(lastLog)) {
                 lastError = "frida-inject: ${lastLog.take(220)}"
                 return false
             }
             val running = RootShell.execAndRead(
                 "pgrep -f '$INJECT_PATH' 2>/dev/null"
             ).trim().isNotEmpty()
-            if (running || looksLikeInjectSuccess(lastLog) || logHasBoot(lastLog)) {
-                return true
+            if (running) {
+                stable++
+                if (stable >= 6) return true
+            } else if (stable > 0) {
+                lastError = lastLog.ifBlank { "frida-inject вышел" }
+                return false
             }
         }
-
         lastError = if (lastLog.isNotBlank()) {
             "frida-inject: ${lastLog.take(220)}"
         } else {
-            "frida-inject не запустился (проверьте root / SELinux)"
+            "frida-inject не запустился (root / SELinux)"
         }
         return false
+    }
+
+    private fun attachDiagnostics(pid: Int): String {
+        val comm = RootShell.execAndRead("cat /proc/$pid/comm 2>/dev/null").trim()
+        val cmd = RootShell.execAndRead("tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null").trim()
+        val log = stripAnsi(RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")).trim()
+        return "pid=$pid comm=$comm cmd=$cmd ${log.take(160)}"
     }
 
     private fun stripAnsi(text: String): String =
@@ -459,14 +458,8 @@ object FridaInstaller {
         val lower = stripAnsi(log).lowercase()
         return listOf(
             "unable to", "failed", "error:", "permission denied", "not found", "cannot",
-            "process terminated", "connection terminated", "device lost"
+            "aborted", "process terminated", "connection terminated", "device lost"
         ).any { it in lower }
-    }
-
-    private fun looksLikeInjectSuccess(log: String): Boolean {
-        if (log.isBlank()) return false
-        val lower = stripAnsi(log).lowercase()
-        return listOf("script", "loaded", "injected", "connected", "resumed").any { it in lower }
     }
 
     private fun stopInjector() {
