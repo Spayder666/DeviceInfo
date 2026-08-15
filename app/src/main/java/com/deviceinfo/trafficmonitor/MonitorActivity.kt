@@ -220,6 +220,7 @@ fun MonitorScreen(
     var contextEvent by remember { mutableStateOf<DisplayEvent?>(null) }
     var fridaHintDismissed by remember { mutableStateOf(false) }
     var showFridaHint by remember { mutableStateOf(false) }
+    var stoppedHintDismissed by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val showJump by remember { derivedStateOf { listState.firstVisibleItemIndex > 2 } }
 
@@ -229,6 +230,9 @@ fun MonitorScreen(
             delay(1000)
             now = System.currentTimeMillis()
         }
+    }
+    LaunchedEffect(targetRunning) {
+        if (targetRunning) stoppedHintDismissed = false
     }
     LaunchedEffect(fridaStatus, sourceCounts) {
         if (fridaStatus == FridaInstaller.FridaStatus.INJECTED || (sourceCounts[EventSource.FRIDA] ?: 0) > 0) {
@@ -425,6 +429,14 @@ fun MonitorScreen(
                 onWrap = { viewModel.injectFridaWrap() },
                 onMitm = { if (mitmActive) viewModel.stopMitm() else viewModel.startMitm() }
             )
+            if (!targetRunning && !stoppedHintDismissed) {
+                HintBanner(
+                    text = "Приложение остановлено. Новые события не пишутся — оно ничего не спрашивает",
+                    action = "Запуск",
+                    onAction = onLaunchApp,
+                    onDismiss = { stoppedHintDismissed = true }
+                )
+            }
             if (showFridaHint && !fridaHintDismissed && fridaStatus != FridaInstaller.FridaStatus.INJECTED) {
                 HintBanner(
                     text = "Модель, Android ID, IMEI видны после Frida. Лучше «+ Frida» до запуска чекера",

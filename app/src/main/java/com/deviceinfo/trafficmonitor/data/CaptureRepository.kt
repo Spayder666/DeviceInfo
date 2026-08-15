@@ -1,5 +1,6 @@
 package com.deviceinfo.trafficmonitor.data
 
+import com.deviceinfo.trafficmonitor.monitor.TargetPresence
 import kotlinx.coroutines.flow.Flow
 
 class CaptureRepository(private val dao: CaptureEventDao) {
@@ -10,7 +11,10 @@ class CaptureRepository(private val dao: CaptureEventDao) {
     fun observeCount(packageName: String): Flow<Int> =
         dao.observeCount(packageName)
 
-    suspend fun insert(event: CaptureEvent): Long = dao.insert(event)
+    suspend fun insert(event: CaptureEvent): Long {
+        if (!TargetPresence.shouldAccept(event.targetPackage)) return -1L
+        return dao.insert(event)
+    }
 
     suspend fun getById(id: Long): CaptureEvent? = dao.getById(id)
 

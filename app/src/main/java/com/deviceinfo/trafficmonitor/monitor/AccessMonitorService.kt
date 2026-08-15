@@ -107,8 +107,11 @@ class AccessMonitorService : Service() {
         }
 
         serviceScope.launch {
+            TargetPresence.begin(targetPackage)
             targetUid = RootShell.getUid(targetPackage) ?: -1
-            targetPid = RootShell.findPid(targetPackage) ?: -1
+            val pids = RootShell.findAllPids(targetPackage)
+            targetPid = pids.firstOrNull() ?: -1
+            TargetPresence.setAlive(pids.isNotEmpty())
 
             identifierAccessMonitor = IdentifierAccessMonitor(
                 targetPackage, targetUid, repository, serviceScope
@@ -155,12 +158,18 @@ class AccessMonitorService : Service() {
 
             pidWatchJob = serviceScope.launch {
                 while (isActive) {
-                    val newPid = RootShell.findPid(targetPackage)
-                    if (newPid != null && newPid != targetPid) {
+                    val live = RootShell.findAllPids(targetPackage)
+                    val alive = live.isNotEmpty()
+                    TargetPresence.setAlive(alive)
+                    val newPid = live.firstOrNull()
+                    if (alive && newPid != null && newPid != targetPid) {
                         targetPid = newPid
                         restartProcessMonitors(repository)
+                    } else if (!alive && targetPid > 0) {
+                        targetPid = -1
+                        stopProcessMonitors()
                     }
-                    delay(1500)
+                    delay(500)
                 }
             }
         }
@@ -178,6 +187,13 @@ class AccessMonitorService : Service() {
         }
     }
 
+    private fun stopProcessMonitors() {
+        procMonitor?.stop()
+        procMonitor = null
+        straceMonitors.forEach { it.stop() }
+        straceMonitors.clear()
+    }
+
     private fun startStraceForPids(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
         val pids = RootShell.findAllPids(targetPackage).ifEmpty {
             listOfNotNull(targetPid.takeIf { it > 0 })
@@ -192,6 +208,7 @@ class AccessMonitorService : Service() {
     }
 
     private fun stopMonitoring() {
+        TargetPresence.end()
         pidWatchJob?.cancel()
         notifyJob?.cancel()
         appOpsMonitor?.stop()
