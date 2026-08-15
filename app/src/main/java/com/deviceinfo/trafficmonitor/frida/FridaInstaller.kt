@@ -34,6 +34,10 @@ object FridaInstaller {
     @Volatile
     var lastError: String? = null
 
+    @Volatile
+    var lastNonce: String = ""
+        private set
+
     enum class FridaStatus {
         NOT_INSTALLED,
         EXTRACTING,
@@ -99,9 +103,11 @@ object FridaInstaller {
     }
 
     fun prepareHooksForPackage(packageName: String, context: Context) {
+        lastNonce = System.currentTimeMillis().toString()
         val template = context.assets.open("frida/identifier_hooks.js")
             .bufferedReader().readText()
             .replace("__TARGET_PACKAGE__", packageName)
+            .replace("__INJECT_NONCE__", lastNonce)
             .replace("__MITM_ENABLED__", if (mitmEnabled) "true" else "false")
         val local = File(context.filesDir, "identifier_hooks_active.js")
         local.writeText(template)
@@ -252,10 +258,30 @@ object FridaInstaller {
                 return@withContext false
             }
 
+            if (!waitForScriptBoot()) {
+                status = FridaStatus.ERROR
+                lastError = "Frida зависла на процессе, но скрипт не шлёт события. Перехват не активен."
+                return@withContext false
+            }
+
             status = FridaStatus.INJECTED
             lastError = null
             true
         }
+
+    private suspend fun waitForScriptBoot(): Boolean {
+        val nonce = lastNonce
+        if (nonce.isBlank()) return false
+        repeat(25) {
+            val dump = RootShell.execAndRead(
+                "logcat -d -t 200 -s AccessMonFrida:I 2>/dev/null",
+                timeoutSec = 6
+            )
+            if (dump.contains(nonce) && dump.contains("frida.boot")) return true
+            delay(200)
+        }
+        return false
+    }
 
     /**
      * Посредник с первого PID: крутим pidof ещё до am start и инжектим сразу,

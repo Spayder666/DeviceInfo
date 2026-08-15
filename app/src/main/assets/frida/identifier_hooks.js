@@ -1,6 +1,7 @@
 'use strict';
 
 var TARGET_PKG = '__TARGET_PACKAGE__';
+var INJECT_NONCE = '__INJECT_NONCE__';
 var MITM_ENABLED = __MITM_ENABLED__;
 var EVENT_FILES = [
   '/data/user/0/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',
@@ -36,7 +37,19 @@ function jsonEscape(s) {
     });
 }
 
+function writeAndroidLog(line) {
+  try {
+    var addr = Module.findExportByName('liblog.so', '__android_log_write');
+    if (!addr) addr = Module.findExportByName(null, '__android_log_write');
+    if (!addr) return;
+    var fn = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
+    var text = line.length > 3500 ? line.substring(0, 3500) : line;
+    fn(4, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(text));
+  } catch (e) {}
+}
+
 function writeLine(line) {
+  writeAndroidLog(line);
   var io = initNativeIo();
   if (!io) return;
   var payload = line + '\n';
@@ -66,7 +79,8 @@ function writeEvent(identifierId, action, request, response, permission, opts) {
     '","permission":"' + jsonEscape(permission || '') +
     '","package":"' + jsonEscape(TARGET_PKG) +
     '","timestamp":' + ts +
-    ',"source":"frida"';
+    ',"source":"frida"' +
+    ',"nonce":"' + jsonEscape(INJECT_NONCE) + '"';
   if (opts.cached) line += ',"cached":true';
   line += '}';
   writeLine(line);

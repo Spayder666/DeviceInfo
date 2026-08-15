@@ -507,7 +507,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = false)
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
-                "Frida подключена (без перезапуска)"
+                "Frida пишет события (источник Frida в фильтре)"
             } else {
                 FridaInstaller.lastError ?: "Attach не удался"
             }
@@ -524,7 +524,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             val ok = FridaInstaller.injectManual(getApplication(), _packageName.value, restartApp = true)
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
-                "Цель запущена с посредником: хуки стоят с первого PID"
+                "Посредник активен: в фильтре должен появиться источник Frida"
             } else {
                 FridaInstaller.lastError ?: "Инъекция не удалась"
             }

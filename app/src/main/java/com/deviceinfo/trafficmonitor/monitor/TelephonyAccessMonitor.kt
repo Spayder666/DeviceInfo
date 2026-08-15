@@ -102,6 +102,7 @@ class TelephonyAccessMonitor(
         for (line in dump.lineSequence()) {
             if (line.isBlank() || !isRecentAccessStamp(line)) continue
             val op = Regex("""([A-Z_]+)""").find(line)?.groupValues?.get(1) ?: continue
+            if (op == "READ_PHONE_STATE") continue
             val id = when {
                 op.contains("DEVICE_IDENTIFIER") || op.contains("IMEI") -> "tel.imei"
                 op.contains("PHONE_NUMBER") -> "tel.line1_number"

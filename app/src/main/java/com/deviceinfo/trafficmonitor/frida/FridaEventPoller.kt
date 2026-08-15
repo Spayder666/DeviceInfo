@@ -23,6 +23,7 @@ class FridaEventPoller(
     private val scope: CoroutineScope
 ) {
     private var job: Job? = null
+    private var logJob: Job? = null
     private val lastSize = mutableMapOf<String, Long>()
     private val pending = mutableMapOf<String, String>()
 
@@ -35,11 +36,29 @@ class FridaEventPoller(
                 delay(400)
             }
         }
+        logJob = scope.launch(Dispatchers.IO) {
+            try {
+                RootShell.execStreaming(
+                    "logcat -v raw -T 1 AccessMonFrida:I *:S 2>&1"
+                ) { line ->
+                    if (isActive) scope.launch { ingestLogLine(line) }
+                }
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun stop() {
         job?.cancel()
+        logJob?.cancel()
         job = null
+        logJob = null
+    }
+
+    private suspend fun ingestLogLine(line: String) {
+        val start = line.indexOf('{')
+        if (start < 0) return
+        parseLine(line.substring(start).trim())
     }
 
     private suspend fun pollFile(path: String) {
@@ -77,7 +96,7 @@ class FridaEventPoller(
         try {
             val json = JSONObject(line)
             val pkg = json.optString("package", "")
-            if (pkg.isNotEmpty() && pkg != packageName) return
+            if (pkg.isNotEmpty() && pkg != packageName && pkg != "__TARGET_PACKAGE__") return
             val identifierId = json.optString("identifierId", "")
             val cached = json.optBoolean("cached", false)
 
