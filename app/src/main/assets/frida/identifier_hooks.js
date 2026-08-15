@@ -32,7 +32,7 @@ function jsonEscape(s) {
     });
 }
 
-function flushLine(line) {
+function writeLine(line) {
   var io = initNativeIo();
   if (!io) return;
   try {
@@ -45,53 +45,6 @@ function flushLine(line) {
     io.fwrite(buf, 1, payload.length, fp);
     io.fclose(fp);
   } catch (e) {}
-}
-
-var writeQueue = [];
-var flushScheduled = false;
-
-function flushQueue() {
-  if (!writeQueue.length) return;
-  var io = initNativeIo();
-  if (!io) {
-    writeQueue = [];
-    return;
-  }
-  try {
-    var path = Memory.allocUtf8String(EVENT_FILE);
-    var mode = Memory.allocUtf8String('a');
-    var fp = io.fopen(path, mode);
-    if (fp.isNull()) {
-      writeQueue = [];
-      return;
-    }
-    for (var i = 0; i < writeQueue.length; i++) {
-      var payload = writeQueue[i] + '\n';
-      var buf = Memory.allocUtf8String(payload);
-      io.fwrite(buf, 1, payload.length, fp);
-    }
-    io.fclose(fp);
-  } catch (e) {}
-  writeQueue = [];
-}
-
-function writeLineAsync(line) {
-  writeQueue.push(line);
-  if (writeQueue.length >= 24) {
-    flushQueue();
-    return;
-  }
-  if (flushScheduled) return;
-  flushScheduled = true;
-  try {
-    setTimeout(function () {
-      flushScheduled = false;
-      flushQueue();
-    }, 60);
-  } catch (e) {
-    flushScheduled = false;
-    flushQueue();
-  }
 }
 
 function writeEvent(identifierId, action, request, response, permission, opts) {
@@ -109,7 +62,7 @@ function writeEvent(identifierId, action, request, response, permission, opts) {
     ',"source":"frida"';
   if (opts.cached) line += ',"cached":true';
   line += '}';
-  writeLineAsync(line);
+  writeLine(line);
 }
 
 var lastReq = {};
@@ -2989,51 +2942,53 @@ function hookBrowserApis() {
   } catch (e) {}
 }
 
-function installEarlyJavaHooks() {
+function installJavaHooks() {
   writeEvent('frida.init', 'Frida: хуки Java API включены', TARGET_PKG, 'Build / Settings / Telephony', null);
   hookBuild();
   hookSystemProperties();
   hookSettings();
   hookTelephonyManager();
   snapshotBuildFields();
+  hookSubscriptionManager();
+  hookWifiAndBluetooth();
+  hookMediaDrm();
+  hookAdvertisingId();
+  hookAccounts();
+  hookNetworkInterface();
+  hookPackageManager();
+  hookContentResolver();
+  hookLocation();
+  hookCamera();
+  hookAudio();
+  hookSensors();
+  hookClipboard();
+  hookSms();
+  hookNetworkDeep();
+  hookBiometric();
+  hookMediaProjection();
+  hookOkHttp();
+  hookHttpUrlConnection();
+  hookWebView();
+  hookSqlite();
+  hookSharedPrefs();
+  hookWorkAndGeofence();
+  hookCronetVolleyRetrofit();
+  hookHmsAndFlutter();
+  hookSniAndIntent();
+  hookRequestSurface();
+  hookMissedRequestApis();
+  hookFraudFingerprint();
+  hookFraudSdks();
+  hookBrowserApis();
+  hookMissedSurface();
+  hookRootDetection();
 }
 
-function installJavaHookBatches() {
-  var batches = [
-    function () { hookSubscriptionManager(); hookWifiAndBluetooth(); hookMediaDrm(); },
-    function () { hookAdvertisingId(); hookAccounts(); hookNetworkInterface(); },
-    function () { hookPackageManager(); hookContentResolver(); hookLocation(); },
-    function () { hookCamera(); hookAudio(); hookSensors(); hookClipboard(); hookSms(); },
-    function () { hookNetworkDeep(); hookBiometric(); hookMediaProjection(); },
-    function () { hookOkHttp(); hookHttpUrlConnection(); hookWebView(); },
-    function () { hookSqlite(); hookSharedPrefs(); hookWorkAndGeofence(); },
-    function () { hookCronetVolleyRetrofit(); hookHmsAndFlutter(); hookSniAndIntent(); },
-    function () { hookRequestSurface(); hookMissedRequestApis(); },
-    function () { hookFraudFingerprint(); hookFraudSdks(); hookBrowserApis(); },
-    function () { hookMissedSurface(); hookRootDetection(); }
-  ];
-  var i = 0;
-  function next() {
-    if (i >= batches.length) return;
-    try { batches[i++](); } catch (e) {}
-    setTimeout(next, 90);
-  }
-  next();
-}
-
-// Не трогаем процесс в первые сотни мс — иначе чекер падает и ID не пишутся.
+// Как в v32: один проход Java.perform после старта, без Field.get и без File I/O хуков.
 setTimeout(function () {
   if (Java.available) {
     Java.perform(function () {
-      try { installEarlyJavaHooks(); } catch (e) {}
-    });
-  }
-}, 450);
-
-setTimeout(function () {
-  if (Java.available) {
-    Java.perform(function () {
-      try { installJavaHookBatches(); } catch (e) {}
+      try { installJavaHooks(); } catch (e) {}
     });
   }
   try { hookNativeProperties(); } catch (e) {}
@@ -3043,7 +2998,7 @@ setTimeout(function () {
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
-}, 2000);
+}, 1500);
 
 function truncateHttp(buf, maxLen) {
   maxLen = maxLen || 1800;

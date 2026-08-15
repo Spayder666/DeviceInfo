@@ -1,5 +1,6 @@
 package com.deviceinfo.trafficmonitor.ui
 
+import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
 import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
@@ -59,6 +60,8 @@ fun buildAskedDigest(events: List<CaptureEvent>): List<AskedItem> {
     val byKey = linkedMapOf<String, AskedItem>()
     for (event in events) {
         if (isInternalNoise(event)) continue
+        if (event.category != AccessCategory.IDENTIFIER) continue
+        if (event.responseDetails.isNullOrBlank()) continue
         val io = describeAskedGot(event)
         val key = event.identifierName ?: io.asked
         val existing = byKey[key]

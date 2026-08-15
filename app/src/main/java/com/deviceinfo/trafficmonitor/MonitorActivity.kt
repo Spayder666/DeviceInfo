@@ -83,7 +83,6 @@ import kotlinx.coroutines.launch
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.export.ExportHelper
 import com.deviceinfo.trafficmonitor.monitor.AccessMonitorService
-import com.deviceinfo.trafficmonitor.ui.AskedDigestCard
 import com.deviceinfo.trafficmonitor.ui.CategoryFilterRow
 import com.deviceinfo.trafficmonitor.ui.EmptyMonitorHint
 import com.deviceinfo.trafficmonitor.ui.EventDetailSheet
@@ -195,7 +194,6 @@ fun MonitorScreen(
     val dedupEnabled by viewModel.dedupEnabled.collectAsState()
     val showStats by viewModel.showStats.collectAsState()
     val sessionStats by viewModel.sessionStats.collectAsState()
-    val askedDigest by viewModel.askedDigest.collectAsState()
     val targetRunning by viewModel.targetRunning.collectAsState()
     val probeResult by viewModel.probeResult.collectAsState()
     val isProbing by viewModel.isProbing.collectAsState()
@@ -439,18 +437,13 @@ fun MonitorScreen(
             }
             if (showFridaHint && !fridaHintDismissed && fridaStatus != FridaInstaller.FridaStatus.INJECTED) {
                 HintBanner(
-                    text = "Модель, Android ID, IMEI видны после Frida. Лучше «+ Frida» до запуска чекера",
+                    text = "Снимок ID уже в списке. Frida пишет живые ответы API цели",
                     action = "Frida",
                     onAction = { viewModel.injectFridaAttach() },
                     onDismiss = { fridaHintDismissed = true }
                 )
             }
-            if (askedDigest.isNotEmpty() && searchQuery.isBlank()) {
-                AskedDigestCard(
-                    items = askedDigest,
-                    onSelectId = viewModel::filterByIdentifier
-                )
-            }
+            // Как в v32: список событий, без сводки dumpsys/logcat.
             if (events.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (eventCount > 0) {

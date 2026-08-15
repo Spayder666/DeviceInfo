@@ -57,13 +57,10 @@ fun isHighRisk(category: AccessCategory): Boolean = when (category) {
 }
 
 fun isIdentifierEvent(event: CaptureEvent): Boolean =
-    event.category == AccessCategory.IDENTIFIER ||
-        !event.identifierName.isNullOrBlank() ||
-        !event.identifierGroup.isNullOrBlank()
+    event.category == AccessCategory.IDENTIFIER
 
 fun eventMatchesCategory(event: CaptureEvent, category: AccessCategory?): Boolean {
     if (category == null) return true
-    if (category == AccessCategory.IDENTIFIER) return isIdentifierEvent(event)
     return event.category == category
 }
 
