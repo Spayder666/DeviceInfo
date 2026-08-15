@@ -12,7 +12,7 @@ class CaptureRepository(private val dao: CaptureEventDao) {
         dao.observeCount(packageName)
 
     suspend fun insert(event: CaptureEvent): Long {
-        if (!TargetPresence.shouldAccept(event.targetPackage)) return -1L
+        if (!TargetPresence.shouldAccept(event.targetPackage, event.source)) return -1L
         return dao.insert(event)
     }
 

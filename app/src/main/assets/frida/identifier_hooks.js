@@ -98,7 +98,7 @@ function writeEvent(identifierId, action, request, response, permission, opts) {
   opts = opts || {};
   var ts = Date.now();
   var req = request || action || identifierId || '';
-  var res = (response === null || response === undefined || response === '') ? '(пусто)' : String(response);
+  var res = (response === null || response === undefined) ? '' : String(response);
   var line = '{"identifierId":"' + jsonEscape(identifierId || '') +
     '","action":"' + jsonEscape(action || '') +
     '","request":"' + jsonEscape(req) +

@@ -1,6 +1,7 @@
 package com.deviceinfo.trafficmonitor.monitor
 
 import android.os.SystemClock
+import com.deviceinfo.trafficmonitor.data.EventSource
 
 /**
  * Событие = запрос живого процесса цели.
@@ -32,10 +33,12 @@ object TargetPresence {
         return SystemClock.elapsedRealtime() - last <= GRACE_MS
     }
 
-    fun shouldAccept(pkg: String): Boolean {
+    fun shouldAccept(pkg: String, source: EventSource? = null): Boolean {
         val current = packageName
         if (current.isEmpty() || pkg != current) return false
-        return isAliveNow()
+        if (isAliveNow()) return true
+        // Frida пишет только из живого процесса; pid-watch 1.5с не должен выкидывать эти строки.
+        return source == EventSource.FRIDA
     }
 
     fun end() {
