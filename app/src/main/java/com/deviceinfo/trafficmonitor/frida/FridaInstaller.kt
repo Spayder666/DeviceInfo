@@ -22,6 +22,8 @@ object FridaInstaller {
     const val INJECT_PATH = "$BASE_DIR/frida-inject"
     const val INJECT_LOG = "$BASE_DIR/inject.log"
     const val HTTPS_LOG = "$BASE_DIR/https.jsonl"
+    const val SPAWN_WAIT = "$BASE_DIR/spawn_wait.sh"
+    const val SPAWN_FLAG = "$BASE_DIR/spawn.ok"
 
     @Volatile
     var mitmEnabled: Boolean = false
@@ -231,14 +233,8 @@ object FridaInstaller {
             stopInjector()
 
             val pids = if (restartApp) {
-                RootShell.execAndRead("am force-stop $packageName")
-                delay(200)
-                if (!RootShell.launchApp(packageName)) {
-                    lastError = "Не удалось запустить приложение"
-                    return@withContext false
-                }
-                waitForPids(packageName) ?: run {
-                    lastError = "Приложение не запустилось (PID не найден)"
+                spawnAndInject(packageName) ?: run {
+                    lastError = lastError ?: "Приложение не запустилось (PID не найден)"
                     return@withContext false
                 }
             } else {
@@ -250,8 +246,9 @@ object FridaInstaller {
                 live
             }
 
-            val injected = pids.take(6).count { startInjector(it) }
-            if (injected == 0) {
+            val already = isInjectorRunning()
+            val injected = if (already) pids.size else pids.take(6).count { startInjector(it) }
+            if (injected == 0 && !already) {
                 return@withContext false
             }
 
@@ -260,14 +257,66 @@ object FridaInstaller {
             true
         }
 
-    private suspend fun waitForPids(packageName: String, attempts: Int = 40): List<Int>? {
-        repeat(attempts) {
-            val live = RootShell.findAllPids(packageName)
-            if (live.isNotEmpty()) return live
-            delay(50)
+    /**
+     * Посредник с первого PID: крутим pidof ещё до am start и инжектим сразу,
+     * не клонируя приложение в виртуальный контейнер.
+     */
+    private suspend fun spawnAndInject(packageName: String): List<Int>? {
+        RootShell.execAndRead("am force-stop $packageName")
+        delay(150)
+        installSpawnWaiter()
+        RootShell.execAndRead("rm -f $SPAWN_FLAG")
+        RootShell.execDetached(
+            "sh $SPAWN_WAIT ${RootShell.shellQuote(packageName)} " +
+                "$INJECT_PATH $HOOKS_PATH $BASE_DIR"
+        )
+        delay(30)
+        if (!RootShell.launchApp(packageName)) {
+            lastError = "Не удалось запустить приложение"
+            return null
         }
-        return null
+        repeat(50) {
+            val flag = RootShell.execAndRead("cat $SPAWN_FLAG 2>/dev/null").trim()
+            if (flag == "ok" || flag == "timeout") {
+                return RootShell.findAllPids(packageName).takeIf { it.isNotEmpty() }
+            }
+            delay(40)
+        }
+        return RootShell.findAllPids(packageName).takeIf { it.isNotEmpty() }
     }
+
+    private fun installSpawnWaiter() {
+        val script = """
+            #!/system/bin/sh
+            pkg="${'$'}1"
+            inject="${'$'}2"
+            script="${'$'}3"
+            dir="${'$'}4"
+            i=0
+            while [ ${'$'}i -lt 400 ]; do
+              pids=`pidof "${'$'}pkg" 2>/dev/null`
+              if [ -n "${'$'}pids" ]; then
+                for p in ${'$'}pids; do
+                  echo -n > "${'$'}dir/inject.log.${'$'}p"
+                  "${'$'}inject" -p "${'$'}p" -s "${'$'}script" -e > "${'$'}dir/inject.log.${'$'}p" 2>&1 &
+                done
+                echo ok > "${'$'}dir/spawn.ok"
+                exit 0
+              fi
+              i=$((i+1))
+              usleep 2000 2>/dev/null || sleep 0.01
+            done
+            echo timeout > "${'$'}dir/spawn.ok"
+            exit 1
+        """.trimIndent()
+        val local = File.createTempFile("spawn_wait", ".sh")
+        local.writeText(script)
+        RootShell.execAndRead("cp ${local.absolutePath} $SPAWN_WAIT && chmod 755 $SPAWN_WAIT")
+        local.delete()
+    }
+
+    private fun isInjectorRunning(): Boolean =
+        RootShell.execAndRead("pgrep -f '$INJECT_PATH' 2>/dev/null").trim().isNotEmpty()
 
     private fun preparePtrace() {
         RootShell.execAndRead("setenforce 0 2>/dev/null")
