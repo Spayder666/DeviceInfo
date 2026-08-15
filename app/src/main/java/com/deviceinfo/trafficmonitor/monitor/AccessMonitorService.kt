@@ -106,8 +106,8 @@ class AccessMonitorService : Service() {
         }
 
         serviceScope.launch {
-            targetPid = waitForPid(targetPackage) ?: -1
             targetUid = RootShell.getUid(targetPackage) ?: -1
+            targetPid = RootShell.findPid(targetPackage) ?: -1
 
             fridaMonitor = FridaMonitor(applicationContext, targetPackage, repository, serviceScope)
                 .also { it.start() }
@@ -140,40 +140,35 @@ class AccessMonitorService : Service() {
             decisionTracker = DecisionTracker(targetPackage, repository, serviceScope).also { it.start() }
             appOpsMonitor = AppOpsMonitor(targetPackage, targetUid, repository, serviceScope).also { it.start() }
 
-            if (targetPid > 0) {
+            if (targetUid > 0 || targetPid > 0) {
                 logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
+            }
+            if (targetPid > 0) {
                 straceMonitor = StraceMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
                 procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
             }
 
             pidWatchJob = serviceScope.launch {
                 while (isActive) {
-                    delay(3000)
                     val newPid = RootShell.findPid(targetPackage)
                     if (newPid != null && newPid != targetPid) {
                         targetPid = newPid
                         restartProcessMonitors(repository)
                     }
+                    delay(1500)
                 }
             }
         }
     }
 
-    private suspend fun waitForPid(packageName: String, attempts: Int = 20): Int? {
-        repeat(attempts) {
-            RootShell.findPid(packageName)?.let { return it }
-            delay(500)
-        }
-        return null
-    }
-
     private fun restartProcessMonitors(repository: com.deviceinfo.trafficmonitor.data.CaptureRepository) {
-        logcatMonitor?.stop()
         straceMonitor?.stop()
         procMonitor?.stop()
 
-        if (targetPid > 0) {
+        if (logcatMonitor == null && (targetUid > 0 || targetPid > 0)) {
             logcatMonitor = LogcatMonitor(targetPackage, targetPid, targetUid, repository, serviceScope).also { it.start() }
+        }
+        if (targetPid > 0) {
             straceMonitor = StraceMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
             procMonitor = ProcMonitor(targetPackage, targetPid, repository, serviceScope).also { it.start() }
         }

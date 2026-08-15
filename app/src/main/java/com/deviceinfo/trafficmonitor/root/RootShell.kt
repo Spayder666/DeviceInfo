@@ -70,7 +70,7 @@ object RootShell {
             val pid = parts[0].toIntOrNull() ?: continue
             if (isAppProcessName(parts[1], packageName)) pids.add(pid)
         }
-        return pids.filter { pidBelongsToPackage(it, packageName) }
+        return pids.toList()
     }
 
     fun isAppProcessName(name: String, packageName: String): Boolean {

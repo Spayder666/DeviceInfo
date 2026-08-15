@@ -131,7 +131,7 @@ class AppOpsMonitor(
             if (accessMatch != null) {
                 val accessTime = accessMatch.groupValues[2].trim().ifBlank { accessMatch.groupValues[1] }
                 val stateKey = "$currentOp:$accessTime"
-                if (lastState.put(stateKey, accessTime) == null && emit) {
+                if (lastState.put(stateKey, accessTime) == null && (emit || isRecentAccess(accessTime))) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
                     val identifierId = opIdentifierMap[currentOp]
                     val value = identifierId
@@ -154,7 +154,7 @@ class AppOpsMonitor(
             if (rejectMatch != null) {
                 val rejectTime = rejectMatch.groupValues[1]
                 val stateKey = "reject:$currentOp:$rejectTime"
-                if (lastState.put(stateKey, rejectTime) == null && emit) {
+                if (lastState.put(stateKey, rejectTime) == null && (emit || isRecentAccess(rejectTime))) {
                     record(
                         category = AccessCategory.PERMISSION,
                         action = "$currentOp (отклонено)",
@@ -167,6 +167,12 @@ class AppOpsMonitor(
             }
         }
         seeded = true
+    }
+
+    private fun isRecentAccess(accessTime: String): Boolean {
+        val seconds = Regex("""\+(\d+)s""").find(accessTime)?.groupValues?.get(1)?.toIntOrNull()
+        if (seconds != null) return seconds <= 180
+        return Regex("""\+\d+ms""").containsMatchIn(accessTime)
     }
 
     private suspend fun record(
