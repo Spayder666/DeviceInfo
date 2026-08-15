@@ -293,7 +293,9 @@ object FridaInstaller {
             }
             delay(200)
         }
-        val injectLog = RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null").trim()
+        val injectLog = stripAnsi(
+            RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")
+        ).trim()
         if (injectLog.isNotBlank()) {
             lastError = "Frida зависла на процессе, но скрипт не шлёт события. ${injectLog.take(240)}"
         }
@@ -417,21 +419,23 @@ object FridaInstaller {
         }
         val log = "$INJECT_LOG.$pid"
         RootShell.execAndRead("echo -n > $log")
-        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH -e --runtime=qjs"
+        // -e = eternalize AND EXIT. That teardown prints "Aborted" and kills console.log.
+        // Keep frida-inject resident so the session and inject.log stay alive.
+        val cmd = "$INJECT_PATH -p $pid -s $HOOKS_PATH"
         RootShell.execDetached("$cmd > $log 2>&1")
 
         var lastLog = ""
-        repeat(16) {
+        repeat(20) {
             Thread.sleep(150)
-            lastLog = RootShell.execAndRead("cat $log 2>/dev/null").trim()
-            if (looksLikeInjectFailure(lastLog)) {
+            lastLog = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null")).trim()
+            if (looksLikeInjectFailure(lastLog) && !logHasBoot(lastLog)) {
                 lastError = "frida-inject: ${lastLog.take(220)}"
                 return false
             }
             val running = RootShell.execAndRead(
                 "pgrep -f '$INJECT_PATH' 2>/dev/null"
             ).trim().isNotEmpty()
-            if (running || looksLikeInjectSuccess(lastLog)) {
+            if (running || looksLikeInjectSuccess(lastLog) || logHasBoot(lastLog)) {
                 return true
             }
         }
@@ -444,17 +448,24 @@ object FridaInstaller {
         return false
     }
 
+    private fun stripAnsi(text: String): String =
+        text.replace(Regex("\u001B\\[[0-9;]*m"), "")
+
+    private fun logHasBoot(log: String): Boolean =
+        log.contains("\"identifierId\":\"frida.boot\"") || log.contains("frida.boot")
+
     private fun looksLikeInjectFailure(log: String): Boolean {
         if (log.isBlank()) return false
-        val lower = log.lowercase()
+        val lower = stripAnsi(log).lowercase()
         return listOf(
-            "unable to", "failed", "error:", "permission denied", "not found", "cannot", "aborted"
+            "unable to", "failed", "error:", "permission denied", "not found", "cannot",
+            "process terminated", "connection terminated", "device lost"
         ).any { it in lower }
     }
 
     private fun looksLikeInjectSuccess(log: String): Boolean {
         if (log.isBlank()) return false
-        val lower = log.lowercase()
+        val lower = stripAnsi(log).lowercase()
         return listOf("script", "loaded", "injected", "connected", "resumed").any { it in lower }
     }
 

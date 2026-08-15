@@ -13,8 +13,8 @@ android {
         applicationId = "com.deviceinfo.trafficmonitor"
         minSdk = 33
         targetSdk = 35
-        versionCode = 52
-        versionName = "1.0.52"
+        versionCode = 53
+        versionName = "1.0.53"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
