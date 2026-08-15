@@ -47,6 +47,17 @@ fun isHighRisk(category: AccessCategory): Boolean = when (category) {
     else -> false
 }
 
+fun isIdentifierEvent(event: CaptureEvent): Boolean =
+    event.category == AccessCategory.IDENTIFIER ||
+        !event.identifierName.isNullOrBlank() ||
+        !event.identifierGroup.isNullOrBlank()
+
+fun eventMatchesCategory(event: CaptureEvent, category: AccessCategory?): Boolean {
+    if (category == null) return true
+    if (category == AccessCategory.IDENTIFIER) return isIdentifierEvent(event)
+    return event.category == category
+}
+
 fun eventMatchesQuery(event: CaptureEvent, query: String): Boolean {
     if (query.isBlank()) return true
     val q = query.trim()

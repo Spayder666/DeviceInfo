@@ -18,7 +18,9 @@ import com.deviceinfo.trafficmonitor.ui.DisplayEvent
 import com.deviceinfo.trafficmonitor.ui.SessionStats
 import com.deviceinfo.trafficmonitor.ui.buildSessionStats
 import com.deviceinfo.trafficmonitor.ui.collapseRepeats
+import com.deviceinfo.trafficmonitor.ui.eventMatchesCategory
 import com.deviceinfo.trafficmonitor.ui.eventMatchesQuery
+import com.deviceinfo.trafficmonitor.ui.isIdentifierEvent
 import com.deviceinfo.trafficmonitor.ui.pinKey
 import com.deviceinfo.trafficmonitor.util.AppListLoader
 import com.deviceinfo.trafficmonitor.util.RecentApp
@@ -150,7 +152,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         _searchQuery
     ) { all, cat, idGroup, source, query ->
         all.filter { event ->
-            (cat == null || event.category == cat) &&
+            eventMatchesCategory(event, cat) &&
                 (idGroup == null || event.identifierGroup == idGroup) &&
                 (source == null || event.source == source) &&
                 eventMatchesQuery(event, query)
@@ -189,7 +191,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val categoryCounts: StateFlow<Map<AccessCategory, Int>> = _allEvents
-        .map { list -> list.groupingBy { it.category }.eachCount() }
+        .map { list ->
+            val counts = list.groupingBy { it.category }.eachCount().toMutableMap()
+            counts[AccessCategory.IDENTIFIER] = list.count(::isIdentifierEvent)
+            counts
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     val identifierGroupCounts: StateFlow<Map<String, Int>> = _allEvents
