@@ -509,9 +509,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             if (ok) FridaEventPoller.active?.pullLogcatDump()
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
-                "Frida пишет события (источник Frida в фильтре)"
+                "Скрипт загружен. В фильтре должен появиться источник Frida"
             } else {
-                FridaInstaller.lastError ?: "Attach не удался"
+                FridaInstaller.lastError ?: "Zygisk не подключил хуки"
             }
             _isFridaInjecting.value = false
         }
@@ -527,9 +527,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             if (ok) FridaEventPoller.active?.pullLogcatDump()
             _fridaStatus.value = FridaInstaller.status
             _fridaMessage.value = if (ok) {
-                "Посредник активен: в фильтре должен появиться источник Frida"
+                "Скрипт загружен. В фильтре должен появиться источник Frida"
             } else {
-                FridaInstaller.lastError ?: "Инъекция не удалась"
+                FridaInstaller.lastError ?: "Zygisk не подключил хуки"
             }
             _isFridaInjecting.value = false
         }

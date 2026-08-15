@@ -45,11 +45,6 @@ object FridaInstaller {
     @Volatile
     private var lastTargetPackage: String = ""
 
-    @Volatile
-    private var injectProcess: Process? = null
-
-    @Volatile
-    private var amsProcess: Process? = null
 
     enum class FridaStatus {
         NOT_INSTALLED,
@@ -278,65 +273,86 @@ object FridaInstaller {
     }
 
     /**
-     * Инъекция через frida-inject (ptrace), без LD_PRELOAD/wrap.
-     * wrap+gadget на Android 13+ ломает запуск из‑за linker namespace.
+     * Хуки через Zygisk: gadget грузится в цели при specialize, без ptrace.
+     * frida-inject на Magisk + Android 13 здесь стабильно Aborted — больше не используем.
+     * Перезапуск цели обязателен: модуль срабатывает только на старте процесса.
      */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun injectManual(context: Context, packageName: String, restartApp: Boolean): Boolean =
         withContext(Dispatchers.IO) {
             if (!ensureReady(context)) return@withContext false
-            if (!ensureFridaInject(context)) return@withContext false
             prepareHooksForPackage(packageName, context)
-            preparePtrace()
-            stopInjector()
 
-            val amsOk = injectAmsBypass(packageName)
-            val amsErr = lastError
-            RootShell.execAndRead("am set-debug-app ${RootShell.shellQuote(packageName)}")
-
-            val pids = spawnAndWait(packageName) ?: run {
-                lastError = lastError ?: "Приложение не запустилось (PID не найден)"
+            if (!ZygiskModule.hasMagiskTree()) {
+                status = FridaStatus.ERROR
+                lastError = "Нужен Magisk или KernelSU с Zygisk. ptrace-инъекция на этом устройстве не работает."
+                return@withContext false
+            }
+            if (!ZygiskModule.isZygiskEnabled()) {
+                status = FridaStatus.ERROR
+                lastError = "Включите Zygisk в Magisk (Настройки → Zygisk) и перезагрузите телефон"
+                return@withContext false
+            }
+            if (ZygiskModule.isOnDenyList(packageName)) {
+                status = FridaStatus.ERROR
+                lastError = "Уберите $packageName из DenyList Magisk — иначе Zygisk не загрузится в цель"
+                return@withContext false
+            }
+            if (!ZygiskModule.install(context)) {
+                status = FridaStatus.ERROR
+                lastError = lastError ?: "Не удалось записать модуль Magisk в /data/adb/modules"
+                return@withContext false
+            }
+            ZygiskModule.writePayload(packageName)
+            if (ZygiskModule.needsReboot()) {
+                status = FridaStatus.READY
+                lastError = "Модуль Magisk установлен. Перезагрузите телефон один раз, затем снова нажмите + Frida"
                 return@withContext false
             }
 
-            val pid = pickMainPid(packageName, pids) ?: pids.first()
-            if (amsOk && ensureAmhooks(context) && attachJvmti(packageName) &&
-                waitForScriptBoot("early")
-            ) {
+            spawnAndWait(packageName) ?: run {
+                lastError = lastError ?: "Приложение не запустилось (PID не найден)"
+                status = FridaStatus.ERROR
+                return@withContext false
+            }
+            if (waitForScriptBoot()) {
                 status = FridaStatus.INJECTED
                 lastError = null
                 return@withContext true
             }
-            val jvmtiErr = lastError ?: amsErr
 
-            if (ensureFridaInject(context) && attachScript(pid, packageName, BOOT_PATH) &&
-                waitForScriptBoot("canary")
-            ) {
-                stopInjector()
-                delay(250)
-                if (attachScript(pid, packageName, HOOKS_PATH) && waitForScriptBoot("early")) {
-                    status = FridaStatus.INJECTED
-                    lastError = null
-                    return@withContext true
-                }
-            }
-
+            val zlog = ZygiskModule.readLog(packageName)
+            val gadgetLog = stripAnsi(
+                RootShell.execAndRead(
+                    "logcat -d -v brief -t 200 -s AccessMonZygisk:I AccessMonFrida:I Gadget:I frida:I frida-gadget:I 2>/dev/null"
+                )
+            ).trim()
             status = FridaStatus.ERROR
-            lastError = "JVMTI: ${jvmtiErr ?: "нет"}. Inject: ${lastError ?: "Aborted"}. ${attachDiagnostics(pid)}"
-            return@withContext false
+            lastError = when {
+                zlog.contains("dlopen=ok") ->
+                    "Gadget в процессе есть, но скрипт не ответил. $zlog ${gadgetLog.take(160)}"
+                zlog.isBlank() ->
+                    "Zygisk не загрузился в цель. Zygisk включён? Приложение не в DenyList? После установки модуля была перезагрузка? ${gadgetLog.take(160)}"
+                else ->
+                    "Zygisk: $zlog ${gadgetLog.take(160)}"
+            }
+            false
         }
 
-    private suspend fun waitForScriptBoot(expectedResponse: String? = null): Boolean {
+    private suspend fun waitForScriptBoot(): Boolean {
         val nonce = lastNonce
         if (nonce.isBlank()) return false
-        repeat(40) {
-            val eventCats = if (lastTargetPackage.isNotBlank()) {
-                eventFiles(lastTargetPackage).joinToString(" ")
+        val pkg = lastTargetPackage
+        repeat(60) {
+            val eventCats = if (pkg.isNotBlank()) {
+                eventFiles(pkg).joinToString(" ")
             } else {
                 EVENTS_PATH
             }
+            val zlog = if (pkg.isNotBlank()) ZygiskModule.zygiskLogPath(pkg) else ""
             val dump = RootShell.execAndRead(
-                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I frida:I Gadget:I 2>/dev/null; " +
-                    "cat $INJECT_LOG $INJECT_LOG.* $eventCats 2>/dev/null",
+                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I AccessMonZygisk:I frida:I Gadget:I frida-gadget:I 2>/dev/null; " +
+                    "cat $eventCats $zlog 2>/dev/null",
                 timeoutSec = 6
             )
             for (line in dump.lineSequence()) {
@@ -345,23 +361,18 @@ object FridaInstaller {
                 val json = runCatching { org.json.JSONObject(line.substring(start).trim()) }.getOrNull()
                     ?: continue
                 if (json.optString("nonce") != nonce) continue
-                if (json.optString("identifierId") != "frida.boot") continue
-                if (expectedResponse == null || json.optString("response") == expectedResponse) {
+                if (json.optString("identifierId") == "frida.boot" ||
+                    json.optString("identifierId") == "frida.init"
+                ) {
                     return true
                 }
             }
-            delay(200)
-        }
-        val injectLog = stripAnsi(
-            RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")
-        ).trim()
-        if (injectLog.isNotBlank()) {
-            lastError = "Frida зависла на процессе, но скрипт не шлёт события. ${injectLog.take(240)}"
+            delay(250)
         }
         return false
     }
 
-    /** Запуск цели и пауза: агент Frida на Android 13 абортится, если цепляться в первые сотни мс. */
+    /** Перезапуск цели: Zygisk подхватывает процесс только на specialize. */
     private suspend fun spawnAndWait(packageName: String): List<Int>? {
         RootShell.execAndRead("am force-stop $packageName")
         delay(250)
@@ -372,7 +383,7 @@ object FridaInstaller {
         repeat(40) {
             val live = RootShell.findAllPids(packageName)
             if (live.isNotEmpty()) {
-                delay(2_500)
+                delay(400)
                 return RootShell.findAllPids(packageName).ifEmpty { live }
             }
             delay(150)
@@ -381,399 +392,14 @@ object FridaInstaller {
         return null
     }
 
-    private fun pickMainPid(packageName: String, pids: List<Int>): Int? {
-        val scored = pids.map { pid ->
-            val cmd = RootShell.execAndRead("tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null").trim()
-            val isolated = cmd.contains(":") || cmd.contains("isolated")
-            pid to Pair(cmd, isolated)
-        }
-        scored.firstOrNull { (_, info) ->
-            !info.second && (info.first == packageName || info.first.startsWith("$packageName "))
-        }?.let { return it.first }
-        scored.firstOrNull { !it.second.second }?.let { return it.first }
-        return pids.firstOrNull()
-    }
-
-    private fun preparePtrace() {
-        RootShell.execAndRead("setenforce 0 2>/dev/null")
-        RootShell.execAndRead("echo 0 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null")
-        RootShell.execAndRead("chmod 711 $BASE_DIR && chmod 644 $HOOKS_PATH 2>/dev/null")
-    }
-
-    /**
-     * libart.so is already mapped in zygote children — that is not "ready".
-     * Wait until the app finished specialize (apk mapped / app SELinux / ART threads).
-     */
-    private fun isProcessReady(pid: Int, packageName: String): Boolean {
-        val comm = RootShell.execAndRead("cat /proc/$pid/comm 2>/dev/null").trim()
-        if (comm.isEmpty() || comm.startsWith("zygote")) return false
-        val maps = RootShell.execAndRead("grep -E '/data/app/|$packageName' /proc/$pid/maps 2>/dev/null | head -n 3")
-        if (maps.contains("/data/app/") && maps.contains(packageName)) return true
-        val ctx = RootShell.execAndRead("cat /proc/$pid/attr/current 2>/dev/null")
-        if (ctx.contains("untrusted_app") || ctx.contains("priv_app")) return true
-        val threads = RootShell.execAndRead("cat /proc/$pid/task/*/comm 2>/dev/null")
-        return threads.contains("HeapTaskDaemon") || threads.contains("Jit thread pool")
-    }
-
-    private fun waitForProcessReady(pid: Int, packageName: String): Boolean {
-        repeat(100) {
-            if (isProcessReady(pid, packageName)) {
-                Thread.sleep(200)
-                return true
-            }
-            Thread.sleep(80)
-        }
-        return RootShell.execAndRead("kill -0 $pid 2>/dev/null && echo ok").trim() == "ok"
-    }
-
-    private fun attachScript(pid: Int, packageName: String, scriptPath: String): Boolean {
-        if (!waitForProcessReady(pid, packageName)) {
-            lastError = "Процесс $pid ещё не специализирован (zygote)"
-            return false
-        }
-        val log = "$INJECT_LOG.$pid"
-        RootShell.execAndRead("rm -f $INJECT_LOG $INJECT_LOG.*; echo -n > $log")
-        RootShell.execAndRead("kill -STOP $pid 2>/dev/null")
-        val ok = try {
-            startKeptInjector("$INJECT_PATH -p $pid -s $scriptPath > $log 2>&1")
-            if (waitInjectorSettled(log)) return true
-            RootShell.execAndRead("echo -n > $log")
-            startKeptInjector("$INJECT_PATH -p $pid -s $scriptPath --runtime=v8 > $log 2>&1")
-            if (waitInjectorSettled(log)) return true
-            RootShell.execAndRead("echo -n > $log")
-            startKeptInjector(
-                "$INJECT_PATH -n ${RootShell.shellQuote(packageName)} -s $scriptPath > $log 2>&1"
-            )
-            waitInjectorSettled(log)
-        } finally {
-            RootShell.execAndRead("kill -CONT $pid 2>/dev/null")
-        }
-        return ok
-    }
-
-    private fun startKeptInjector(command: String) {
-        runCatching { injectProcess?.destroyForcibly() }
-        injectProcess = RootShell.execKeepAlive(command)
-    }
-
-    /** Хуки в system_server: FLAG_DEBUGGABLE для цели, иначе ART отвергнет attach-agent. */
-    private fun injectAmsBypass(packageName: String): Boolean {
-        val ss = RootShell.execAndRead("pidof system_server").trim()
-            .split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()
-        if (ss == null) {
-            lastError = "system_server не найден"
-            return false
-        }
-        val js = """
-            'use strict';
-            var TARGET = '$packageName';
-            function mark(info) {
-              try {
-                if (info && info.packageName.value === TARGET) {
-                  info.flags.value = info.flags.value | 0x2;
-                }
-              } catch (e) {}
-            }
-            Java.perform(function () {
-              try {
-                var AMS = Java.use('com.android.server.am.ActivityManagerService');
-                AMS.enforceDebuggable.overloads.forEach(function (o) {
-                  o.implementation = function () {};
-                });
-              } catch (e) {}
-              try {
-                var PR = Java.use('com.android.server.am.ProcessRecord');
-                var orig = PR.isDebuggable;
-                PR.isDebuggable.implementation = function () {
-                  try {
-                    if (this.info.value && this.info.value.packageName.value === TARGET) return true;
-                  } catch (e) {}
-                  return orig.call(this);
-                };
-              } catch (e) {}
-              ['com.android.server.pm.PackageManagerService${'$'}IPackageManagerImpl',
-               'com.android.server.pm.PackageManagerService',
-               'com.android.server.pm.ComputerEngine'].forEach(function (name) {
-                try {
-                  var C = Java.use(name);
-                  if (!C.getApplicationInfo) return;
-                  C.getApplicationInfo.overloads.forEach(function (o) {
-                    o.implementation = function () {
-                      var info = o.apply(this, arguments);
-                      mark(info);
-                      return info;
-                    };
-                  });
-                } catch (e) {}
-              });
-              console.log('AMF {"identifierId":"frida.boot","action":"AMS bypass","request":"' +
-                TARGET + '","response":"ams","package":"' + TARGET +
-                '","timestamp":' + Date.now() + ',"source":"frida","nonce":"$lastNonce"}');
-            });
-        """.trimIndent()
-        val local = File.createTempFile("am_ams", ".js")
-        local.writeText(js)
-        val script = "$BASE_DIR/ams_bypass.js"
-        RootShell.execAndRead("cp ${local.absolutePath} $script && chmod 644 $script")
-        local.delete()
-        val log = "$INJECT_LOG.ams"
-        RootShell.execAndRead("echo -n > $log")
-        runCatching { amsProcess?.destroyForcibly() }
-        amsProcess = RootShell.execKeepAlive("$INJECT_PATH -p $ss -s $script > $log 2>&1")
-        repeat(20) {
-            Thread.sleep(200)
-            val text = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null"))
-            if (text.contains("\"response\":\"ams\"") || text.contains("AMS bypass")) return true
-            if (looksLikeInjectFailure(text)) {
-                lastError = "system_server: ${text.take(180)}"
-                return false
-            }
-        }
-        val text = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null"))
-        lastError = "system_server: ${text.take(180).ifBlank { "хук не подтвердился" }}"
-        return text.contains("script") || RootShell.execAndRead(
-            "pgrep -f 'frida-inject -p $ss' 2>/dev/null"
-        ).trim().isNotEmpty()
-    }
-
-    private fun waitInjectorSettled(log: String): Boolean {
-        var lastLog = ""
-        var stable = 0
-        repeat(24) {
-            Thread.sleep(150)
-            lastLog = stripAnsi(RootShell.execAndRead("cat $log 2>/dev/null")).trim()
-            if (logHasBoot(lastLog)) return true
-            if (looksLikeInjectFailure(lastLog)) {
-                lastError = "frida-inject: ${lastLog.take(220)}"
-                return false
-            }
-            val running = RootShell.execAndRead(
-                "pgrep -f '$INJECT_PATH' 2>/dev/null"
-            ).trim().isNotEmpty()
-            if (running) {
-                stable++
-                if (stable >= 6) return true
-            } else if (stable > 0) {
-                lastError = lastLog.ifBlank { "frida-inject вышел" }
-                return false
-            }
-        }
-        lastError = if (lastLog.isNotBlank()) {
-            "frida-inject: ${lastLog.take(220)}"
-        } else {
-            "frida-inject не запустился (root / SELinux)"
-        }
-        return false
-    }
-
-    private fun attachDiagnostics(pid: Int): String {
-        val comm = RootShell.execAndRead("cat /proc/$pid/comm 2>/dev/null").trim()
-        val cmd = RootShell.execAndRead("tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null").trim()
-        val tracer = RootShell.execAndRead(
-            "awk '/TracerPid|State|Seccomp/{print}' /proc/$pid/status 2>/dev/null"
-        ).trim().replace('\n', ' ')
-        val log = stripAnsi(RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")).trim()
-        return "pid=$pid comm=$comm cmd=$cmd $tracer ${log.take(140)}"
-    }
-
     private fun stripAnsi(text: String): String =
         text.replace(Regex("\u001B\\[[0-9;]*m"), "")
 
-    private fun logHasBoot(log: String): Boolean =
-        log.contains("\"identifierId\":\"frida.boot\"") || log.contains("frida.boot")
-
-    private fun looksLikeInjectFailure(log: String): Boolean {
-        if (log.isBlank()) return false
-        val lower = stripAnsi(log).lowercase()
-        return listOf(
-            "unable to", "failed", "error:", "permission denied", "not found", "cannot",
-            "aborted", "process terminated", "connection terminated", "device lost"
-        ).any { it in lower }
-    }
-
-    private fun attachJvmti(packageName: String): Boolean {
-        val out = RootShell.execAndRead(
-            "am attach-agent ${RootShell.shellQuote(packageName)} $AMHOOKS_PATH 2>&1",
-            timeoutSec = 10
-        )
-        val lower = out.lowercase()
-        if (listOf("exception", "error", "not debuggable", "unable", "failed", "denied")
-                .any { it in lower }
-        ) {
-            lastError = "attach-agent: ${out.trim().take(200).ifBlank { "отклонено" }}"
-            return false
-        }
-        return true
-    }
-
-    private fun ensureAmhooks(context: Context): Boolean {
-        if (RootShell.execAndRead("test -x $AMHOOKS_PATH && echo ok").trim() == "ok") {
-            return true
-        }
-        val abiFolder = resolveAssetAbiFolder()
-        val assetPath = "frida/$abiFolder/libamhooks.so"
-        val cacheFile = File(context.filesDir, "libamhooks-$abiFolder.so")
-        return try {
-            if (!cacheFile.exists() || cacheFile.length() == 0L) {
-                context.assets.open(assetPath).use { input ->
-                    cacheFile.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            RootShell.execAndRead(
-                "cp ${cacheFile.absolutePath} $AMHOOKS_PATH && chmod 755 $AMHOOKS_PATH && " +
-                    "chcon u:object_r:apk_data_file:s0 $AMHOOKS_PATH 2>/dev/null; echo ok"
-            ).trim().endsWith("ok")
-        } catch (e: Exception) {
-            lastError = "libamhooks: ${e.message}"
-            false
-        }
-    }
-
-    private fun injectGadget(context: Context, pid: Int, packageName: String): Boolean {
-        if (!ensureKitty(context)) return false
-        writeGadgetConfig(packageName)
-        val log = "$INJECT_LOG.gadget"
-        RootShell.execAndRead("echo -n > $log")
-        val cmd = "$KITTY_PATH --pid $pid --libs $GADGET_PATH --memfd --timeout 8000"
-        val out = stripAnsi(RootShell.execAndRead("$cmd > $log 2>&1; cat $log", timeoutSec = 20))
-        val mapped = RootShell.execAndRead(
-            "grep -c libfrida-gadget /proc/$pid/maps 2>/dev/null"
-        ).trim().toIntOrNull() ?: 0
-        if (mapped > 0) return true
-        lastError = "gadget: ${out.take(180).ifBlank { "не загрузился" }}"
-        return false
-    }
-
-    private fun ensureKitty(context: Context): Boolean {
-        if (RootShell.execAndRead("test -x $KITTY_PATH && echo ok").trim() == "ok") {
-            return true
-        }
-        val abiFolder = resolveAssetAbiFolder()
-        val assetPath = "frida/$abiFolder/AndKittyInjector"
-        val cacheFile = File(context.filesDir, "AndKittyInjector-$abiFolder")
-        return try {
-            if (!cacheFile.exists() || cacheFile.length() == 0L) {
-                context.assets.open(assetPath).use { input ->
-                    cacheFile.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            RootShell.execAndRead(
-                "cp ${cacheFile.absolutePath} $KITTY_PATH && chmod 755 $KITTY_PATH && echo ok"
-            ).trim() == "ok"
-        } catch (e: Exception) {
-            lastError = "AndKittyInjector: ${e.message}"
-            false
-        }
-    }
-
-    private fun stopInjector() {
-        runCatching { injectProcess?.destroyForcibly() }
-        injectProcess = null
-    }
-
-    private suspend fun ensureFridaInject(context: Context): Boolean = withContext(Dispatchers.IO) {
-        if (RootShell.execAndRead("test -x $INJECT_PATH && echo ok").trim() == "ok") {
-            return@withContext true
-        }
-        status = FridaStatus.EXTRACTING
-        if (deployInjectFromApp(context)) return@withContext true
-        status = FridaStatus.DOWNLOADING
-        if (downloadFridaInject(context)) return@withContext true
-        status = FridaStatus.ERROR
-        lastError = lastError ?: "frida-inject недоступен"
-        false
-    }
-
-    private fun deployInjectFromApp(context: Context): Boolean {
-        val abiFolder = resolveAssetAbiFolder()
-        val assetPath = "frida/$abiFolder/frida-inject"
-        val cacheFile = File(context.filesDir, "frida-inject-$abiFolder")
-        return try {
-            if (!cacheFile.exists() || cacheFile.length() == 0L) {
-                context.assets.open(assetPath).use { input ->
-                    cacheFile.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            RootShell.execAndRead(
-                "cp ${cacheFile.absolutePath} $INJECT_PATH && chmod 755 $INJECT_PATH && echo ok"
-            ).trim() == "ok"
-        } catch (e: Exception) {
-            lastError = "Встроенный frida-inject: ${e.message}"
-            false
-        }
-    }
-
-    private fun downloadFridaInject(context: Context): Boolean {
-        val abi = resolveDownloadAbi()
-        val url = "https://github.com/frida/frida/releases/download/$FRIDA_VERSION/" +
-            "frida-inject-$FRIDA_VERSION-android-$abi.xz"
-        val cacheXz = File(context.cacheDir, "frida-inject-$abi.xz")
-        val cacheBin = File(context.cacheDir, "frida-inject-$abi")
-        return try {
-            downloadFile(url, cacheXz)
-            RootShell.execAndRead(
-                "which xz >/dev/null 2>&1 && xz -d -f ${cacheXz.absolutePath} || unxz -f ${cacheXz.absolutePath}"
-            )
-            if (!cacheBin.exists()) {
-                lastError = "Не удалось распаковать frida-inject"
-                return false
-            }
-            RootShell.execAndRead(
-                "cp ${cacheBin.absolutePath} $INJECT_PATH && chmod 755 $INJECT_PATH && echo ok"
-            ).trim() == "ok"
-        } catch (e: Exception) {
-            lastError = "frida-inject: ${e.message}"
-            false
-        }
-    }
-
-    private suspend fun ensureFridaServerRunning(context: Context): Boolean = withContext(Dispatchers.IO) {
-        if (!deployFridaServerIfNeeded(context)) return@withContext false
-
-        val running = RootShell.execAndRead(
-            "pidof frida-server 2>/dev/null || pgrep -f '$SERVER_PATH' 2>/dev/null"
-        ).trim()
-        if (running.isNotEmpty()) return@withContext true
-
-        RootShell.execAndRead("chmod 755 $SERVER_PATH && $SERVER_PATH -D >/dev/null 2>&1 & sleep 1 && echo ok")
-        delay(500)
-        RootShell.execAndRead("pidof frida-server 2>/dev/null || pgrep -f '$SERVER_PATH' 2>/dev/null")
-            .trim().isNotEmpty()
-    }
-
-    private fun deployFridaServerIfNeeded(context: Context): Boolean {
-        if (RootShell.execAndRead("test -x $SERVER_PATH && echo ok").trim() == "ok") {
-            return true
-        }
-        val abi = resolveDownloadAbi()
-        val url = "https://github.com/frida/frida/releases/download/$FRIDA_VERSION/" +
-            "frida-server-$FRIDA_VERSION-android-$abi.xz"
-        val cacheXz = File(context.cacheDir, "frida-server-$abi.xz")
-        val cacheBin = File(context.cacheDir, "frida-server-$abi")
-
-        return try {
-            downloadFile(url, cacheXz)
-            RootShell.execAndRead(
-                "which xz >/dev/null 2>&1 && xz -d -f ${cacheXz.absolutePath} || unxz -f ${cacheXz.absolutePath}"
-            )
-            if (!cacheBin.exists()) {
-                lastError = "Не удалось распаковать frida-server"
-                return false
-            }
-            RootShell.execAndRead(
-                "cp ${cacheBin.absolutePath} $SERVER_PATH && chmod 755 $SERVER_PATH && echo ok"
-            ).trim() == "ok"
-        } catch (e: Exception) {
-            lastError = "frida-server: ${e.message}"
-            false
-        }
-    }
-
     fun clearInjection(packageName: String) {
-        stopInjector()
-        runCatching { amsProcess?.destroyForcibly() }
-        amsProcess = null
-        RootShell.execAndRead("pkill -f '$INJECT_PATH' 2>/dev/null")
+        ZygiskModule.clearTarget()
+        if (packageName.isNotBlank()) {
+            RootShell.execAndRead("rm -f ${ZygiskModule.zygiskLogPath(packageName)}")
+        }
         RootShell.execAndRead("am clear-debug-app 2>/dev/null")
         if (status == FridaStatus.INJECTED) {
             status = FridaStatus.READY
@@ -791,7 +417,7 @@ object FridaInstaller {
         FridaStatus.NOT_INSTALLED -> "Frida: не установлен"
         FridaStatus.EXTRACTING -> "Frida: установка из APK…"
         FridaStatus.DOWNLOADING -> "Frida: загрузка…"
-        FridaStatus.READY -> "Frida: готов (ручное подключение)"
+        FridaStatus.READY -> "Frida: Zygisk готов"
         FridaStatus.INJECTED -> "Frida: хуки активны"
         FridaStatus.ERROR -> "Frida: ошибка (${lastError ?: "unknown"})"
     }

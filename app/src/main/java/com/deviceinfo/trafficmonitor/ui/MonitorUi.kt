@@ -507,7 +507,7 @@ fun EmptyMonitorHint() {
         Spacer(Modifier.height(10.dp))
         Text("Пока тихо", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         Text(
-            "Посредник в реальном процессе, не виртуальный клон. «+ Frida» ставит хуки с первого PID — в списке API, запрос и ответ системы.",
+            "Посредник в реальном процессе, не виртуальный клон. «+ Frida» ставит Zygisk-модуль (один раз перезагрузка), затем хуки: API, запрос и ответ системы.",
             fontSize = 12.sp,
             color = TextMuted,
             modifier = Modifier.padding(top = 6.dp)

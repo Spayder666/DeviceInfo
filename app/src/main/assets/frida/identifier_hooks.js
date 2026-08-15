@@ -9,6 +9,14 @@ var MITM_ENABLED = __MITM_ENABLED__;
     TARGET_PKG + '","response":"early","package":"' + TARGET_PKG +
     '","timestamp":' + Date.now() + ',"source":"frida","nonce":"' + INJECT_NONCE + '"}';
   try { console.log('AMF ' + line); } catch (e) {}
+  try {
+    var addr = Module.findExportByName('liblog.so', '__android_log_write');
+    if (!addr) addr = Module.findExportByName(null, '__android_log_write');
+    if (addr) {
+      var fn = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
+      fn(4, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(line));
+    }
+  } catch (e) {}
 })();
 var EVENT_FILES = [
   '/data/user/0/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',

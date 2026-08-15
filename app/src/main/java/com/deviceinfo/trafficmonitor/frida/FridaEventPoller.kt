@@ -48,7 +48,7 @@ class FridaEventPoller(
 
     suspend fun pullLogcatDump() {
         val dump = RootShell.execAndRead(
-            "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null",
+            "logcat -d -v threadtime -t 400 -s AccessMonFrida:I AccessMonZygisk:I Gadget:I frida-gadget:I 2>/dev/null",
             timeoutSec = 8
         )
         val injectDump = RootShell.execAndRead(

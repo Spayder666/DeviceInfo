@@ -437,7 +437,7 @@ fun MonitorScreen(
             }
             if (showFridaHint && !fridaHintDismissed && fridaStatus != FridaInstaller.FridaStatus.INJECTED) {
                 HintBanner(
-                    text = "Модель, Android ID, IMEI появятся, когда цель их запросит. Для живых ответов — Frida",
+                    text = "Модель, Android ID, IMEI появятся, когда цель их запросит. + Frida: Zygisk, один раз перезагрузка",
                     action = "Frida",
                     onAction = { viewModel.injectFridaAttach() },
                     onDismiss = { fridaHintDismissed = true }

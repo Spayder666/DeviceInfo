@@ -31,7 +31,7 @@ Android-приложение, которое смотрит **что целев�
 5. **dumpsys / cmd** — LMS, GNSS, камера, RIL, Health Connect, Nearby, `cmd location`…
 6. **Binder / iptables UID LOG / ss** — IPC и сеть без VPN/MITM
 7. **inotify / sqlite** — запись в `/data/data/<pkg>` (кэш GPS, prefs, БД)
-8. **Frida** (вручную) — Java API: Location, OkHttp, WebView, SQLite, SharedPreferences
+8. **Frida** (вручную, через Zygisk-модуль) — Java API: Location, OkHttp, WebView, SQLite, SharedPreferences
 9. **Perfetto / atrace** — короткие трейсы AM/WM/camera/audio/binder
 10. **tcpdump / pcap** — заголовки пакетов (snaplen 96) и DNS QNAME, без расшифровки HTTPS
 11. **statsd atoms** — системные счётчики location/camera/appops
@@ -50,6 +50,7 @@ Android-приложение, которое смотрит **что целев�
 
 - Android 13+ (API 33)
 - **Root-доступ (su)** на устройстве
+- **Magisk с Zygisk** (или KernelSU + ZygiskNext) — хуки в процессе цели. Первый раз: + Frida, перезагрузка, снова + Frida
 - `strace` в системе (обычно `/system/bin/strace`)
 
 ## Сборка
