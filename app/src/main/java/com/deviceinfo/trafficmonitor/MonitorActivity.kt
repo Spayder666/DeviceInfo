@@ -437,7 +437,7 @@ fun MonitorScreen(
             }
             if (showFridaHint && !fridaHintDismissed && fridaStatus != FridaInstaller.FridaStatus.INJECTED) {
                 HintBanner(
-                    text = "Снимок ID уже в списке. Frida пишет живые ответы API цели",
+                    text = "Модель, Android ID, IMEI появятся, когда цель их запросит. Для живых ответов — Frida",
                     action = "Frida",
                     onAction = { viewModel.injectFridaAttach() },
                     onDismiss = { fridaHintDismissed = true }
