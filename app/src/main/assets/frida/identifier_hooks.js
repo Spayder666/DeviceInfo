@@ -3,6 +3,21 @@
 var TARGET_PKG = '__TARGET_PACKAGE__';
 var INJECT_NONCE = '__INJECT_NONCE__';
 var MITM_ENABLED = __MITM_ENABLED__;
+
+(function () {
+  var line = '{"identifierId":"frida.boot","action":"Frida: скрипт загружен","request":"' +
+    TARGET_PKG + '","response":"early","package":"' + TARGET_PKG +
+    '","timestamp":' + Date.now() + ',"source":"frida","nonce":"' + INJECT_NONCE + '"}';
+  try { console.log('AMF ' + line); } catch (e) {}
+  try {
+    var addr = Module.findExportByName('liblog.so', '__android_log_write');
+    if (!addr) addr = Module.findExportByName(null, '__android_log_write');
+    if (addr) {
+      var fn = new NativeFunction(addr, 'int', ['int', 'pointer', 'pointer']);
+      fn(5, Memory.allocUtf8String('AccessMonFrida'), Memory.allocUtf8String(line));
+    }
+  } catch (e) {}
+})();
 var EVENT_FILES = [
   '/data/user/0/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',
   '/data/data/' + TARGET_PKG + '/cache/access_monitor_events.jsonl',
@@ -49,6 +64,7 @@ function writeAndroidLog(line) {
 }
 
 function writeLine(line) {
+  try { console.log('AMF ' + line); } catch (e) {}
   writeAndroidLog(line);
   var io = initNativeIo();
   if (!io) return;

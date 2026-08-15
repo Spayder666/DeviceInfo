@@ -51,7 +51,11 @@ class FridaEventPoller(
             "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null",
             timeoutSec = 8
         )
-        for (line in dump.lineSequence()) {
+        val injectDump = RootShell.execAndRead(
+            "cat ${FridaInstaller.INJECT_LOG} ${FridaInstaller.INJECT_LOG}.* 2>/dev/null",
+            timeoutSec = 5
+        )
+        for (line in (dump + "\n" + injectDump).lineSequence()) {
             ingestLogLine(line)
         }
     }

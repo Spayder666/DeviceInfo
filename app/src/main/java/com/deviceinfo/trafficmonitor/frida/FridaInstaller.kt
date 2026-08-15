@@ -260,7 +260,9 @@ object FridaInstaller {
 
             if (!waitForScriptBoot()) {
                 status = FridaStatus.ERROR
-                lastError = "Frida зависла на процессе, но скрипт не шлёт события. Перехват не активен."
+                if (lastError.isNullOrBlank()) {
+                    lastError = "Frida зависла на процессе, но скрипт не шлёт события. Перехват не активен."
+                }
                 return@withContext false
             }
 
@@ -274,7 +276,8 @@ object FridaInstaller {
         if (nonce.isBlank()) return false
         repeat(25) {
             val dump = RootShell.execAndRead(
-                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null",
+                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null; " +
+                    "cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null",
                 timeoutSec = 6
             )
             for (line in dump.lineSequence()) {
@@ -287,6 +290,10 @@ object FridaInstaller {
                 }
             }
             delay(200)
+        }
+        val injectLog = RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null").trim()
+        if (injectLog.isNotBlank()) {
+            lastError = "Frida зависла на процессе, но скрипт не шлёт события. ${injectLog.take(240)}"
         }
         return false
     }
