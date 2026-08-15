@@ -96,7 +96,13 @@ class AppOpsMonitor(
         job = null
     }
 
+    fun resetForNewProcess() {
+        lastState.clear()
+        seeded = false
+    }
+
     private suspend fun pollAppOps() {
+        if (!TargetPresence.isAliveNow()) return
         val output = RootShell.execAndRead("dumpsys appops $packageName", timeoutSec = 15)
         parseAppOps(output)
     }
@@ -119,9 +125,11 @@ class AppOpsMonitor(
                 val mode = accessMatch.groupValues[1]
                 val accessTime = accessMatch.groupValues[2].trim().ifBlank { mode }
                 val stateKey = "$currentOp:$mode"
-                if (lastState.put(stateKey, accessTime) == null && (emit || isRecentAccess(accessTime))) {
+                if (stateKey in lastState) continue
+                val shouldEmit = emit || isRecentAccess(accessTime)
+                if (shouldEmit) {
                     val category = opCategoryMap[currentOp] ?: AccessCategory.PERMISSION
-                    record(
+                    val ok = record(
                         category = category,
                         action = currentOp,
                         permission = currentOp,
@@ -129,15 +137,20 @@ class AppOpsMonitor(
                         responseDetails = "разрешено ($mode), $accessTime",
                         raw = line.trim()
                     )
+                    if (ok) lastState[stateKey] = accessTime
+                } else {
+                    lastState[stateKey] = accessTime
                 }
             }
 
             val rejectMatch = Regex("Reject:\\s*\\[(\\w+)\\]").find(line)
             if (rejectMatch != null) {
                 val rejectTime = rejectMatch.groupValues[1]
-                val stateKey = "reject:$currentOp:$rejectTime"
-                if (lastState.put(stateKey, rejectTime) == null && (emit || isRecentAccess(rejectTime))) {
-                    record(
+                val stateKey = "reject:$currentOp"
+                if (stateKey in lastState) continue
+                val shouldEmit = emit || isRecentAccess(rejectTime)
+                if (shouldEmit) {
+                    val ok = record(
                         category = AccessCategory.PERMISSION,
                         action = "$currentOp (отклонено)",
                         permission = currentOp,
@@ -145,6 +158,9 @@ class AppOpsMonitor(
                         responseDetails = "Статус: отклонено, время=$rejectTime",
                         raw = line.trim()
                     )
+                    if (ok) lastState[stateKey] = rejectTime
+                } else {
+                    lastState[stateKey] = rejectTime
                 }
             }
         }
@@ -160,9 +176,9 @@ class AppOpsMonitor(
         requestDetails: String?,
         responseDetails: String?,
         raw: String
-    ) {
-        if (repository.isDuplicate(packageName, action, raw)) return
-        repository.insert(
+    ): Boolean {
+        if (repository.isDuplicate(packageName, action, raw)) return true
+        return repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
                 category = category,
@@ -173,6 +189,6 @@ class AppOpsMonitor(
                 responseDetails = responseDetails,
                 rawData = raw
             )
-        )
+        ) > 0
     }
 }

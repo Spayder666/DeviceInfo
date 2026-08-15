@@ -2942,22 +2942,32 @@ function hookBrowserApis() {
   } catch (e) {}
 }
 
-function installJavaHooks() {
-  writeEvent('frida.init', 'Frida: хуки Java API включены', TARGET_PKG, 'Build / Settings / Telephony', null);
+var identifierHooksInstalled = false;
+function installIdentifierHooks() {
+  if (identifierHooksInstalled) return;
+  identifierHooksInstalled = true;
+  writeEvent('frida.init', 'Frida: хуки идентификаторов включены', TARGET_PKG, 'Build / Settings / Telephony / Location / Wi-Fi', null);
   hookBuild();
   hookSystemProperties();
   hookSettings();
   hookTelephonyManager();
   snapshotBuildFields();
-  hookSubscriptionManager();
+  hookLocation();
   hookWifiAndBluetooth();
+}
+
+var remainingHooksInstalled = false;
+function installJavaHooks() {
+  if (remainingHooksInstalled) return;
+  remainingHooksInstalled = true;
+  installIdentifierHooks();
+  hookSubscriptionManager();
   hookMediaDrm();
   hookAdvertisingId();
   hookAccounts();
   hookNetworkInterface();
   hookPackageManager();
   hookContentResolver();
-  hookLocation();
   hookCamera();
   hookAudio();
   hookSensors();
@@ -2984,21 +2994,28 @@ function installJavaHooks() {
   hookRootDetection();
 }
 
-// Как в v32: один проход Java.perform после старта, без Field.get и без File I/O хуков.
+// Сразу: Model / Android ID / IMEI / GPS / Wi‑Fi. Остальное — чуть позже.
+// Без Field.get и без File I/O хуков (они вешали старт цели).
+if (Java.available) {
+  Java.perform(function () {
+    try { installIdentifierHooks(); } catch (e) {}
+  });
+}
+try { hookNativeProperties(); } catch (e) {}
+
 setTimeout(function () {
   if (Java.available) {
     Java.perform(function () {
       try { installJavaHooks(); } catch (e) {}
     });
   }
-  try { hookNativeProperties(); } catch (e) {}
   try { hookNativeNetMeta(); } catch (e) {}
   try { hookNativeRootAccess(); } catch (e) {}
   try { hookNativeSyscall(); } catch (e) {}
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
-}, 1500);
+}, 1200);
 
 function truncateHttp(buf, maxLen) {
   maxLen = maxLen || 1800;

@@ -29,10 +29,12 @@ class LocationDumpMonitor(
     fun start() {
         job = scope.launch(Dispatchers.IO) {
             while (isActive) {
-                pollLocationService()
-                pollGnss()
-                pollAppLocationOps()
-                pollForegroundService()
+                if (TargetPresence.isAliveNow()) {
+                    pollLocationService()
+                    pollGnss()
+                    pollAppLocationOps()
+                    pollForegroundService()
+                }
                 delay(2000)
             }
         }
@@ -41,6 +43,10 @@ class LocationDumpMonitor(
     fun stop() {
         job?.cancel()
         job = null
+    }
+
+    fun resetForNewProcess() {
+        seen.clear()
     }
 
     private suspend fun pollLocationService() {
@@ -64,7 +70,7 @@ class LocationDumpMonitor(
             val extra = match.groupValues[4]
             val acc = Regex("hAcc=([^\\s\\]]+)").find(extra)?.groupValues?.get(1)
             val key = "last:$provider:$lat:$lon"
-            if (seen.put(key, lat) != null) continue
+            if (key in seen) continue
 
             val id = when (provider.lowercase()) {
                 "gps", "gnss" -> "location.gps"
@@ -73,7 +79,7 @@ class LocationDumpMonitor(
                 "passive" -> "location.passive"
                 else -> "location.gps"
             }
-            record(
+            val ok = record(
                 action = "Последняя координата ($provider)",
                 request = "LocationManagerService / provider=$provider",
                 response = buildString {
@@ -84,6 +90,7 @@ class LocationDumpMonitor(
                 raw = match.value,
                 identifierId = id
             )
+            if (ok) seen[key] = lat
         }
     }
 
@@ -99,9 +106,9 @@ class LocationDumpMonitor(
             ?: Regex("(?i)provider[=:]\\s*(\\w+)").find(window)?.groupValues?.get(1)
 
         val key = "reg:$packageName:${request ?: window.hashCode()}"
-        if (seen.put(key, request ?: "reg") != null) return
+        if (key in seen) return
 
-        record(
+        val ok = record(
             action = "Приложение подписано на локацию",
             request = "Пакет $packageName зарегистрирован в LocationManagerService" +
                 (provider?.let { " (provider=$it)" } ?: ""),
@@ -114,6 +121,7 @@ class LocationDumpMonitor(
                 else -> "location.gps"
             }
         )
+        if (ok) seen[key] = request ?: "reg"
     }
 
     private suspend fun parseRecentRequests(dump: String) {
@@ -125,15 +133,16 @@ class LocationDumpMonitor(
             ) continue
             if (!line.contains(packageName) && !line.contains("request")) continue
             val key = "hist:${line.trim()}"
-            if (seen.put(key, "1") != null) continue
+            if (key in seen) continue
             if (!line.contains(packageName)) continue
-            record(
+            val ok = record(
                 action = "Запрос локации (история LMS)",
                 request = line.trim(),
                 response = "LocationManagerService зафиксировал запрос от $packageName",
                 raw = line.trim(),
                 identifierId = "location.gps"
             )
+            if (ok) seen[key] = "1"
         }
     }
 
@@ -151,14 +160,15 @@ class LocationDumpMonitor(
         ).joinToString(" ")
         if (summary.isBlank() || !dump.contains(packageName)) return
         val key = "gnss:$summary"
-        if (seen.put(key, summary) != null) return
-        record(
+        if (key in seen) return
+        val ok = record(
             action = "GNSS HAL",
             request = "dumpsys gnss",
             response = summary,
             raw = dump.take(400),
             identifierId = "location.hal"
         )
+        if (ok) seen[key] = summary
     }
 
     private suspend fun pollAppLocationOps() {
@@ -176,10 +186,10 @@ class LocationDumpMonitor(
                 ?: inline?.groupValues?.get(2)?.trim()
                 ?: continue
             if (stamp.isBlank() || !isRecentAccessStamp(stamp)) continue
-            val key = "op:$op:$stamp"
-            if (seen.put(key, stamp) != null) continue
+            val key = "op:$op"
+            if (key in seen) continue
             val delivered = op.startsWith("MONITOR")
-            record(
+            val ok = record(
                 action = if (delivered) "Доставка локации ($op)" else "Доступ к $op",
                 request = "AppOps $op",
                 response = if (delivered) {
@@ -190,6 +200,7 @@ class LocationDumpMonitor(
                 raw = block.take(300),
                 identifierId = if (op.contains("WIFI")) "location.wifi_scan" else "location.gps"
             )
+            if (ok) seen[key] = stamp
         }
     }
 
@@ -202,21 +213,22 @@ class LocationDumpMonitor(
         val hasLocationFgs = dump.contains("location", ignoreCase = true) &&
             (dump.contains("foreground", ignoreCase = true) || dump.contains("isForeground"))
         if (!hasLocationFgs) return
-        val key = "fgs:${dump.hashCode()}"
         val snippet = dump.lines().filter {
             it.contains("location", ignoreCase = true) ||
                 it.contains("ServiceRecord") ||
                 it.contains("isForeground")
         }.joinToString("\n").take(400)
         if (snippet.isBlank()) return
-        if (seen.put("fgs:$packageName:${snippet.take(80)}", "1") != null) return
-        record(
+        val fgsKey = "fgs:$packageName:${snippet.take(80)}"
+        if (fgsKey in seen) return
+        val ok = record(
             action = "Foreground service (location)",
             request = "dumpsys activity services $packageName",
             response = snippet.replace(Regex("\\s+"), " ").take(300),
             raw = snippet,
             identifierId = "location.gps"
         )
+        if (ok) seen[fgsKey] = "1"
     }
 
     private suspend fun record(
@@ -225,9 +237,9 @@ class LocationDumpMonitor(
         response: String?,
         raw: String,
         identifierId: String? = "location.gps"
-    ) {
-        if (repository.isDuplicate(packageName, action, raw, sinceMs = 4000)) return
-        repository.insert(
+    ): Boolean {
+        if (repository.isDuplicate(packageName, action, raw, sinceMs = 4000)) return true
+        return repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
                 category = AccessCategory.LOCATION,
@@ -240,6 +252,6 @@ class LocationDumpMonitor(
                 identifierName = identifierId,
                 identifierGroup = "LOCATION"
             )
-        )
+        ) > 0
     }
 }

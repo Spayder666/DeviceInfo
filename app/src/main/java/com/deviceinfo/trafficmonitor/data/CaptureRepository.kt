@@ -16,6 +16,9 @@ class CaptureRepository(private val dao: CaptureEventDao) {
         return dao.insert(event)
     }
 
+    /** Снимок после проверки PID цели: чтение dumpsys дольше grace TargetPresence. */
+    suspend fun insertSnapshot(event: CaptureEvent): Long = dao.insert(event)
+
     suspend fun getById(id: Long): CaptureEvent? = dao.getById(id)
 
     suspend fun getAllEvents(packageName: String): List<CaptureEvent> =

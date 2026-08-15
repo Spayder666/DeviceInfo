@@ -56,7 +56,12 @@ class TelephonyAccessMonitor(
         logJob = null
     }
 
+    fun resetForNewProcess() {
+        seen.clear()
+    }
+
     private suspend fun pollDumps() {
+        if (!TargetPresence.isAliveNow()) return
         val registry = RootShell.execAndRead(
             "dumpsys telephony.registry 2>/dev/null | grep -n -i -E '$packageName|uid=$uid' | head -n 20",
             timeoutSec = 8
@@ -145,9 +150,12 @@ class TelephonyAccessMonitor(
         source: EventSource = EventSource.DUMPSYS
     ) {
         val key = "$action:${raw.hashCode()}"
-        if (seen.put(key, "1") != null) return
-        if (repository.isDuplicate(packageName, action, raw, sinceMs = 4000)) return
-        repository.insert(
+        if (key in seen) return
+        if (repository.isDuplicate(packageName, action, raw, sinceMs = 4000)) {
+            seen[key] = "1"
+            return
+        }
+        val id = repository.insert(
             CaptureEvent(
                 targetPackage = packageName,
                 category = AccessCategory.TELEPHONY,
@@ -161,5 +169,6 @@ class TelephonyAccessMonitor(
                 identifierGroup = "TELEPHONY"
             )
         )
+        if (id > 0) seen[key] = "1"
     }
 }
