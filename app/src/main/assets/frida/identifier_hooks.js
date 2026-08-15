@@ -1445,6 +1445,28 @@ function hookNativeNetMeta() {
       });
     }
   } catch (e) {}
+  try {
+    var dlopen = Module.findExportByName(null, 'android_dlopen_ext') ||
+      Module.findExportByName('libdl.so', 'dlopen');
+    if (dlopen) {
+      Interceptor.attach(dlopen, {
+        onEnter: function (args) {
+          inNativeHook++;
+          try { this.path = Memory.readUtf8String(args[0]); } catch (e) { this.path = ''; }
+        },
+        onLeave: function () {
+          try {
+            if (this.path && /loc|gps|gnss|map|cronet|okhttp|mqtt/i.test(this.path)) {
+              writeEvent('location.hal', 'dlopen', this.path, 'loaded', null, { async: true });
+            }
+            if (this.path && /magisk|zygisk|xposed|lsposed|frida|gadget|riru|substrate/i.test(this.path)) {
+              writeRoot('root.maps', 'dlopen', this.path, 'loaded');
+            }
+          } finally { inNativeHook--; }
+        }
+      });
+    }
+  } catch (e) {}
 }
 
 var lastRoot = {};
@@ -3026,9 +3048,7 @@ function installJavaHooks() {
   hookRootDetection();
 }
 
-setTimeout(function () {
-  try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
-}, 200);
+try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
 
 function tryInstallIdentifierHooks() {
   if (identifierHooksInstalled) return true;
@@ -3040,18 +3060,29 @@ function tryInstallIdentifierHooks() {
 }
 
 var nativePropsHooked = false;
+var nativeNetHooked = false;
 var installTries = 0;
 var installTimer = null;
 
-setTimeout(function () {
-  installTimer = setInterval(function () {
-    installTries++;
-    try { tryInstallIdentifierHooks(); } catch (e) {}
-    if (identifierHooksInstalled || installTries > 20) {
-      if (installTimer) clearInterval(installTimer);
-    }
-  }, 400);
-}, 1800);
+function installNativeEarly() {
+  if (!nativePropsHooked) {
+    try { hookNativeProperties(); nativePropsHooked = true; } catch (e) {}
+  }
+  if (!nativeNetHooked) {
+    try { hookNativeNetMeta(); nativeNetHooked = true; } catch (e) {}
+  }
+}
+
+installNativeEarly();
+try { tryInstallIdentifierHooks(); } catch (e) {}
+
+installTimer = setInterval(function () {
+  installTries++;
+  try { tryInstallIdentifierHooks(); } catch (e) {}
+  if (identifierHooksInstalled || installTries > 40) {
+    if (installTimer) clearInterval(installTimer);
+  }
+}, 80);
 
 setTimeout(function () {
   if (Java.available) {
@@ -3059,14 +3090,11 @@ setTimeout(function () {
       try { installJavaHooks(); } catch (e) {}
     });
   }
-  if (!nativePropsHooked) {
-    try { hookNativeProperties(); nativePropsHooked = true; } catch (e) {}
-  }
-  try { hookNativeNetMeta(); } catch (e) {}
+  installNativeEarly();
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
-}, 3500);
+}, 400);
 
 function truncateHttp(buf, maxLen) {
   maxLen = maxLen || 1800;

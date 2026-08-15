@@ -211,7 +211,7 @@ class AccessMonitor : public zygisk::ModuleBase {
 
     static void *injectThread(void *arg) {
         auto *job = static_cast<InjectJob *>(arg);
-        usleep(2 * 1000 * 1000);
+        usleep(350 * 1000);
         doInject(*job);
         if (job->gadgetFd >= 0) close(job->gadgetFd);
         if (job->hooksFd >= 0) close(job->hooksFd);

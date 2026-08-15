@@ -105,8 +105,8 @@ object ZygiskModule {
             val prop = """
                 id=access_monitor
                 name=Access Monitor
-                version=v1.0.61
-                versionCode=61
+                version=v1.0.62
+                versionCode=62
                 author=AccessMonitor
                 description=Loads Frida gadget into the monitored app
             """.trimIndent()
