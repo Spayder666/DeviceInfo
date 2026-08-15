@@ -129,6 +129,21 @@ object RootShell {
         )
     }
 
+    /**
+     * Держит сессию su открытой. Magisk часто убивает дерево, если `su -c 'cmd &'` сразу выходит —
+     * frida-inject тогда пишет только Aborted.
+     */
+    fun execKeepAlive(command: String): Process {
+        val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+        Thread {
+            runCatching { process.inputStream.copyTo(java.io.OutputStream.nullOutputStream()) }
+        }.apply { isDaemon = true; start() }
+        Thread {
+            runCatching { process.errorStream.copyTo(java.io.OutputStream.nullOutputStream()) }
+        }.apply { isDaemon = true; start() }
+        return process
+    }
+
     fun shellQuote(value: String): String {
         return "'" + value.replace("'", "'\\''") + "'"
     }

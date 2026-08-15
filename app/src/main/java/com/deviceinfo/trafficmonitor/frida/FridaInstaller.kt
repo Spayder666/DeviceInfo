@@ -37,6 +37,9 @@ object FridaInstaller {
     var lastNonce: String = ""
         private set
 
+    @Volatile
+    private var injectProcess: Process? = null
+
     enum class FridaStatus {
         NOT_INSTALLED,
         EXTRACTING,
@@ -396,18 +399,25 @@ object FridaInstaller {
             lastError = "Процесс $pid ещё не специализирован (zygote)"
             return false
         }
-        stopInjector()
         val log = "$INJECT_LOG.$pid"
         RootShell.execAndRead("rm -f $INJECT_LOG $INJECT_LOG.*; echo -n > $log")
-        val byPid = "$INJECT_PATH -p $pid -s $scriptPath"
-        RootShell.execDetached("$byPid > $log 2>&1")
-        if (waitInjectorSettled(log)) return true
+        RootShell.execAndRead("kill -STOP $pid 2>/dev/null")
+        val ok = try {
+            startKeptInjector("$INJECT_PATH -p $pid -s $scriptPath > $log 2>&1")
+            if (waitInjectorSettled(log)) return true
+            startKeptInjector(
+                "$INJECT_PATH -n ${RootShell.shellQuote(packageName)} -s $scriptPath > $log 2>&1"
+            )
+            waitInjectorSettled(log)
+        } finally {
+            RootShell.execAndRead("kill -CONT $pid 2>/dev/null")
+        }
+        return ok
+    }
 
+    private fun startKeptInjector(command: String) {
         stopInjector()
-        RootShell.execAndRead("echo -n > $log")
-        val byName = "$INJECT_PATH -n ${RootShell.shellQuote(packageName)} -s $scriptPath"
-        RootShell.execDetached("$byName > $log 2>&1")
-        return waitInjectorSettled(log)
+        injectProcess = RootShell.execKeepAlive(command)
     }
 
     private fun waitInjectorSettled(log: String): Boolean {
@@ -443,8 +453,11 @@ object FridaInstaller {
     private fun attachDiagnostics(pid: Int): String {
         val comm = RootShell.execAndRead("cat /proc/$pid/comm 2>/dev/null").trim()
         val cmd = RootShell.execAndRead("tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null").trim()
+        val tracer = RootShell.execAndRead(
+            "awk '/TracerPid|State|Seccomp/{print}' /proc/$pid/status 2>/dev/null"
+        ).trim().replace('\n', ' ')
         val log = stripAnsi(RootShell.execAndRead("cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null")).trim()
-        return "pid=$pid comm=$comm cmd=$cmd ${log.take(160)}"
+        return "pid=$pid comm=$comm cmd=$cmd $tracer ${log.take(140)}"
     }
 
     private fun stripAnsi(text: String): String =
@@ -463,6 +476,8 @@ object FridaInstaller {
     }
 
     private fun stopInjector() {
+        runCatching { injectProcess?.destroyForcibly() }
+        injectProcess = null
         RootShell.execAndRead("pkill -f '$INJECT_PATH' 2>/dev/null")
     }
 
