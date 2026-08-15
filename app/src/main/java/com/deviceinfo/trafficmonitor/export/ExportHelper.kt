@@ -6,6 +6,8 @@ import android.os.Environment
 import androidx.core.content.FileProvider
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.EventSource
+import com.deviceinfo.trafficmonitor.ui.buildAskedDigest
+import com.deviceinfo.trafficmonitor.ui.describeAskedGot
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -91,8 +93,21 @@ object ExportHelper {
         root.put("targetAppName", appName)
         root.put("eventCount", events.size)
 
+        val digest = JSONArray()
+        for (item in buildAskedDigest(events)) {
+            digest.put(
+                JSONObject()
+                    .put("asked", item.title)
+                    .put("got", item.value)
+                    .put("api", item.api)
+                    .put("count", item.count)
+            )
+        }
+        root.put("askedGot", digest)
+
         val arr = JSONArray()
         for (e in events) {
+            val io = describeAskedGot(e)
             arr.put(
                 JSONObject().apply {
                     put("id", e.id)
@@ -100,6 +115,9 @@ object ExportHelper {
                     put("category", e.category.name)
                     put("source", e.source.name)
                     put("action", e.action)
+                    put("asked", io.asked)
+                    put("got", io.got)
+                    put("api", io.api)
                     put("permission", e.permission)
                     put("requestDetails", e.requestDetails)
                     put("responseDetails", e.responseDetails)
@@ -116,13 +134,15 @@ object ExportHelper {
 
     private fun toCsv(events: List<CaptureEvent>): String {
         val header = listOf(
-            "id", "timestamp", "category", "source", "action", "permission",
+            "id", "timestamp", "category", "source", "action", "asked", "got", "api", "permission",
             "requestDetails", "responseDetails", "identifierName", "identifierGroup",
             "processId", "rawData"
         ).joinToString(",")
         val rows = events.map { e ->
+            val io = describeAskedGot(e)
             listOf(
                 e.id, e.timestamp, e.category.name, e.source.name, e.action,
+                io.asked, io.got, io.api,
                 e.permission, e.requestDetails, e.responseDetails,
                 e.identifierName, e.identifierGroup, e.processId, e.rawData
             ).joinToString(",") { escapeCsv(it?.toString()) }
@@ -218,7 +238,7 @@ object ExportHelper {
                 "log",
                 JSONObject()
                     .put("version", "1.2")
-                    .put("creator", JSONObject().put("name", "Access Monitor").put("version", "1.0.38"))
+                    .put("creator", JSONObject().put("name", "Access Monitor").put("version", "1.0.39"))
                     .put("comment", "$appName ($packageName)")
                     .put("entries", entries)
             )

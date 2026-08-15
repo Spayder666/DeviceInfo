@@ -363,7 +363,7 @@ fun AskedDigestCard(items: List<AskedItem>, onSelectId: (String) -> Unit = {}) {
             Icon(Icons.Outlined.Devices, null, tint = Accent, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
             Text(
-                "Что спросили",
+                "Что спросили → что получили",
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f)
@@ -482,7 +482,8 @@ fun EventRow(item: DisplayEvent, onClick: () -> Unit, onLongClick: () -> Unit = 
                 Text(
                     text = preview,
                     fontSize = 11.sp,
-                    color = TextMuted,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -506,7 +507,7 @@ fun EmptyMonitorHint() {
         Spacer(Modifier.height(10.dp))
         Text("Пока тихо", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         Text(
-            "Чекер железа читает Build/getprop внутри процесса — без логов. Запусти цель, затем Frida, и повтори проверку.",
+            "Каждая строка: что спросили → что получили. Запусти цель, лучше «+ Frida», и повтори проверку.",
             fontSize = 12.sp,
             color = TextMuted,
             modifier = Modifier.padding(top = 6.dp)
@@ -609,8 +610,24 @@ fun EventDetailSheet(
         event.permission?.let { DetailRow("Право", it, Icons.Outlined.Bolt) }
         event.processId?.let { DetailRow("PID", it.toString()) }
 
-        event.requestDetails?.let { CopySection("Что спросили", it) }
-        event.responseDetails?.let { CopySection("Какое значение", it, Accent.copy(alpha = 0.12f)) }
+        val io = describeAskedGot(event)
+        CopySection(
+            "Что спросили",
+            buildString {
+                append(io.asked)
+                io.api?.takeIf { it != io.asked }?.let {
+                    append('\n')
+                    append(it)
+                }
+                event.requestDetails
+                    ?.takeIf { it.isNotBlank() && it != io.asked && it != io.api }
+                    ?.let {
+                        append('\n')
+                        append(it)
+                    }
+            }
+        )
+        CopySection("Что получили", io.got, Accent.copy(alpha = 0.12f))
 
         Button(
             onClick = onProbe,

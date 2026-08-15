@@ -3,8 +3,6 @@ package com.deviceinfo.trafficmonitor.ui
 import com.deviceinfo.trafficmonitor.data.AccessCategory
 import com.deviceinfo.trafficmonitor.data.CaptureEvent
 import com.deviceinfo.trafficmonitor.data.EventSource
-import com.deviceinfo.trafficmonitor.identifiers.IdentifierCatalog
-import com.deviceinfo.trafficmonitor.identifiers.IdentifierGroup
 
 data class DisplayEvent(
     val event: CaptureEvent,
@@ -72,7 +70,11 @@ fun eventMatchesCategory(event: CaptureEvent, category: AccessCategory?): Boolea
 fun eventMatchesQuery(event: CaptureEvent, query: String): Boolean {
     if (query.isBlank()) return true
     val q = query.trim()
+    val io = describeAskedGot(event)
     return event.action.contains(q, ignoreCase = true) ||
+        io.asked.contains(q, ignoreCase = true) ||
+        io.got.contains(q, ignoreCase = true) ||
+        io.api?.contains(q, ignoreCase = true) == true ||
         event.requestDetails?.contains(q, ignoreCase = true) == true ||
         event.responseDetails?.contains(q, ignoreCase = true) == true ||
         event.identifierName?.contains(q, ignoreCase = true) == true ||
@@ -135,93 +137,3 @@ fun buildSessionStats(events: List<CaptureEvent>): SessionStats {
     )
 }
 
-private val DIGEST_SKIP_IDS = setOf(
-    "root.inject", "root.decision", "root.ports", "frida.init"
-)
-
-private val DUMP_NOISE = Regex(
-    """(?i)m[A-Z]\w+:|dumpsys |Unknown command|IllegalArgument|VirtualDisplayAdapter|lshal |mRttRequesterInfo|mOverlays:"""
-)
-
-fun looksLikeDumpText(text: String): Boolean {
-    if (text.lines().count { it.isNotBlank() } > 3) return true
-    return DUMP_NOISE.containsMatchIn(text)
-}
-
-fun shortEventValue(event: CaptureEvent): String? {
-    val raw = event.responseDetails?.trim().orEmpty()
-    if (raw.isEmpty() || looksLikeDumpText(raw)) return null
-    val first = raw.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return null
-    return first.take(80)
-}
-
-fun eventTitle(event: CaptureEvent): String =
-    event.identifierName
-        ?.let { IdentifierCatalog.findById(it)?.displayName }
-        ?: event.action
-
-fun eventPreviewLine(event: CaptureEvent): String {
-    val title = eventTitle(event)
-    val value = shortEventValue(event)
-    if (value != null) return "$title → $value"
-    val req = event.requestDetails?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
-    return if (!req.isNullOrBlank() && !looksLikeDumpText(event.requestDetails.orEmpty())) {
-        "$title · $req".take(90)
-    } else {
-        title
-    }
-}
-
-fun buildAskedDigest(events: List<CaptureEvent>): List<AskedItem> {
-    val byId = linkedMapOf<String, AskedItem>()
-    for (event in events) {
-        val id = event.identifierName ?: continue
-        if (id in DIGEST_SKIP_IDS) continue
-        val def = IdentifierCatalog.findById(id)
-        val title = def?.displayName ?: event.action
-        val value = shortEventValue(event)
-        val existing = byId[id]
-        if (existing == null) {
-            byId[id] = AskedItem(
-                id = id,
-                title = title,
-                value = value ?: "запрос без значения",
-                api = def?.api ?: event.requestDetails?.lineSequence()?.firstOrNull(),
-                group = def?.group?.name ?: event.identifierGroup,
-                count = 1
-            )
-        } else {
-            byId[id] = existing.copy(
-                count = existing.count + 1,
-                value = value ?: existing.value
-            )
-        }
-    }
-    val order = listOf(
-        IdentifierGroup.BUILD.name,
-        IdentifierGroup.OS_VERSION.name,
-        IdentifierGroup.SETTINGS.name,
-        IdentifierGroup.TELEPHONY.name,
-        IdentifierGroup.SUBSCRIPTION.name,
-        IdentifierGroup.WIFI.name,
-        IdentifierGroup.DRM.name,
-        IdentifierGroup.ADVERTISING.name,
-        IdentifierGroup.SYSTEM_PROPERTY.name
-    )
-    return byId.values.sortedWith(
-        compareBy<AskedItem> { item ->
-            val i = order.indexOf(item.group)
-            if (i < 0) 100 else i
-        }.thenBy { it.title }
-    )
-}
-
-fun eventAsText(event: CaptureEvent): String = buildString {
-    appendLine(event.action)
-    appendLine("${event.category} · ${event.source}")
-    event.identifierName?.let { appendLine("ID: $it") }
-    event.permission?.let { appendLine("Право: $it") }
-    event.requestDetails?.let { appendLine("Запрос:\n$it") }
-    event.responseDetails?.let { appendLine("Ответ:\n$it") }
-    event.rawData?.let { appendLine("Raw:\n$it") }
-}

@@ -58,10 +58,12 @@ function writeLineAsync(line) {
 function writeEvent(identifierId, action, request, response, permission, opts) {
   opts = opts || {};
   var ts = Date.now();
+  var req = request || action || identifierId || '';
+  var res = (response === null || response === undefined || response === '') ? '(пусто)' : String(response);
   var line = '{"identifierId":"' + jsonEscape(identifierId || '') +
     '","action":"' + jsonEscape(action || '') +
-    '","request":"' + jsonEscape(request || '') +
-    '","response":"' + jsonEscape(response || '') +
+    '","request":"' + jsonEscape(req) +
+    '","response":"' + jsonEscape(res) +
     '","permission":"' + jsonEscape(permission || '') +
     '","package":"' + jsonEscape(TARGET_PKG) +
     '","timestamp":' + ts +
@@ -2336,8 +2338,24 @@ function hookRequestSurface() {
       try {
         Win[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
-            writeOnce('display.metrics', 'Display.' + m, '', '', null);
-            return overload.apply(this, arguments);
+            var out = overload.apply(this, arguments);
+            var w = 0, h = 0, dpi = 0;
+            try {
+              var arg0 = arguments[0];
+              if (arg0) {
+                w = arg0.widthPixels || arg0.x || 0;
+                h = arg0.heightPixels || arg0.y || 0;
+                dpi = arg0.densityDpi || 0;
+              }
+            } catch (e2) {}
+            writeOnce(
+              'display.metrics',
+              'Display.' + m,
+              'android.view.Display.' + m,
+              'w=' + w + ' h=' + h + (dpi ? ' dpi=' + dpi : ''),
+              null
+            );
+            return out;
           };
         });
       } catch (e) {}
@@ -2534,6 +2552,33 @@ function hookRequestSurface() {
   } catch (e) {}
 }
 
+function summarizeResult(result) {
+  if (result === null || result === undefined) return '(null)';
+  try {
+    if (result === true || result === false) return String(result);
+    if (typeof result === 'number') return String(result);
+    var s = safeStr(result);
+    if (s && s !== 'undefined' && s.indexOf('@') < 0 && s !== '[object Object]') {
+      return s.length > 200 ? s.substring(0, 200) + '…' : s;
+    }
+    try { if (result.size) return 'count=' + result.size(); } catch (e) {}
+    try { if (result.length !== undefined && typeof result.length === 'number') return 'len=' + result.length; } catch (e) {}
+    return s && s !== 'undefined' ? s.substring(0, 120) : '(объект)';
+  } catch (e) {
+    return '(ошибка чтения ответа)';
+  }
+}
+
+function summarizeArgs(args) {
+  var parts = [];
+  var n = Math.min(args.length, 4);
+  for (var i = 0; i < n; i++) {
+    var s = safeStr(args[i]);
+    if (s && s !== 'undefined') parts.push(s.substring(0, 80));
+  }
+  return parts.join(', ');
+}
+
 function hookAny(className, id, methods, perm) {
   try {
     var Cls = Java.use(className);
@@ -2542,7 +2587,13 @@ function hookAny(className, id, methods, perm) {
         Cls[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var result = overload.apply(this, arguments);
-            writeReq(id, className.split('.').pop() + '.' + m, safeStr(arguments[0]), safeStr(result), perm || null);
+            writeReq(
+              id,
+              className.split('.').pop() + '.' + m,
+              summarizeArgs(arguments) || (className.split('.').pop() + '.' + m),
+              summarizeResult(result),
+              perm || null
+            );
             return result;
           };
         });
@@ -2655,6 +2706,28 @@ function hookMissedRequestApis() {
       var r = this.getDefaultSmsPackage(ctx);
       writeReq('role.sms', 'Telephony.Sms.getDefaultSmsPackage', '', safeStr(r), null);
       return r;
+    };
+  } catch (e) {}
+  try {
+    var Os = Java.use('android.system.Os');
+    Os.uname.implementation = function () {
+      var r = this.uname();
+      writeOnce(
+        'build.hardware',
+        'Os.uname',
+        'android.system.Os.uname()',
+        safeStr(r.sysname) + ' ' + safeStr(r.machine) + ' ' + safeStr(r.release),
+        null
+      );
+      return r;
+    };
+  } catch (e) {}
+  try {
+    var RT = Java.use('java.lang.Runtime');
+    RT.availableProcessors.implementation = function () {
+      var n = this.availableProcessors();
+      writeOnce('hw.cores', 'Runtime.availableProcessors', 'Runtime.availableProcessors()', String(n), null);
+      return n;
     };
   } catch (e) {}
 }

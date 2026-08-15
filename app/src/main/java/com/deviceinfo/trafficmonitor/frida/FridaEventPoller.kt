@@ -78,8 +78,8 @@ class FridaEventPoller(
             val cached = json.optBoolean("cached", false)
 
             val action = json.optString("action", identifierId)
-            val request = json.optString("request").takeIf { it.isNotEmpty() }
-            val response = json.optString("response").takeIf { it.isNotEmpty() }
+            val request = json.optString("request").ifBlank { action }.takeIf { it.isNotEmpty() }
+            val response = json.optString("response").ifBlank { "(пусто)" }
             val permission = json.optString("permission").takeIf { it.isNotEmpty() }
             val timestamp = json.optLong("timestamp", System.currentTimeMillis())
             val verdict = IntegrityVerdict.summarize(
@@ -94,9 +94,10 @@ class FridaEventPoller(
                 else -> identifierId
             }
             val def = IdentifierCatalog.findById(resolvedId)
-            val enriched = listOfNotNull(response?.takeIf { it.isNotEmpty() }, verdict)
-                .joinToString(" · ")
-                .ifBlank { null }
+            val enriched = listOfNotNull(
+                response.takeIf { it.isNotEmpty() && it != "(пусто)" } ?: response,
+                verdict
+            ).joinToString(" · ").ifBlank { "(пусто)" }
 
             if (repository.isDuplicate(packageName, action, line, sinceMs = 800)) return
 
