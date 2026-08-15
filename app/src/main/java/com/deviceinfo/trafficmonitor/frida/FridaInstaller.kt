@@ -21,6 +21,7 @@ object FridaInstaller {
     const val EVENTS_PATH = "$BASE_DIR/events.jsonl"
     const val SERVER_PATH = "$BASE_DIR/frida-server"
     const val INJECT_PATH = "$BASE_DIR/frida-inject"
+    const val KITTY_PATH = "$BASE_DIR/AndKittyInjector"
     const val INJECT_LOG = "$BASE_DIR/inject.log"
     const val HTTPS_LOG = "$BASE_DIR/https.jsonl"
 
@@ -36,6 +37,9 @@ object FridaInstaller {
     @Volatile
     var lastNonce: String = ""
         private set
+
+    @Volatile
+    private var lastTargetPackage: String = ""
 
     @Volatile
     private var injectProcess: Process? = null
@@ -115,8 +119,28 @@ object FridaInstaller {
         local.writeText(template)
         RootShell.execAndRead("cp ${local.absolutePath} $HOOKS_PATH && chmod 644 $HOOKS_PATH")
         writeBootScript(packageName)
+        writeGadgetConfig(packageName)
+        lastTargetPackage = packageName
         RootShell.execAndRead("touch $HTTPS_LOG")
         prepareEventSink(packageName)
+    }
+
+    private fun writeGadgetConfig(packageName: String) {
+        val uid = RootShell.getUid(packageName)
+        val hookInApp = "/data/user/0/$packageName/cache/access_monitor_hooks.js"
+        val mkdir = "mkdir -p /data/user/0/$packageName/cache"
+        val copy = "cp $HOOKS_PATH $hookInApp && chmod 644 $hookInApp"
+        val chown = if (uid != null) "chown $uid:$uid $hookInApp" else "true"
+        RootShell.execAndRead("$mkdir && $copy && $chown")
+        val json = """{"interaction":{"type":"script","path":"$hookInApp"}}"""
+        val local = File.createTempFile("am_gadget", ".json")
+        local.writeText(json)
+        RootShell.execAndRead(
+            "cp ${local.absolutePath} $CONFIG_PATH && chmod 644 $CONFIG_PATH && " +
+                "chcon u:object_r:apk_data_file:s0 $GADGET_PATH $CONFIG_PATH $hookInApp 2>/dev/null; " +
+                "chmod 755 $GADGET_PATH"
+        )
+        local.delete()
     }
 
     /** Только console.log — без Module/Java. Если и это Aborted, виноват attach, не хуки. */
@@ -270,8 +294,14 @@ object FridaInstaller {
 
             val pid = pickMainPid(packageName, pids) ?: pids.first()
             if (!attachScript(pid, packageName, BOOT_PATH)) {
+                val injectErr = lastError
+                if (injectGadget(context, pid, packageName) && waitForScriptBoot("early")) {
+                    status = FridaStatus.INJECTED
+                    lastError = null
+                    return@withContext true
+                }
                 status = FridaStatus.ERROR
-                lastError = "Canary: ${lastError ?: "не загрузился"}. ${attachDiagnostics(pid)}"
+                lastError = "Canary: ${injectErr ?: "Aborted"}. Gadget: ${lastError ?: "нет"}. ${attachDiagnostics(pid)}"
                 return@withContext false
             }
             if (!waitForScriptBoot("canary")) {
@@ -302,9 +332,14 @@ object FridaInstaller {
         val nonce = lastNonce
         if (nonce.isBlank()) return false
         repeat(40) {
+            val eventCats = if (lastTargetPackage.isNotBlank()) {
+                eventFiles(lastTargetPackage).joinToString(" ")
+            } else {
+                EVENTS_PATH
+            }
             val dump = RootShell.execAndRead(
-                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I 2>/dev/null; " +
-                    "cat $INJECT_LOG $INJECT_LOG.* 2>/dev/null",
+                "logcat -d -v threadtime -t 400 -s AccessMonFrida:I frida:I Gadget:I 2>/dev/null; " +
+                    "cat $INJECT_LOG $INJECT_LOG.* $eventCats 2>/dev/null",
                 timeoutSec = 6
             )
             for (line in dump.lineSequence()) {
@@ -406,6 +441,9 @@ object FridaInstaller {
             startKeptInjector("$INJECT_PATH -p $pid -s $scriptPath > $log 2>&1")
             if (waitInjectorSettled(log)) return true
             RootShell.execAndRead("echo -n > $log")
+            startKeptInjector("$INJECT_PATH -p $pid -s $scriptPath --runtime=v8 > $log 2>&1")
+            if (waitInjectorSettled(log)) return true
+            RootShell.execAndRead("echo -n > $log")
             startKeptInjector(
                 "$INJECT_PATH -n ${RootShell.shellQuote(packageName)} -s $scriptPath > $log 2>&1"
             )
@@ -474,6 +512,44 @@ object FridaInstaller {
             "unable to", "failed", "error:", "permission denied", "not found", "cannot",
             "aborted", "process terminated", "connection terminated", "device lost"
         ).any { it in lower }
+    }
+
+    private fun injectGadget(context: Context, pid: Int, packageName: String): Boolean {
+        if (!ensureReady(context)) return false
+        if (!ensureKitty(context)) return false
+        writeGadgetConfig(packageName)
+        val log = "$INJECT_LOG.gadget"
+        RootShell.execAndRead("echo -n > $log")
+        val cmd = "$KITTY_PATH --pid $pid --libs $GADGET_PATH --memfd --timeout 8000"
+        val out = stripAnsi(RootShell.execAndRead("$cmd > $log 2>&1; cat $log", timeoutSec = 20))
+        val mapped = RootShell.execAndRead(
+            "grep -c libfrida-gadget /proc/$pid/maps 2>/dev/null"
+        ).trim().toIntOrNull() ?: 0
+        if (mapped > 0) return true
+        lastError = "gadget: ${out.take(180).ifBlank { "не загрузился" }}"
+        return false
+    }
+
+    private fun ensureKitty(context: Context): Boolean {
+        if (RootShell.execAndRead("test -x $KITTY_PATH && echo ok").trim() == "ok") {
+            return true
+        }
+        val abiFolder = resolveAssetAbiFolder()
+        val assetPath = "frida/$abiFolder/AndKittyInjector"
+        val cacheFile = File(context.filesDir, "AndKittyInjector-$abiFolder")
+        return try {
+            if (!cacheFile.exists() || cacheFile.length() == 0L) {
+                context.assets.open(assetPath).use { input ->
+                    cacheFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+            RootShell.execAndRead(
+                "cp ${cacheFile.absolutePath} $KITTY_PATH && chmod 755 $KITTY_PATH && echo ok"
+            ).trim() == "ok"
+        } catch (e: Exception) {
+            lastError = "AndKittyInjector: ${e.message}"
+            false
+        }
     }
 
     private fun stopInjector() {

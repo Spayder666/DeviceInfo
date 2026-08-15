@@ -8,6 +8,7 @@
 /release/
 /app/src/main/assets/frida/*/libfrida-gadget.so
 /app/src/main/assets/frida/*/frida-inject
+/app/src/main/assets/frida/*/AndKittyInjector
 /captures/
 .externalNativeBuild/
 .cxx/

@@ -13,8 +13,8 @@ android {
         applicationId = "com.deviceinfo.trafficmonitor"
         minSdk = 33
         targetSdk = 35
-        versionCode = 55
-        versionName = "1.0.55"
+        versionCode = 56
+        versionName = "1.0.56"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -79,12 +79,14 @@ dependencies {
 
 val fridaGadgetArm64 = file("src/main/assets/frida/arm64-v8a/libfrida-gadget.so")
 val fridaInjectArm64 = file("src/main/assets/frida/arm64-v8a/frida-inject")
+val kittyInjectorArm64 = file("src/main/assets/frida/arm64-v8a/AndKittyInjector")
 val downloadFridaGadgets by tasks.registering(Exec::class) {
     workingDir = rootProject.projectDir
     commandLine("bash", "scripts/download_frida_gadgets.sh")
     onlyIf {
         !fridaGadgetArm64.exists() || fridaGadgetArm64.length() == 0L ||
-            !fridaInjectArm64.exists() || fridaInjectArm64.length() == 0L
+            !fridaInjectArm64.exists() || fridaInjectArm64.length() == 0L ||
+            !kittyInjectorArm64.exists() || kittyInjectorArm64.length() == 0L
     }
     doFirst { file("src/main/assets/frida/arm64-v8a").mkdirs() }
 }

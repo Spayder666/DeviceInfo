@@ -36,4 +36,21 @@ download_inject() {
 
 download_inject
 
-echo "Frida gadget + inject (arm64) ready"
+download_kitty() {
+  local dest="$ASSETS/arm64-v8a/AndKittyInjector"
+  if [[ -f "$dest" && -s "$dest" ]]; then
+    echo "skip AndKittyInjector (exists)"
+    return 0
+  fi
+  echo "download AndKittyInjector arm64"
+  local zip
+  zip="$(mktemp)"
+  curl -sL "https://github.com/MJx0/AndKittyInjector/releases/download/v5.3.0/arm64-v8a.zip" -o "$zip"
+  unzip -o -j "$zip" "arm64-v8a/AndKittyInjector" -d "$ASSETS/arm64-v8a"
+  rm -f "$zip"
+  chmod +x "$dest"
+}
+
+download_kitty
+
+echo "Frida gadget + inject + kitty (arm64) ready"
