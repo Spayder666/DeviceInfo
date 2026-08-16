@@ -579,6 +579,169 @@ function hookBuild() {
       };
     }
   } catch (e) {}
+  hookBuildGetstatic();
+}
+
+var buildGetstaticHooked = false;
+var buildWatchIds = [];
+var buildWatchValues = [];
+
+function hookBuildGetstatic() {
+  if (buildGetstaticHooked) return;
+  buildGetstaticHooked = true;
+  var reportBuild = new NativeCallback(function (idx) {
+    inNativeHook++;
+    try {
+      var id = buildWatchIds[idx];
+      if (id) writeOnce(id, 'Build.getstatic', id, buildWatchValues[idx] || '', null, { async: true });
+    } catch (e) {
+    } finally {
+      inNativeHook--;
+    }
+  }, 'void', ['int']);
+
+  var cm;
+  try {
+    cm = new CModule([
+      '#include <gum/guminterceptor.h>',
+      'extern void report_build(int idx);',
+      '#define MAXW 64',
+      'static void *objs[MAXW];',
+      'static int obj_idx[MAXW];',
+      'static int nobj;',
+      'static void *fields[MAXW];',
+      'static int field_idx[MAXW];',
+      'static int nfield;',
+      'void am_add_obj(void *p, int idx) { if (p && nobj < MAXW) { objs[nobj] = p; obj_idx[nobj] = idx; nobj++; } }',
+      'void am_add_field(void *p, int idx) { if (p && nfield < MAXW) { fields[nfield] = p; field_idx[nfield] = idx; nfield++; } }',
+      'static int find_obj(void *p) { int i; if (!p) return -1; for (i = 0; i < nobj; i++) if (objs[i] == p) return obj_idx[i]; return -1; }',
+      'static int find_field(void *p) { int i; if (!p) return -1; for (i = 0; i < nfield; i++) if (fields[i] == p) return field_idx[i]; return -1; }',
+      'void on_get_obj_leave(GumInvocationContext *ic) {',
+      '  void *ret = gum_invocation_context_get_return_value(ic);',
+      '  int idx = find_obj(ret);',
+      '  if (idx >= 0) report_build(idx);',
+      '}',
+      'void on_artfield_enter(GumInvocationContext *ic) {',
+      '  void *self = gum_invocation_context_get_nth_argument(ic, 0);',
+      '  int idx = find_field(self);',
+      '  if (idx >= 0) report_build(idx);',
+      '}'
+    ].join('\n'), { report_build: reportBuild });
+  } catch (e) {
+    return;
+  }
+
+  function addWatch(id, fid, obj, value) {
+    var idx = buildWatchIds.length;
+    buildWatchIds.push(id);
+    buildWatchValues.push(value || '');
+    try { if (fid && !fid.isNull()) cm.am_add_field(fid, idx); } catch (e) {}
+    try { if (obj && !obj.isNull()) cm.am_add_obj(obj, idx); } catch (e) {}
+  }
+
+  var specs = [
+    ['android/os/Build', 'MODEL', 'Ljava/lang/String;', 'build.model'],
+    ['android/os/Build', 'DEVICE', 'Ljava/lang/String;', 'build.device'],
+    ['android/os/Build', 'MANUFACTURER', 'Ljava/lang/String;', 'build.manufacturer'],
+    ['android/os/Build', 'BRAND', 'Ljava/lang/String;', 'build.brand'],
+    ['android/os/Build', 'PRODUCT', 'Ljava/lang/String;', 'build.product'],
+    ['android/os/Build', 'HARDWARE', 'Ljava/lang/String;', 'build.hardware'],
+    ['android/os/Build', 'BOARD', 'Ljava/lang/String;', 'build.board'],
+    ['android/os/Build', 'BOOTLOADER', 'Ljava/lang/String;', 'build.bootloader'],
+    ['android/os/Build', 'DISPLAY', 'Ljava/lang/String;', 'build.display'],
+    ['android/os/Build', 'FINGERPRINT', 'Ljava/lang/String;', 'build.fingerprint'],
+    ['android/os/Build', 'ID', 'Ljava/lang/String;', 'build.id'],
+    ['android/os/Build', 'HOST', 'Ljava/lang/String;', 'build.host'],
+    ['android/os/Build', 'TAGS', 'Ljava/lang/String;', 'build.tags'],
+    ['android/os/Build', 'TYPE', 'Ljava/lang/String;', 'build.type'],
+    ['android/os/Build', 'USER', 'Ljava/lang/String;', 'build.user'],
+    ['android/os/Build', 'RADIO', 'Ljava/lang/String;', 'build.radio'],
+    ['android/os/Build', 'SOC_MANUFACTURER', 'Ljava/lang/String;', 'build.soc_manufacturer'],
+    ['android/os/Build', 'SOC_MODEL', 'Ljava/lang/String;', 'build.soc_model'],
+    ['android/os/Build', 'SKU', 'Ljava/lang/String;', 'build.sku'],
+    ['android/os/Build', 'ODM_SKU', 'Ljava/lang/String;', 'build.odm_sku'],
+    ['android/os/Build', 'SERIAL', 'Ljava/lang/String;', 'build.serial'],
+    ['android/os/Build', 'SUPPORTED_ABIS', '[Ljava/lang/String;', 'build.supported_abis'],
+    ['android/os/Build', 'SUPPORTED_32_BIT_ABIS', '[Ljava/lang/String;', 'build.supported_32_bit_abis'],
+    ['android/os/Build', 'SUPPORTED_64_BIT_ABIS', '[Ljava/lang/String;', 'build.supported_64_bit_abis'],
+    ['android/os/Build', 'TIME', 'J', 'build.time'],
+    ['android/os/Build', 'IS_EMULATOR', 'Z', 'build.is_emulator'],
+    ['android/os/Build', 'IS_TREBLE_ENABLED', 'Z', 'build.is_treble_enabled'],
+    ['android/os/Build$VERSION', 'SDK_INT', 'I', 'version.sdk'],
+    ['android/os/Build$VERSION', 'RELEASE', 'Ljava/lang/String;', 'version.release'],
+    ['android/os/Build$VERSION', 'INCREMENTAL', 'Ljava/lang/String;', 'version.incremental'],
+    ['android/os/Build$VERSION', 'CODENAME', 'Ljava/lang/String;', 'version.codename'],
+    ['android/os/Build$VERSION', 'SECURITY_PATCH', 'Ljava/lang/String;', 'version.security_patch'],
+    ['android/os/Build$VERSION', 'BASE_OS', 'Ljava/lang/String;', 'version.base_os'],
+    ['android/os/Build$VERSION', 'PREVIEW_SDK_INT', 'I', 'version.preview_sdk'],
+    ['android/os/Build$VERSION', 'MEDIA_PERFORMANCE_CLASS', 'I', 'version.mpc']
+  ];
+
+  try {
+    var env = Java.vm.getEnv();
+    specs.forEach(function (spec) {
+      try {
+        var klass = env.findClass(spec[0]);
+        var fid = env.getStaticFieldId(klass, spec[1], spec[2]);
+        if (!fid || fid.isNull()) return;
+        var obj = null;
+        var value = '';
+        if (spec[2].indexOf('Ljava/lang/String;') >= 0 || spec[2].charAt(0) === '[') {
+          try { obj = env.getStaticObjectField(klass, fid); } catch (e2) { obj = null; }
+          try { if (obj) value = env.getStringUtf8(obj) || ''; } catch (e2) {}
+        } else if (spec[2] === 'I') {
+          try { value = '' + env.getStaticIntField(klass, fid); } catch (e2) {}
+        } else if (spec[2] === 'J') {
+          try { value = '' + env.getStaticLongField(klass, fid); } catch (e2) {}
+        } else if (spec[2] === 'Z') {
+          try { value = env.getStaticBooleanField(klass, fid) ? 'true' : 'false'; } catch (e2) {}
+        }
+        addWatch(spec[3], fid, obj, value);
+      } catch (e) {}
+    });
+  } catch (e) {}
+
+  try {
+    [['android.os.Build', 'MODEL', 'build.model'],
+      ['android.os.Build', 'FINGERPRINT', 'build.fingerprint'],
+      ['android.os.Build', 'MANUFACTURER', 'build.manufacturer'],
+      ['android.os.Build$VERSION', 'RELEASE', 'version.release']].forEach(function (pair) {
+      try {
+        var f = Java.use(pair[0]).class.getDeclaredField(pair[1]);
+        f.setAccessible(true);
+        var v = f.get(null);
+        var h = v && (v.$h || v.handle);
+        if (h) {
+          var idx = buildWatchIds.indexOf(pair[2]);
+          if (idx < 0) {
+            idx = buildWatchIds.length;
+            buildWatchIds.push(pair[2]);
+          }
+          cm.am_add_obj(h, idx);
+        }
+      } catch (e) {}
+    });
+  } catch (e) {}
+
+  function attachArt(re, onEnter, onLeave) {
+    var art = Process.findModuleByName('libart.so');
+    if (!art) return;
+    var seen = {};
+    function consider(name, addr) {
+      if (!addr || seen['' + addr]) return;
+      if (!re.test(name)) return;
+      seen['' + addr] = 1;
+      var opts = {};
+      if (onEnter) opts.onEnter = onEnter;
+      if (onLeave) opts.onLeave = onLeave;
+      try { Interceptor.attach(addr, opts); } catch (e) {}
+    }
+    art.enumerateExports().forEach(function (e) { consider(e.name, e.address); });
+    try { art.enumerateSymbols().forEach(function (e) { consider(e.name, e.address); }); } catch (e) {}
+  }
+
+  attachArt(/art_quick_get_obj_static|GetObjStaticFromCompiled|GetStaticObjectField/i, null, cm.on_get_obj_leave);
+  attachArt(/8ArtField.*GetObject|8ArtField.*Get32|8ArtField.*Get64|8ArtField3GetE|GetStaticIntField|GetStaticLongField|GetStaticBooleanField/i, cm.on_artfield_enter, null);
 }
 
 function hookWifiAndBluetooth() {
@@ -1652,7 +1815,37 @@ function classifyPath(path) {
   if (/xposed/.test(s)) return 'root.xposed';
   if (isProcInjectPath(s) || /sandhook|yahfa|dobby|whale|epic|substrate|memfd/.test(s)) return 'root.inject';
   if (/magisk|zygisk/.test(s)) return 'root.magisk';
+  if (/\/ksu|apatch/.test(s)) return 'root.ksu';
   return 'root.su';
+}
+
+function classifyFsPath(path) {
+  var s = String(path || '').toLowerCase();
+  if (!s) return '';
+  if (s.indexOf('/sys/class/net/') >= 0 && s.indexOf('/address') >= 0) return 'wifi.sysfs_mac';
+  if (s.indexOf('/sys/class/bluetooth') >= 0) return 'bt.sysfs_mac';
+  if (s.indexOf('/sys/class/android_usb') >= 0 && s.indexOf('iserial') >= 0) return 'sys.usb_serial';
+  if (s.indexOf('/sys/class/thermal') >= 0) return 'sys.thermal';
+  if (s.indexOf('/sys/class/power_supply') >= 0) return 'hw.battery_capacity';
+  if (s.indexOf('/sys/devices/system/cpu') >= 0 && s.indexOf('cpufreq') >= 0) return 'sys.cpu_freq';
+  if (s.indexOf('/sys/devices/system/cpu') >= 0) return 'sys.cpu';
+  if (s.indexOf('/sys/block') >= 0) return 'sys.block_cid';
+  if (s.indexOf('/proc/cpuinfo') >= 0) return 'proc.cpuinfo';
+  if (s.indexOf('/proc/meminfo') >= 0) return 'proc.meminfo';
+  if (s.indexOf('/proc/version') >= 0) return 'proc.version';
+  if (s.indexOf('boot_id') >= 0) return 'proc.boot_id';
+  if (s.indexOf('/proc/self/auxv') >= 0) return 'proc.auxv';
+  if (s.indexOf('/proc/uptime') >= 0) return 'proc.uptime';
+  if (s.indexOf('/proc/stat') >= 0) return 'proc.stat';
+  if (s.indexOf('/proc/self/mountinfo') >= 0) return 'proc.mountinfo';
+  if (s.indexOf('/proc/mounts') >= 0 || s.indexOf('/proc/self/mounts') >= 0) return 'root.mounts';
+  if (s.indexOf('/proc/net/arp') >= 0) return 'proc.net_arp';
+  if (s.indexOf('/proc/net/route') >= 0) return 'net.route';
+  if (s.indexOf('/dev/__properties') >= 0) return 'proc.properties';
+  if (s.indexOf('/dev/gnss') >= 0 || s.indexOf('/dev/gps') >= 0) return 'location.hal';
+  if (isRootPath(s) || isProcInjectPath(s)) return classifyPath(s);
+  if (s.indexOf('/proc/') === 0 || s.indexOf('/sys/') === 0) return 'proc.properties';
+  return '';
 }
 
 function classifyClass(name) {
@@ -1705,9 +1898,8 @@ function hookRootFiles() {
           var path = '';
           try { path = this.getAbsolutePath(); } catch (e) {}
           var result = orig.call(this);
-          if (isRootPath(path)) {
-            writeRoot(classifyPath(path), 'File.' + m, path, safeStr(result));
-          }
+          var id = classifyFsPath(path);
+          if (id) writeRoot(id, 'File.' + m, path, safeStr(result));
           return result;
         };
       } catch (e) {}
@@ -1972,9 +2164,8 @@ function hookProcReaders() {
           var a0 = arguments[0];
           path = a0 && a0.getAbsolutePath ? a0.getAbsolutePath() : safeStr(a0);
         } catch (e) {}
-        if (isProcInjectPath(path) || isRootPath(path)) {
-          writeRoot(classifyPath(path), 'FileInputStream', path, '');
-        }
+        var id = classifyFsPath(path);
+        if (id) writeRoot(id, 'FileInputStream', path, '');
         return overload.apply(this, arguments);
       };
     });
@@ -1988,9 +2179,8 @@ function hookProcReaders() {
           var a0 = arguments[0];
           path = a0 && a0.getAbsolutePath ? a0.getAbsolutePath() : safeStr(a0);
         } catch (e) {}
-        if (isProcInjectPath(path) || isRootPath(path)) {
-          writeRoot(classifyPath(path), 'RandomAccessFile', path, '');
-        }
+        var id = classifyFsPath(path);
+        if (id) writeRoot(id, 'RandomAccessFile', path, '');
         return overload.apply(this, arguments);
       };
     });
@@ -2001,11 +2191,26 @@ function hookProcReaders() {
       overload.implementation = function () {
         var path = safeStr(arguments[0]);
         var fd = overload.apply(this, arguments);
-        if (isProcInjectPath(path) || isRootPath(path)) {
-          writeRoot(classifyPath(path), 'Os.open', path, 'fd');
-        }
+        var id = classifyFsPath(path);
+        if (id) writeRoot(id, 'Os.open', path, 'fd');
         return fd;
       };
+    });
+  } catch (e) {}
+  try {
+    var Os2 = Java.use('android.system.Os');
+    ['access', 'stat', 'lstat', 'readlink'].forEach(function (m) {
+      try {
+        Os2[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var path = safeStr(arguments[0]);
+            var result = overload.apply(this, arguments);
+            var id = classifyFsPath(path);
+            if (id) writeRoot(id, 'Os.' + m, path, safeStr(result));
+            return result;
+          };
+        });
+      } catch (e) {}
     });
   } catch (e) {}
   try {
@@ -2015,9 +2220,8 @@ function hookProcReaders() {
         Files[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var path = safeStr(arguments[0]);
-            if (isProcInjectPath(path) || isRootPath(path)) {
-              writeRoot(classifyPath(path), 'Files.' + m, path, '');
-            }
+            var id = classifyFsPath(path);
+            if (id) writeRoot(id, 'Files.' + m, path, '');
             return overload.apply(this, arguments);
           };
         });
@@ -2123,41 +2327,124 @@ function hookInjectEnvAndLoad() {
   } catch (e) {}
 }
 
+var nativeFsHooked = false;
+var KIND_NAMES = ['open', 'openat', 'access', 'faccessat', 'stat', 'lstat', 'fstatat'];
+
 function hookNativeRootAccess() {
-  return;
-  /* libc open/stat/access hooks deadlock apps that fopen from writeLine. */
-  ['access', 'faccessat', 'stat', 'lstat'].forEach(function (fn) {
+  if (nativeFsHooked) return;
+  nativeFsHooked = true;
+  var reportPath = new NativeCallback(function (pathPtr, kind) {
+    inNativeHook++;
+    try {
+      var path = pathPtr.isNull() ? '' : pathPtr.readUtf8String();
+      var id = classifyFsPath(path);
+      if (!id) return;
+      var kn = KIND_NAMES[kind] || ('fn' + kind);
+      writeRoot(id, 'native.' + kn, path, '');
+    } catch (e) {
+    } finally {
+      inNativeHook--;
+    }
+  }, 'void', ['pointer', 'int']);
+
+  try {
+    var cm = new CModule([
+      '#include <gum/guminterceptor.h>',
+      '#include <string.h>',
+      'extern void report_path(const char *p, int kind);',
+      'static int starts(const char *p, const char *pre) {',
+      '  if (!p || !pre) return 0;',
+      '  while (*pre) { if (*p++ != *pre++) return 0; }',
+      '  return 1;',
+      '}',
+      'static int interesting(const char *p) {',
+      '  int n;',
+      '  const char *s;',
+      '  if (!p || p[0] == 0) return 0;',
+      '  if (p[0] == \'/\' && (',
+      '      starts(p, "/proc/") || starts(p, "/sys/") ||',
+      '      starts(p, "/dev/__properties") || starts(p, "/dev/qemu") ||',
+      '      starts(p, "/dev/goldfish") || starts(p, "/dev/gnss") ||',
+      '      starts(p, "/dev/gps") || starts(p, "/system/bin/su") ||',
+      '      starts(p, "/system/xbin/su") || starts(p, "/sbin/su") ||',
+      '      starts(p, "/su/bin/su") || starts(p, "/data/adb") ||',
+      '      starts(p, "/sbin/.magisk") || starts(p, "/debug_ramdisk"))) return 1;',
+      '  if (p[0] == \'s\' && p[1] == \'u\' && p[2] == 0) return 1;',
+      '  n = 0; s = p; while (*s) { n++; s++; }',
+      '  if (n >= 3 && p[n-3] == \'/\' && p[n-2] == \'s\' && p[n-1] == \'u\') return 1;',
+      '  return 0;',
+      '}',
+      'void on_open(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
+      '  if (interesting(p)) report_path(p, 0);',
+      '}',
+      'void on_openat(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
+      '  if (interesting(p)) report_path(p, 1);',
+      '}',
+      'void on_access(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
+      '  if (interesting(p)) report_path(p, 2);',
+      '}',
+      'void on_faccessat(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
+      '  if (interesting(p)) report_path(p, 3);',
+      '}',
+      'void on_stat(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
+      '  if (interesting(p)) report_path(p, 4);',
+      '}',
+      'void on_lstat(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
+      '  if (interesting(p)) report_path(p, 5);',
+      '}',
+      'void on_fstatat(GumInvocationContext *ic) {',
+      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
+      '  if (interesting(p)) report_path(p, 6);',
+      '}'
+    ].join('\n'), { report_path: reportPath });
+
+    var map = [
+      ['open', cm.on_open], ['openat', cm.on_openat],
+      ['access', cm.on_access], ['faccessat', cm.on_faccessat],
+      ['stat', cm.on_stat], ['lstat', cm.on_lstat], ['fstatat', cm.on_fstatat]
+    ];
+    map.forEach(function (pair) {
+      try {
+        var addr = Module.findExportByName('libc.so', pair[0]);
+        if (addr && pair[1]) Interceptor.attach(addr, { onEnter: pair[1] });
+      } catch (e) {}
+    });
+  } catch (e) {
+    nativeFsHooked = false;
+    hookAccessJsFallback();
+  }
+  hookNativeDlsymAndConnect();
+}
+
+function hookAccessJsFallback() {
+  ['access', 'faccessat'].forEach(function (fn) {
     try {
       var addr = Module.findExportByName('libc.so', fn);
       if (!addr) return;
       Interceptor.attach(addr, {
         onEnter: function (args) {
+          inNativeHook++;
           var idx = fn === 'faccessat' ? 1 : 0;
-          try { this.path = Memory.readUtf8String(args[idx]); } catch (e) { this.path = ''; }
+          try { this.path = Memory.readUtf8String(args[idx]); } catch (e2) { this.path = ''; }
         },
         onLeave: function (retval) {
-          if (!this.path || !isRootPath(this.path)) return;
-          writeRoot(classifyPath(this.path), 'native.' + fn, this.path, 'rc=' + retval.toInt32());
+          try {
+            var id = classifyFsPath(this.path);
+            if (id) writeRoot(id, 'native.' + fn, this.path, 'rc=' + retval.toInt32());
+          } finally { inNativeHook--; }
         }
       });
     } catch (e) {}
   });
-  ['open', 'openat'].forEach(function (fn) {
-    try {
-      var addr = Module.findExportByName('libc.so', fn);
-      if (!addr) return;
-      Interceptor.attach(addr, {
-        onEnter: function (args) {
-          var idx = fn === 'openat' ? 1 : 0;
-          try { this.path = Memory.readUtf8String(args[idx]); } catch (e) { this.path = ''; }
-        },
-        onLeave: function (retval) {
-          if (!this.path || !isRootPath(this.path)) return;
-          writeRoot(classifyPath(this.path), 'native.' + fn, this.path, 'fd=' + retval.toInt32());
-        }
-      });
-    } catch (e) {}
-  });
+}
+
+function hookNativeDlsymAndConnect() {
   try {
     var dlsym = Module.findExportByName('libdl.so', 'dlsym') || Module.findExportByName(null, 'dlsym');
     if (dlsym) {
@@ -3368,6 +3655,7 @@ function installNativeEarly() {
   if (!nativeNetHooked) {
     try { hookNativeNetMeta(); nativeNetHooked = true; } catch (e) {}
   }
+  try { hookNativeRootAccess(); } catch (e) {}
 }
 
 installNativeEarly();
