@@ -144,6 +144,7 @@ function classifyBrowserJs(script) {
   if (/OfflineAudioContext|AudioContext|createOscillator|createDynamicsCompressor/i.test(s)) return 'browser.audio';
   if (/queryLocalFonts|document\.fonts|offsetWidth.{0,40}font|measureText/i.test(s)) return 'browser.fonts';
   if (/speechSynthesis|getVoices/i.test(s)) return 'browser.speech';
+  if (/userAgentData\.|navigator\.userAgentData/i.test(s) && !/getHighEntropyValues|Sec-CH-UA/i.test(s)) return 'browser.ua_data';
   if (/userAgentData|getHighEntropyValues|Sec-CH-UA/i.test(s)) return 'browser.ch_ua';
   if (/hardwareConcurrency/i.test(s)) return 'browser.hardware_concurrency';
   if (/deviceMemory/i.test(s)) return 'browser.device_memory';
@@ -175,21 +176,25 @@ function classifyBrowserJs(script) {
 
 function classifyUri(uri) {
   var u = String(uri || '').toLowerCase();
-  if (u.indexOf('contacts') >= 0) return 'cp.contacts';
-  if (u.indexOf('sms') >= 0 || u.indexOf('mms') >= 0) return 'cp.sms';
-  if (u.indexOf('call_log') >= 0) return 'cp.call_log';
-  if (u.indexOf('calendar') >= 0) return 'cp.calendar';
-  if (u.indexOf('telephony') >= 0 || u.indexOf('icc') >= 0) return 'cp.telephony';
+  if (u.indexOf('profile') >= 0 && u.indexOf('contact') >= 0) return 'contacts.profile';
+  if (u.indexOf('contacts') >= 0) return 'contacts.query';
+  if (u.indexOf('mms') >= 0) return 'mms.query';
+  if (u.indexOf('sms') >= 0) return 'sms.inbox';
+  if (u.indexOf('call_log') >= 0) return 'call_log.query';
+  if (u.indexOf('calendar') >= 0) return 'calendar.query';
+  if (u.indexOf('icc') >= 0) return 'contacts.sim';
+  if (u.indexOf('telephony') >= 0) return 'cp.telephony';
   if (u.indexOf('gsf') >= 0 || u.indexOf('gservices') >= 0) return 'ad.gsf_id';
   if (u.indexOf('settings/secure') >= 0) return 'settings.secure';
   if (u.indexOf('settings/global') >= 0) return 'settings.global';
   if (u.indexOf('settings/system') >= 0) return 'settings.system';
   if (u.indexOf('media') >= 0) return 'storage.media';
-  if (u.indexOf('browser') >= 0) return 'cp.browser';
-  if (u.indexOf('voicemail') >= 0) return 'cp.voicemail';
-  if (u.indexOf('blocked') >= 0) return 'cp.blocked';
+  if (u.indexOf('browser') >= 0) return 'browser.history';
+  if (u.indexOf('voicemail') >= 0) return 'voicemail.query';
+  if (u.indexOf('blocked') >= 0) return 'blocked.query';
   if (u.indexOf('download') >= 0) return 'storage.downloads';
   if (u.indexOf('health') >= 0) return 'health.connect';
+  if (u.indexOf('document') >= 0) return 'hw.saf';
   if (u.indexOf('content://') === 0) return 'cp.other';
   return '';
 }
@@ -238,6 +243,9 @@ function classifySettingsKey(key) {
   if (k.indexOf('location') >= 0) return 'settings.location_mode';
   if (k.indexOf('http_proxy') >= 0) return 'net.proxy';
   if (k === 'advertising_id' || k === 'ad_aaid' || k === 'ads_aaid' || k.indexOf('aaid') >= 0) return 'ad.gaid';
+  if (k.indexOf('samsungaccount') >= 0) return 'oem.samsung_account';
+  if (k.indexOf('sem_auto_wifi') >= 0) return 'oem.samsung_wifi';
+  if (k.indexOf('dsa_sim') >= 0) return 'oem.samsung_imsi';
   return 'settings.secure';
 }
 
@@ -346,7 +354,17 @@ function hookSubscriptionManager() {
       try {
         SI[m].implementation = function () {
           var result = this[m]();
-          var sid = m === 'getIccId' ? 'sub.iccid' : (m === 'getNumber' ? 'sub.phone_number' : (m === 'getCardString' ? 'sub.card_string' : (m === 'isEmbedded' ? 'sub.embedded' : 'sub.subscription_id')));
+          var sid = 'sub.subscription_id';
+          if (m === 'getIccId') sid = 'sub.iccid';
+          else if (m === 'getNumber') sid = 'sub.phone_number';
+          else if (m === 'getCardString') sid = 'sub.card_string';
+          else if (m === 'isEmbedded') sid = 'sub.embedded';
+          else if (m === 'getSimSlotIndex') sid = 'sub.sim_slot';
+          else if (m === 'getMccString' || m === 'getMcc') sid = 'sub.mcc';
+          else if (m === 'getMncString' || m === 'getMnc') sid = 'sub.mnc';
+          else if (m === 'getCardId') sid = 'sub.card_id';
+          else if (m === 'getPortIndex') sid = 'sub.port_index';
+          else if (m === 'getGroupUuid') sid = 'sub.group_uuid';
           writeEvent(sid, 'SubscriptionInfo.' + m, '', safeStr(result), null);
           return result;
         };
@@ -375,6 +393,20 @@ function hookSettings() {
         Cls.getInt.overload('android.content.ContentResolver', 'java.lang.String', 'int').implementation = function (cr, key, def) {
           var result = this.getInt(cr, key, def);
           writeEvent(classifySettingsKey(key), c[0] + '.getInt', safeStr(key), safeStr(result), null);
+          return result;
+        };
+      } catch (e) {}
+      try {
+        Cls.getLong.overload('android.content.ContentResolver', 'java.lang.String', 'long').implementation = function (cr, key, def) {
+          var result = this.getLong(cr, key, def);
+          writeEvent(classifySettingsKey(key), c[0] + '.getLong', safeStr(key), safeStr(result), null);
+          return result;
+        };
+      } catch (e) {}
+      try {
+        Cls.getFloat.overload('android.content.ContentResolver', 'java.lang.String', 'float').implementation = function (cr, key, def) {
+          var result = this.getFloat(cr, key, def);
+          writeEvent(classifySettingsKey(key), c[0] + '.getFloat', safeStr(key), safeStr(result), null);
           return result;
         };
       } catch (e) {}
@@ -446,7 +478,11 @@ function isInterestingProperty(key) {
     key === 'ro.opengles.version' ||
     key === 'ro.sf.lcd_density' ||
     key.indexOf('gsm.operator') === 0 ||
-    key.indexOf('gsm.sim') === 0;
+    key.indexOf('gsm.sim') === 0 ||
+    key.indexOf('ril.serial') === 0 ||
+    key.indexOf('ro.odm.build') === 0 ||
+    key.indexOf('ro.build.version.emui') === 0 ||
+    key.indexOf('hw_sc.build') === 0;
 }
 
 function mapPropertyToId(key) {
@@ -457,29 +493,70 @@ function mapPropertyToId(key) {
     'ro.product.brand': 'build.brand',
     'ro.product.name': 'build.product',
     'ro.hardware': 'build.hardware',
+    'ro.product.board': 'build.board',
+    'ro.bootloader': 'build.bootloader',
+    'ro.build.display.id': 'build.display',
     'ro.build.fingerprint': 'build.fingerprint',
-    'ro.bootimage.build.fingerprint': 'prop.bootimage.fingerprint',
-    'ro.serialno': 'build.serial',
-    'ro.boot.serialno': 'prop.boot.serialno',
+    'ro.build.id': 'build.id',
+    'ro.build.host': 'build.host',
+    'ro.build.tags': 'build.tags',
+    'ro.build.type': 'build.type',
+    'ro.build.user': 'build.user',
+    'ro.soc.manufacturer': 'build.soc_manufacturer',
+    'ro.soc.model': 'build.soc_model',
+    'ro.boot.hardware.sku': 'build.sku',
+    'ro.boot.product.hardware.sku': 'build.odm_sku',
+    'ro.build.date.utc': 'build.time',
+    'ro.product.cpu.abilist': 'build.supported_abis',
+    'ro.product.cpu.abilist32': 'build.supported_32_bit_abis',
+    'ro.product.cpu.abilist64': 'build.supported_64_bit_abis',
+    'ro.boot.qemu': 'build.is_emulator',
+    'ro.kernel.qemu': 'build.is_emulator',
+    'ro.treble.enabled': 'build.is_treble_enabled',
     'ro.build.version.release': 'version.release',
     'ro.build.version.sdk': 'version.sdk',
+    'ro.build.version.incremental': 'version.incremental',
+    'ro.build.version.codename': 'version.codename',
     'ro.build.version.security_patch': 'version.security_patch',
+    'ro.build.version.base_os': 'version.base_os',
+    'ro.build.version.preview_sdk': 'version.preview_sdk',
+    'ro.product.first_api_level': 'version.first_sdk',
+    'ro.odm.build.media_performance_class': 'version.mpc',
+    'ro.bootimage.build.fingerprint': 'prop.bootimage.fingerprint',
+    'ro.serialno': 'prop.serialno',
+    'ro.boot.serialno': 'prop.boot.serialno',
+    'ril.serialnumber': 'prop.ril.serial',
     'gsm.version.baseband': 'prop.gsm.version.baseband',
+    'gsm.sim.state': 'prop.gsm.sim.state',
     'persist.radio.imei': 'prop.persist.radio.imei',
+    'persist.radio.factory_sn': 'prop.persist.radio.factory_sn',
+    'net.hostname': 'prop.net.hostname',
+    'ro.com.google.gmsversion': 'prop.gms.version',
+    'ro.boot.hardware': 'prop.boot.hardware',
+    'persist.sys.timezone': 'prop.timezone',
+    'persist.sys.locale': 'prop.locale',
+    'ro.sf.lcd_density': 'prop.density',
+    'ro.opengles.version': 'prop.opengles',
     'ro.secure': 'root.props',
     'ro.debuggable': 'root.props',
-    'ro.build.tags': 'root.props',
-    'ro.build.type': 'root.props',
-    'ro.kernel.qemu': 'root.emulator',
-    'ro.hardware': 'root.emulator',
     'ro.boot.verifiedbootstate': 'attest.verified_boot',
-    'ro.boot.flash.locked': 'attest.verified_boot',
-    'ro.boot.vbmeta.device_state': 'attest.verified_boot'
+    'ro.boot.flash.locked': 'attest.flash_locked',
+    'ro.boot.vbmeta.device_state': 'attest.verified_boot',
+    'ro.boot.vbmeta.digest': 'attest.vbmeta',
+    'ro.boot.warranty_bit': 'attest.warranty',
+    'ro.build.version.emui': 'fraud.harmony',
+    'hw_sc.build.platform.version': 'fraud.harmony'
   };
   if (key.indexOf('lsposed') >= 0 || key.indexOf('lspd') >= 0) return 'root.lsposed';
   if (key.indexOf('xposed') >= 0 || key.indexOf('taichi') >= 0) return 'root.xposed';
   if (key.indexOf('magisk') >= 0 || key.indexOf('zygisk') >= 0) return 'root.magisk';
-  if (key.indexOf('qemu') >= 0 || key.indexOf('goldfish') >= 0) return 'root.emulator';
+  if (key.indexOf('ksu') >= 0 || key.indexOf('apatch') >= 0) return 'root.ksu';
+  if (key.indexOf('qemu') >= 0 || key.indexOf('goldfish') >= 0 || key.indexOf('ranchu') >= 0) return 'root.emulator';
+  if (key.indexOf('selinux') >= 0) return 'root.selinux';
+  if (key.indexOf('emui') >= 0 || key.indexOf('harmony') >= 0 || key.indexOf('hw_sc.build') >= 0) return 'fraud.harmony';
+  if (key.indexOf('ro.product.') === 0) return 'prop.product.model';
+  if (key.indexOf('ro.build.') === 0) return 'prop.build.fingerprint';
+  if (key.indexOf('ro.hardware') === 0) return 'prop.hardware';
   return map[key] || 'getprop.shell';
 }
 
@@ -507,11 +584,21 @@ function hookBuild() {
 function hookWifiAndBluetooth() {
   try {
     var WifiInfo = Java.use('android.net.wifi.WifiInfo');
-    ['getMacAddress', 'getBSSID', 'getSSID', 'getNetworkId', 'getIpAddress'].forEach(function (m) {
+    ['getMacAddress', 'getBSSID', 'getSSID', 'getNetworkId', 'getIpAddress',
+      'getApMldMacAddress', 'getPasspointFqdn', 'getRandomizedMacAddress',
+      'getWifiStandard', 'getFrequency'].forEach(function (m) {
       try {
         WifiInfo[m].implementation = function () {
           var result = this[m]();
-          var wid = m === 'getBSSID' ? 'wifi.bssid' : (m === 'getSSID' ? 'wifi.ssid' : (m === 'getIpAddress' ? 'wifi.ip' : (m === 'getNetworkId' ? 'wifi.network_id' : 'wifi.mac')));
+          var wid = 'wifi.mac';
+          if (m === 'getBSSID') wid = 'wifi.bssid';
+          else if (m === 'getSSID') wid = 'wifi.ssid';
+          else if (m === 'getIpAddress') wid = 'wifi.ip';
+          else if (m === 'getNetworkId') wid = 'wifi.network_id';
+          else if (m === 'getApMldMacAddress') wid = 'wifi.ap_mld_mac';
+          else if (m === 'getPasspointFqdn') wid = 'wifi.passpoint';
+          else if (m === 'getRandomizedMacAddress') wid = 'wifi.randomized_mac';
+          else if (m === 'getWifiStandard' || m === 'getFrequency') wid = 'wifi.standard';
           writeEvent(wid, 'WifiInfo.' + m, '', safeStr(result), 'ACCESS_FINE_LOCATION');
           return result;
         };
@@ -534,7 +621,7 @@ function hookWifiAndBluetooth() {
       try {
         BA[m].implementation = function () {
           var result = this[m]();
-          writeEvent('bt.local_mac', 'BluetoothAdapter.' + m, '', safeStr(result), 'BLUETOOTH_CONNECT');
+          writeEvent(m === 'getName' ? 'bt.local_name' : 'bt.local_mac', 'BluetoothAdapter.' + m, '', safeStr(result), 'BLUETOOTH_CONNECT');
           return result;
         };
       } catch (e) {}
@@ -547,7 +634,7 @@ function hookWifiAndBluetooth() {
       try {
         BD[m].implementation = function () {
           var result = this[m]();
-          writeEvent('bt.remote_mac', 'BluetoothDevice.' + m, '', safeStr(result), 'BLUETOOTH_CONNECT');
+          writeEvent(m === 'getName' ? 'bt.remote_name' : 'bt.remote_mac', 'BluetoothDevice.' + m, '', safeStr(result), 'BLUETOOTH_CONNECT');
           return result;
         };
       } catch (e) {}
@@ -566,9 +653,28 @@ function hookMediaDrm() {
     };
     MD.getPropertyString.implementation = function (key) {
       var result = this.getPropertyString(key);
-      writeEvent('drm.version', 'MediaDrm.getPropertyString', safeStr(key), safeStr(result), null);
+      var k = safeStr(key);
+      var id = 'drm.version';
+      if (k === 'vendor') id = 'drm.vendor';
+      else if (/securityLevel|securitylevel/i.test(k)) id = 'drm.security_level';
+      else if (k === 'version') id = 'drm.version';
+      writeEvent(id, 'MediaDrm.getPropertyString', k, safeStr(result), null);
       return result;
     };
+    try {
+      MD.$init.overloads.forEach(function (overload) {
+        overload.implementation = function () {
+          var uuid = safeStr(arguments[0]);
+          var id = 'drm.widevine_id';
+          if (/edef8ba9|widevine/i.test(uuid)) id = 'drm.widevine_id';
+          else if (/e2719d2a|clearkey/i.test(uuid)) id = 'drm.clearkey';
+          else if (/9a04f079|playready/i.test(uuid)) id = 'drm.playready';
+          else if (/3d5e6d35|wiseplay/i.test(uuid)) id = 'drm.wiseplay';
+          writeEvent(id, 'MediaDrm.<init>', uuid, '', null);
+          return overload.apply(this, arguments);
+        };
+      });
+    } catch (e) {}
   } catch (e) {}
 }
 
@@ -594,6 +700,13 @@ function hookAdvertisingId() {
       writeEvent('ad.gaid', 'AdvertisingIdClient.Info.getId', '', safeStr(r), 'AD_ID');
       return r;
     };
+    try {
+      Info.isLimitAdTrackingEnabled.implementation = function () {
+        var r = this.isLimitAdTrackingEnabled();
+        writeEvent('ad.limit_tracking', 'AdvertisingIdClient.Info.isLimitAdTrackingEnabled', '', safeStr(r), 'AD_ID');
+        return r;
+      };
+    } catch (e) {}
   } catch (e) {}
   try {
     var ASM = Java.use('com.google.android.gms.appset.AppSetIdClient');
@@ -626,7 +739,7 @@ function hookAdvertisingId() {
 function hookAccounts() {
   try {
     var AM = Java.use('android.accounts.AccountManager');
-    ['getAccounts', 'getAccountsByType', 'getAccountsAsUser'].forEach(function (m) {
+    ['getAccounts', 'getAccountsByType', 'getAccountsAsUser', 'getAccountsByTypeForPackage'].forEach(function (m) {
       try {
         AM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
@@ -638,7 +751,7 @@ function hookAccounts() {
               }
             } catch (e) {}
             writeEvent(
-              'account.list',
+              m.indexOf('ByType') >= 0 ? 'account.by_type' : 'account.list',
               'AccountManager.' + m,
               safeStr(arguments[0]),
               names.length ? names.join(', ') : ('count=' + (result ? result.length : 0)),
@@ -649,6 +762,27 @@ function hookAccounts() {
         });
       } catch (e) {}
     });
+    ['getAuthToken', 'peekAuthToken', 'blockingGetAuthToken', 'getAuthTokenByFeatures'].forEach(function (m) {
+      try {
+        AM[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var result = overload.apply(this, arguments);
+            var acc = '';
+            try { acc = arguments[0] ? safeStr(arguments[0].name) : ''; } catch (e) {}
+            writeEvent('account.auth_token', 'AccountManager.' + m, acc || safeStr(arguments[0]), 'token-requested', 'GET_ACCOUNTS');
+            return result;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Acc = Java.use('android.accounts.Account');
+    Acc.toString.implementation = function () {
+      var r = this.toString();
+      writeOnce('account.name', 'Account.toString', safeStr(this.type), safeStr(this.name), 'GET_ACCOUNTS');
+      return r;
+    };
   } catch (e) {}
 }
 
@@ -694,11 +828,22 @@ function hookPackageManager() {
               var pkg = safeStr(arguments[0]);
               var flags = safeStr(arguments[1]);
               var result = overload.apply(this, arguments);
-              if (isRootPkg(pkg)) writeRoot(classifyClass(pkg), name + '.' + m, pkg, 'found');
+              if (isRootPkg(pkg)) {
+                writeRoot('root.packages', name + '.' + m, pkg, 'found');
+                writeRoot(classifyClass(pkg), name + '.' + m, pkg, 'found');
+              }
               else {
                 var fraudId = classifyFraudPkg(pkg);
                 if (fraudId) writeReq(fraudId, name + '.' + m, pkg, 'present', null);
                 else writeReq(m === 'getPackageInfo' ? 'install.package_info' : 'install.application_info', name + '.' + m, pkg + ' flags=' + flags, 'ok', null);
+                if (m === 'getPackageInfo' && result && (pkg === TARGET_PKG || /SIGNING|signatures/i.test(flags))) {
+                  try { writeOnce('install.first_install', name + '.PackageInfo.firstInstallTime', pkg, safeStr(result.firstInstallTime), null); } catch (e2) {}
+                  try { writeOnce('install.last_update', name + '.PackageInfo.lastUpdateTime', pkg, safeStr(result.lastUpdateTime), null); } catch (e2) {}
+                  try {
+                    var sigs = result.signingInfo || result.signatures;
+                    if (sigs) writeOnce('install.signing_cert', name + '.PackageInfo.signatures', pkg, 'present', null);
+                  } catch (e2) {}
+                }
               }
               return result;
             };
@@ -816,14 +961,19 @@ function hookLocation() {
             var response = (m.indexOf('getLast') === 0 || m === 'getCurrentLocation')
               ? formatLocation(result) : safeStr(result);
             var locId = 'location.gps';
-            if (m.indexOf('GnssMeasurement') >= 0 || m.indexOf('GnssNavigation') >= 0) locId = 'location.gnss_clock';
+            var argBlob = args.join(' ').toLowerCase();
+            if (m === 'getCurrentLocation') locId = 'location.current';
+            else if (m.indexOf('GnssMeasurement') >= 0 || m.indexOf('GnssNavigation') >= 0) locId = 'location.gnss_clock';
             else if (m.indexOf('Antenna') >= 0) locId = 'location.gnss_antenna';
             else if (m.indexOf('Gnss') === 0 || m.indexOf('getGnss') === 0) locId = 'location.gnss_caps';
             else if (m.indexOf('TestProvider') >= 0) locId = 'location.mock_test';
             else if (m === 'addProximityAlert') locId = 'location.proximity';
-            else if (m.indexOf('Provider') >= 0) locId = 'location.providers';
             else if (m === 'sendExtraCommand') locId = 'location.cmd';
             else if (m.indexOf('Nmea') >= 0) locId = 'location.gnss_nmea';
+            else if (argBlob.indexOf('network') >= 0) locId = 'location.network';
+            else if (argBlob.indexOf('passive') >= 0) locId = 'location.passive';
+            else if (argBlob.indexOf('fused') >= 0) locId = 'location.fused';
+            else if (m.indexOf('Provider') >= 0) locId = 'location.providers';
             writeEvent(locId, 'LocationManager.' + m, args.join(', '), response, 'ACCESS_FINE_LOCATION');
             return result;
           };
@@ -2248,7 +2398,9 @@ function hookRequestSurface() {
       overload.implementation = function () {
         var perm = safeStr(arguments[0]);
         var result = overload.apply(this, arguments);
-        if (/PHONE|SMS|CONTACTS|LOCATION|CAMERA|RECORD|STORAGE|AD_ID|ACCOUNTS|CALENDAR|CALL_LOG|BODY_SENSORS|NEARBY|BLUETOOTH|PACKAGE/i.test(perm)) {
+        if (/READ_MEDIA_VISUAL_USER_SELECTED/i.test(perm)) {
+          writeReq('hw.partial_media', 'checkSelfPermission', perm, safeStr(result), perm);
+        } else if (/PHONE|SMS|CONTACTS|LOCATION|CAMERA|RECORD|STORAGE|AD_ID|ACCOUNTS|CALENDAR|CALL_LOG|BODY_SENSORS|NEARBY|BLUETOOTH|PACKAGE|READ_MEDIA/i.test(perm)) {
           writeReq('perm.check', 'checkSelfPermission', perm, safeStr(result), perm);
         }
         return result;
@@ -2479,7 +2631,9 @@ function hookRequestSurface() {
         WM[m].overloads.forEach(function (overload) {
           overload.implementation = function () {
             var r = overload.apply(this, arguments);
-            var id = m === 'getScanResults' ? 'wifi.scan_results' : 'wifi.mac';
+            var id = 'wifi.mac';
+            if (m === 'getScanResults') id = 'wifi.scan_results';
+            else if (m === 'getDhcpInfo') id = 'wifi.dhcp';
             writeReq(id, 'WifiManager.' + m, '', safeStr(r), 'ACCESS_FINE_LOCATION');
             return r;
           };
@@ -2623,6 +2777,7 @@ function hookMissedRequestApis() {
   hookAny('android.os.UserManager', 'user.serial', ['getSerialNumberForUser', 'getUserName'], null);
   hookAny('android.app.admin.DevicePolicyManager', 'dpm.owner', ['isDeviceOwnerApp', 'isProfileOwnerApp', 'isAdminActive'], null);
   hookAny('android.app.admin.DevicePolicyManager', 'ent.esid', ['getEnrollmentSpecificId'], null);
+  hookAny('android.app.admin.DevicePolicyManager', 'ent.org_id', ['setOrganizationId', 'getEnrollmentSpecificId'], null);
   hookAny('android.telephony.CellIdentityLte', 'cell.identity', ['getMccString', 'getMncString', 'getCi', 'getTac', 'getEarfcn'], null);
   hookAny('android.telephony.CellIdentityNr', 'cell.identity', ['getMccString', 'getMncString', 'getNci', 'getTac', 'getNrarfcn'], null);
   hookAny('android.telephony.CellIdentityGsm', 'cell.identity', ['getMccString', 'getMncString', 'getCid', 'getLac'], null);
@@ -2667,7 +2822,7 @@ function hookMissedRequestApis() {
     Os.uname.implementation = function () {
       var r = this.uname();
       writeOnce(
-        'build.hardware',
+        'kernel.version',
         'Os.uname',
         'android.system.Os.uname()',
         safeStr(r.sysname) + ' ' + safeStr(r.machine) + ' ' + safeStr(r.release),
@@ -2824,6 +2979,7 @@ function hookMissedSurface() {
   hookAny('android.hardware.SensorManager', 'sensor.trigger', ['requestTriggerSensor', 'cancelTriggerSensor'], null);
   hookAny('android.hardware.SensorManager', 'sensor.dynamic', ['registerDynamicSensorCallback', 'getDynamicSensorList'], null);
   hookAny('android.hardware.SensorPrivacyManager', 'sensor.privacy', ['areAnySensorPrivacyTogglesEnabled', 'isSensorPrivacyEnabled'], null);
+  hookAny('android.hardware.SensorEventCallback', 'sensor.additional', ['onSensorAdditionalInfo', 'onFlushCompleted'], null);
   hookAny('android.hardware.GeomagneticField', 'sensor.geomagnetic', ['getDeclination', 'getFieldStrength'], null);
   hookAny('android.telephony.TelephonyManager', 'tel.signal', ['getSignalStrength'], null);
   hookAny('android.telephony.TelephonyManager', 'tel.emergency', ['getEmergencyNumberList'], null);
@@ -2872,6 +3028,9 @@ function hookMissedSurface() {
         else if (t === '36') id = 'sensor.hinge';
         else if (t === '37') id = 'sensor.head_tracker';
         else if (t === '17') id = 'sensor.significant';
+        else if (t === '34') id = 'sensor.offbody';
+        else if (t === '42') id = 'sensor.heading';
+        else if (t === '14' || t === '16' || t === '35' || t === '40' || t === '41') id = 'sensor.uncalibrated';
         writeOnce(id, 'SensorManager.getDefaultSensor', t, safeStr(r), null);
         return r;
       };
@@ -2939,6 +3098,15 @@ function hookBrowserApis() {
           if ('' + intent.getComponent() && /customtabs|trustedweb/i.test('' + intent.getComponent())) {
             writeReq('browser.custom_tabs', 'startActivity', safeStr(intent.getComponent()), data.substring(0, 120), null);
           }
+          if (action === 'android.intent.action.OPEN_DOCUMENT' ||
+              action === 'android.intent.action.OPEN_DOCUMENT_TREE' ||
+              action === 'android.intent.action.GET_CONTENT') {
+            writeReq('hw.saf', 'Context.startActivity', safeStr(action), safeStr(intent.getType()), null);
+          }
+          if (action === 'android.provider.action.PICK_IMAGES' ||
+              /PickVisualMedia|PICK_IMAGES/i.test(safeStr(intent.getComponent()))) {
+            writeReq('photo.picker', 'Context.startActivity', safeStr(action), '', null);
+          }
         } catch (e) {}
         return overload.apply(this, arguments);
       };
@@ -2955,6 +3123,134 @@ function hookBrowserApis() {
       if (/^x-client-data$/i.test(n)) writeOnce('browser.variations', 'OkHttp Headers.get', n, safeStr(r), null);
       return r;
     };
+  } catch (e) {}
+}
+
+function classifyRoleName(role) {
+  var s = String(role || '');
+  if (/SMS/i.test(s)) return 'role.sms';
+  if (/BROWSER/i.test(s)) return 'role.browser';
+  if (/DIALER/i.test(s)) return 'role.dialer';
+  if (/HOME/i.test(s)) return 'role.home';
+  return 'role.sms';
+}
+
+function hookCatalogCompleteness() {
+  hookAny('android.drm.DrmManagerClient', 'drm.legacy', ['getUniqueId', 'acquireDrmInfo'], null);
+  hookAny('android.security.keystore.KeyInfo', 'attest.strongbox', ['isInsideSecureHardware', 'isUserAuthenticationRequired'], null);
+  hookAny('android.security.keystore.KeyGenParameterSpec$Builder', 'attest.device_id', ['setDevicePropertiesAttestationIncluded', 'setAttestationChallenge'], null);
+  hookAny('android.view.Display', 'hw.cutout', ['getCutout'], null);
+  hookAny('android.view.WindowInsets', 'hw.cutout', ['getDisplayCutout'], null);
+  hookAny('android.view.accessibility.CaptioningManager', 'hw.captioning', ['getLocale', 'getFontScale', 'isEnabled'], null);
+  hookAny('android.app.GameManager', 'hw.game_mode', ['getGameMode'], null);
+  hookAny('android.os.PerformanceHintManager', 'hw.adpf', ['createHintSession'], null);
+  hookAny('android.view.translation.TranslationManager', 'hw.translation', ['createOnDeviceTranslator', 'getOnDeviceTranslationCapabilities'], null);
+  hookAny('android.view.textclassifier.TextClassificationManager', 'hw.textclass', ['getTextClassifier'], null);
+  hookAny('android.media.AudioManager', 'hw.spatializer', ['getSpatializer'], null);
+  hookAny('android.app.ActivityManager', 'hw.start_info', ['getHistoricalProcessStartReasons'], null);
+  hookAny('android.os.UserManager', 'hw.private_space', ['isPrivateProfile', 'getUserProfiles'], null);
+  hookAny('android.provider.DocumentsContract', 'hw.saf', ['buildDocumentUri', 'isDocumentUri'], null);
+  hookAny('androidx.activity.result.contract.ActivityResultContracts$PickVisualMedia', 'photo.picker', ['createIntent'], null);
+  hookAny('android.media.AudioDeviceInfo', 'bt.audio_device_mac', ['getAddress', 'getProductName', 'getType'], null);
+  hookAny('org.altbeacon.beacon.BeaconParser', 'bt.beacon', ['setBeaconLayout', 'addExtraDataParser'], null);
+  hookAny('org.altbeacon.beacon.BeaconManager', 'bt.beacon', ['startRangingBeacons', 'startMonitoring'], null);
+  hookAny('android.telephony.TelephonyManager', 'tel.physical_channel', ['getPhysicalChannelConfigList'], null);
+  hookAny('android.telephony.TelephonyManager', 'tel.display_info', ['getTelephonyDisplayInfo'], null);
+  hookAny('android.telephony.ims.ImsMmTelManager', 'tel.ims', ['isAvailable', 'isVoNrAvailable', 'isWifiCallingAvailable', 'isTtySupported'], null);
+  hookAny('android.telecom.TelecomManager', 'tel.phone_account', ['getCallCapablePhoneAccounts', 'getDefaultOutgoingPhoneAccount', 'getPhoneAccountsSupportingScheme'], 'READ_PHONE_NUMBERS');
+  hookAny('android.telecom.CallScreeningService', 'call.screening', ['onScreenCall', 'respondToCall'], null);
+  hookAny('android.uwb.UwbManager', 'location.uwb', ['openRangingSession', 'getTimestampInformation'], null);
+  hookAny('com.google.android.gms.nearby.Nearby', 'nearby.messages', ['getMessagesClient'], null);
+  hookAny('com.google.android.gms.nearby.sharing.Sharing', 'nearby.share', ['getClient'], null);
+  hookAny('com.google.android.gms.nearby.fastpair.FastPair', 'nearby.fastpair', ['getClient'], null);
+  hookAny('okhttp3.OkHttpClient', 'net.websocket', ['newWebSocket'], null);
+  hookAny('okhttp3.internal.ws.RealWebSocket', 'net.websocket', ['connect', 'send'], null);
+  hookAny('org.chromium.net.CronetEngine$Builder', 'net.quic', ['enableQuic', 'addQuicHint'], null);
+  hookAny('com.amplitude.api.Amplitude', 'ad.amplitude', ['getDeviceId', 'setDeviceId', 'getInstance'], null);
+  hookAny('com.amplitude.android.Amplitude', 'ad.amplitude', ['getDeviceId'], null);
+  hookAny('com.mixpanel.android.mpmetrics.MixpanelAPI', 'ad.amplitude', ['getDistinctId', 'getDeviceId'], null);
+  hookAny('com.google.ccc.abuse.droidguard.DroidGuard', 'droidguard', ['init', 'ss', 'close'], null);
+  hookAny('com.kaspersky.kfp.KFPSdk', 'fraud.kfp', ['init', 'getDeviceId'], null);
+  hookAny('com.google.android.gms.wallet.Pay', 'identity.wallet', ['getClient'], null);
+  hookAny('com.google.android.gms.wallet.Wallet', 'identity.wallet', ['getPaymentsClient', 'getWalletObjectsClient'], null);
+  hookAny('com.google.android.gms.safetynet.SafetyNetClient', 'play.protect', ['enableVerifyApps', 'isVerifyAppsEnabled', 'listHarmfulApps'], null);
+  hookAny('android.net.ConnectivityManager', 'net.captive', ['getCaptivePortalServerUrl'], null);
+  hookAny('android.net.wifi.WifiManager', 'oem.vivo_wifi', ['getExtWifiScanResults'], null);
+  try {
+    var Role = Java.use('android.app.role.RoleManager');
+    ['isRoleHeld', 'isRoleAvailable'].forEach(function (m) {
+      try {
+        Role[m].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var role = safeStr(arguments[0]);
+            var r = overload.apply(this, arguments);
+            writeReq(classifyRoleName(role), 'RoleManager.' + m, role, safeStr(r), null);
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Xiaomi = Java.use('com.android.id.impl.IdProviderImpl');
+    [['getOAID', 'ad.oaid'], ['getVAID', 'ad.vaid'], ['getAAID', 'ad.aaid'], ['getUDID', 'ad.udid']].forEach(function (pair) {
+      try {
+        Xiaomi[pair[0]].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            writeReq(pair[1], 'IdProviderImpl.' + pair[0], '', safeStr(r), null);
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var Vivo = Java.use('com.vivo.identifier.IdentifierManager');
+    [['getOAID', 'ad.oaid'], ['getVAID', 'ad.vaid'], ['getAAID', 'ad.aaid'], ['getGuid', 'ad.guid']].forEach(function (pair) {
+      try {
+        Vivo[pair[0]].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            var r = overload.apply(this, arguments);
+            writeReq(pair[1], 'IdentifierManager.' + pair[0], '', safeStr(r), null);
+            return r;
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var WVC = Java.use('android.webkit.WebViewClient');
+    [['onReceivedSslError', 'browser.ssl_error'],
+      ['onReceivedClientCertRequest', 'browser.client_cert'],
+      ['onReceivedHttpAuthRequest', 'browser.http_auth']].forEach(function (pair) {
+      try {
+        WVC[pair[0]].overloads.forEach(function (overload) {
+          overload.implementation = function () {
+            writeReq(pair[1], 'WebViewClient.' + pair[0], safeStr(arguments[2]), '', null);
+            return overload.apply(this, arguments);
+          };
+        });
+      } catch (e) {}
+    });
+  } catch (e) {}
+  try {
+    var WCC = Java.use('android.webkit.WebChromeClient');
+    WCC.onShowFileChooser.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('browser.file_chooser', 'WebChromeClient.onShowFileChooser', '', 'chooser', null);
+        return overload.apply(this, arguments);
+      };
+    });
+  } catch (e) {}
+  try {
+    var FI = Java.use('com.google.firebase.installations.FirebaseInstallations');
+    FI.getToken.overloads.forEach(function (overload) {
+      overload.implementation = function () {
+        writeReq('ad.firebase_token', 'FirebaseInstallations.getToken', '', 'requested', null);
+        return overload.apply(this, arguments);
+      };
+    });
   } catch (e) {}
 }
 
@@ -3045,6 +3341,7 @@ function installJavaHooks() {
   hookFraudSdks();
   hookBrowserApis();
   hookMissedSurface();
+  hookCatalogCompleteness();
   hookRootDetection();
 }
 

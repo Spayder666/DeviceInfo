@@ -858,7 +858,7 @@ fun groupForIdentifierId(id: String?): IdentifierGroup? {
         "pkg", "install" -> IdentifierGroup.INSTALL
         "acct", "account" -> IdentifierGroup.ACCOUNT
         "cp" -> IdentifierGroup.CONTENT_PROVIDER
-        "proc", "sys" -> IdentifierGroup.PROC_SYS
+        "proc", "sys", "kernel" -> IdentifierGroup.PROC_SYS
         "net", "http", "https", "sni", "vpn" -> IdentifierGroup.NETWORK
         "dpm", "mdm" -> IdentifierGroup.ENTERPRISE
         "oem" -> IdentifierGroup.OEM
@@ -866,7 +866,7 @@ fun groupForIdentifierId(id: String?): IdentifierGroup? {
         "location", "cell", "gnss", "gps", "fused" -> IdentifierGroup.LOCATION
         "root" -> IdentifierGroup.ROOT
         "contacts", "sms", "mms", "calendar", "call_log" -> IdentifierGroup.PERSONAL
-        "camera", "mic", "sensor", "hw", "nfc", "usb", "display" -> IdentifierGroup.HARDWARE
+        "camera", "mic", "sensor", "hw", "nfc", "usb", "display", "locale", "battery", "gpu" -> IdentifierGroup.HARDWARE
         "fcm", "cred", "identity", "play", "fido", "games" -> IdentifierGroup.IDENTITY
         "fraud" -> IdentifierGroup.FRAUD
         "browser", "webview" -> IdentifierGroup.BROWSER

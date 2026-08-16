@@ -417,13 +417,11 @@ fun MonitorScreen(
                 total = eventCount,
                 onSelect = viewModel::setCategoryFilter
             )
-            if (identifierGroupCounts.isNotEmpty() || selectedIdentifierGroup != null) {
-                IdentifierGroupFilterRow(
-                    selected = selectedIdentifierGroup,
-                    counts = identifierGroupCounts,
-                    onSelect = viewModel::setIdentifierGroupFilter
-                )
-            }
+            IdentifierGroupFilterRow(
+                selected = selectedIdentifierGroup,
+                counts = identifierGroupCounts,
+                onSelect = viewModel::setIdentifierGroupFilter
+            )
             if (listMode == ListMode.TIMELINE) {
                 SourceFilterRow(
                     selected = selectedSource,

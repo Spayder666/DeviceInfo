@@ -204,11 +204,8 @@ fun IdentifierGroupFilterRow(
 ) {
     val groups = buildList {
         add(null)
-        IdentifierGroup.entries
-            .filter { selected == it.name || (counts[it.name] ?: 0) > 0 }
-            .forEach { add(it) }
+        FINGERPRINT_GROUP_ORDER.forEach { add(it) }
     }
-    if (groups.size <= 1) return
     Row(
         modifier = Modifier
             .fillMaxWidth()
