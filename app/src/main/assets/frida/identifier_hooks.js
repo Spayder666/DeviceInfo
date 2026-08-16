@@ -674,6 +674,7 @@ function hookBuildGetstatic() {
     ['android/os/Build$VERSION', 'SECURITY_PATCH', 'Ljava/lang/String;', 'version.security_patch'],
     ['android/os/Build$VERSION', 'BASE_OS', 'Ljava/lang/String;', 'version.base_os'],
     ['android/os/Build$VERSION', 'PREVIEW_SDK_INT', 'I', 'version.preview_sdk'],
+    ['android/os/Build$VERSION', 'FIRST_SDK_INT', 'I', 'version.first_sdk'],
     ['android/os/Build$VERSION', 'MEDIA_PERFORMANCE_CLASS', 'I', 'version.mpc']
   ];
 
