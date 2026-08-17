@@ -579,13 +579,32 @@ function hookBuild() {
       };
     }
   } catch (e) {}
+  hookBuildGetstatic();
+}
+
+var buildWatchIds = [];
+var buildWatchValues = [];
+var buildGetstaticHooked = false;
+
+function attachNamedExport(mod, names, opts) {
+  for (var i = 0; i < names.length; i++) {
+    var addr = null;
+    try { addr = Module.findExportByName(mod, names[i]); } catch (e) { addr = null; }
+    if (!addr) {
+      try { addr = Module.findExportByName(null, names[i]); } catch (e2) { addr = null; }
+    }
+    if (!addr) continue;
+    try {
+      Interceptor.attach(addr, opts);
+      return true;
+    } catch (e) {}
+  }
+  return false;
 }
 
 function hookBuildGetstatic() {
-  return;
-}
-
-function _disabledBuildGetstatic() {
+  if (buildGetstaticHooked) return;
+  buildGetstaticHooked = true;
   var reportBuild = new NativeCallback(function (idx) {
     inNativeHook++;
     try {
@@ -618,7 +637,7 @@ function _disabledBuildGetstatic() {
       '  int idx = find_obj(ret);',
       '  if (idx >= 0) report_build(idx);',
       '}',
-      'void on_artfield_enter(GumInvocationContext *ic) {',
+      'void on_get_field_enter(GumInvocationContext *ic) {',
       '  void *self = gum_invocation_context_get_nth_argument(ic, 0);',
       '  int idx = find_field(self);',
       '  if (idx >= 0) report_build(idx);',
@@ -714,6 +733,7 @@ function _disabledBuildGetstatic() {
           if (idx < 0) {
             idx = buildWatchIds.length;
             buildWatchIds.push(pair[2]);
+            buildWatchValues.push(safeStr(v));
           }
           cm.am_add_obj(h, idx);
         }
@@ -721,25 +741,15 @@ function _disabledBuildGetstatic() {
     });
   } catch (e) {}
 
-  function attachArt(re, onEnter, onLeave) {
-    var art = Process.findModuleByName('libart.so');
-    if (!art) return;
-    var seen = {};
-    function consider(name, addr) {
-      if (!addr || seen['' + addr]) return;
-      if (!re.test(name)) return;
-      seen['' + addr] = 1;
-      var opts = {};
-      if (onEnter) opts.onEnter = onEnter;
-      if (onLeave) opts.onLeave = onLeave;
-      try { Interceptor.attach(addr, opts); } catch (e) {}
-    }
-    art.enumerateExports().forEach(function (e) { consider(e.name, e.address); });
-    try { art.enumerateSymbols().forEach(function (e) { consider(e.name, e.address); }); } catch (e) {}
-  }
-
-  attachArt(/art_quick_get_obj_static|GetObjStaticFromCompiled|GetStaticObjectField/i, null, cm.on_get_obj_leave);
-  attachArt(/8ArtField.*GetObject|8ArtField.*Get32|8ArtField.*Get64|8ArtField3GetE|GetStaticIntField|GetStaticLongField|GetStaticBooleanField/i, cm.on_artfield_enter, null);
+  // One compiled-code getter each. No libart enumerateSymbols / ArtField::Get*.
+  attachNamedExport('libart.so', [
+    'art_quick_get_obj_static',
+    'artGetObjStaticFromCompiledCode'
+  ], { onLeave: cm.on_get_obj_leave });
+  attachNamedExport('libart.so', [
+    'art_quick_get_32_static',
+    'artGet32StaticFromCompiledCode'
+  ], { onEnter: cm.on_get_field_enter });
 }
 
 function hookWifiAndBluetooth() {
@@ -2304,34 +2314,56 @@ function hookInjectEnvAndLoad() {
 }
 
 var nativeFsHooked = false;
-var KIND_NAMES = ['open', 'openat', 'access', 'faccessat', 'stat', 'lstat', 'fstatat'];
 
-function hookNativeRootAccess() {
-  return;
+function hasZygiskFsHook() {
+  try {
+    var io = initNativeIo();
+    if (!io) return false;
+    var mode = Memory.allocUtf8String('r');
+    var paths = [
+      '/data/user/0/' + TARGET_PKG + '/cache/access_monitor_native_fs',
+      '/data/data/' + TARGET_PKG + '/cache/access_monitor_native_fs'
+    ];
+    for (var i = 0; i < paths.length; i++) {
+      var fp = io.fopen(Memory.allocUtf8String(paths[i]), mode);
+      if (fp && !fp.isNull()) {
+        io.fclose(fp);
+        return true;
+      }
+    }
+  } catch (e) {}
+  return false;
 }
 
-function _disabledNativeRootAccess() {
+function hookNativeRootAccess() {
   if (nativeFsHooked) return;
   nativeFsHooked = true;
-  var reportPath = new NativeCallback(function (pathPtr, kind) {
+  if (hasZygiskFsHook()) {
+    hookNativeDlsymAndConnect();
+    return;
+  }
+  hookAccessJsFallback();
+  hookOpenatCFilter();
+  hookNativeDlsymAndConnect();
+}
+
+function hookOpenatCFilter() {
+  var reportPath = new NativeCallback(function (pathPtr) {
     inNativeHook++;
     try {
       var path = pathPtr.isNull() ? '' : pathPtr.readUtf8String();
       var id = classifyFsPath(path);
-      if (!id) return;
-      var kn = KIND_NAMES[kind] || ('fn' + kind);
-      writeRoot(id, 'native.' + kn, path, '');
+      if (id) writeRoot(id, 'native.openat', path, '');
     } catch (e) {
     } finally {
       inNativeHook--;
     }
-  }, 'void', ['pointer', 'int']);
+  }, 'void', ['pointer']);
 
   try {
     var cm = new CModule([
       '#include <gum/guminterceptor.h>',
-      '#include <string.h>',
-      'extern void report_path(const char *p, int kind);',
+      'extern void report_path(const char *p);',
       'static int starts(const char *p, const char *pre) {',
       '  if (!p || !pre) return 0;',
       '  while (*pre) { if (*p++ != *pre++) return 0; }',
@@ -2354,52 +2386,14 @@ function _disabledNativeRootAccess() {
       '  if (n >= 3 && p[n-3] == \'/\' && p[n-2] == \'s\' && p[n-1] == \'u\') return 1;',
       '  return 0;',
       '}',
-      'void on_open(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
-      '  if (interesting(p)) report_path(p, 0);',
-      '}',
       'void on_openat(GumInvocationContext *ic) {',
       '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
-      '  if (interesting(p)) report_path(p, 1);',
-      '}',
-      'void on_access(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
-      '  if (interesting(p)) report_path(p, 2);',
-      '}',
-      'void on_faccessat(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
-      '  if (interesting(p)) report_path(p, 3);',
-      '}',
-      'void on_stat(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
-      '  if (interesting(p)) report_path(p, 4);',
-      '}',
-      'void on_lstat(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
-      '  if (interesting(p)) report_path(p, 5);',
-      '}',
-      'void on_fstatat(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
-      '  if (interesting(p)) report_path(p, 6);',
+      '  if (interesting(p)) report_path(p);',
       '}'
     ].join('\n'), { report_path: reportPath });
-
-    var map = [
-      ['open', cm.on_open], ['openat', cm.on_openat],
-      ['access', cm.on_access], ['faccessat', cm.on_faccessat],
-      ['stat', cm.on_stat], ['lstat', cm.on_lstat], ['fstatat', cm.on_fstatat]
-    ];
-    map.forEach(function (pair) {
-      try {
-        var addr = Module.findExportByName('libc.so', pair[0]);
-        if (addr && pair[1]) Interceptor.attach(addr, { onEnter: pair[1] });
-      } catch (e) {}
-    });
-  } catch (e) {
-    nativeFsHooked = false;
-    hookAccessJsFallback();
-  }
-  hookNativeDlsymAndConnect();
+    var addr = Module.findExportByName('libc.so', 'openat');
+    if (addr) Interceptor.attach(addr, { onEnter: cm.on_openat });
+  } catch (e) {}
 }
 
 function hookAccessJsFallback() {
@@ -3610,6 +3604,7 @@ function installJavaHooks() {
   hookMissedSurface();
   hookCatalogCompleteness();
   hookRootDetection();
+  hookNativeRootAccess();
 }
 
 try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
