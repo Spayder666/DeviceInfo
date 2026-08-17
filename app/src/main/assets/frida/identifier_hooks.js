@@ -579,16 +579,13 @@ function hookBuild() {
       };
     }
   } catch (e) {}
-  hookBuildGetstatic();
 }
 
-var buildGetstaticHooked = false;
-var buildWatchIds = [];
-var buildWatchValues = [];
-
 function hookBuildGetstatic() {
-  if (buildGetstaticHooked) return;
-  buildGetstaticHooked = true;
+  return;
+}
+
+function _disabledBuildGetstatic() {
   var reportBuild = new NativeCallback(function (idx) {
     inNativeHook++;
     try {
@@ -825,20 +822,6 @@ function hookMediaDrm() {
       writeEvent(id, 'MediaDrm.getPropertyString', k, safeStr(result), null);
       return result;
     };
-    try {
-      MD.$init.overloads.forEach(function (overload) {
-        overload.implementation = function () {
-          var uuid = safeStr(arguments[0]);
-          var id = 'drm.widevine_id';
-          if (/edef8ba9|widevine/i.test(uuid)) id = 'drm.widevine_id';
-          else if (/e2719d2a|clearkey/i.test(uuid)) id = 'drm.clearkey';
-          else if (/9a04f079|playready/i.test(uuid)) id = 'drm.playready';
-          else if (/3d5e6d35|wiseplay/i.test(uuid)) id = 'drm.wiseplay';
-          writeEvent(id, 'MediaDrm.<init>', uuid, '', null);
-          return overload.apply(this, arguments);
-        };
-      });
-    } catch (e) {}
   } catch (e) {}
 }
 
@@ -939,14 +922,6 @@ function hookAccounts() {
         });
       } catch (e) {}
     });
-  } catch (e) {}
-  try {
-    var Acc = Java.use('android.accounts.Account');
-    Acc.toString.implementation = function () {
-      var r = this.toString();
-      writeOnce('account.name', 'Account.toString', safeStr(this.type), safeStr(this.name), 'GET_ACCOUNTS');
-      return r;
-    };
   } catch (e) {}
 }
 
@@ -2332,6 +2307,10 @@ var nativeFsHooked = false;
 var KIND_NAMES = ['open', 'openat', 'access', 'faccessat', 'stat', 'lstat', 'fstatat'];
 
 function hookNativeRootAccess() {
+  return;
+}
+
+function _disabledNativeRootAccess() {
   if (nativeFsHooked) return;
   nativeFsHooked = true;
   var reportPath = new NativeCallback(function (pathPtr, kind) {
@@ -3656,7 +3635,6 @@ function installNativeEarly() {
   if (!nativeNetHooked) {
     try { hookNativeNetMeta(); nativeNetHooked = true; } catch (e) {}
   }
-  try { hookNativeRootAccess(); } catch (e) {}
 }
 
 installNativeEarly();
