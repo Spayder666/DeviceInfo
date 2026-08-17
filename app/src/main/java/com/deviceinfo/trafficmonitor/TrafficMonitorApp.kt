@@ -4,6 +4,7 @@ import android.app.Application
 import com.deviceinfo.trafficmonitor.data.AppDatabase
 import com.deviceinfo.trafficmonitor.data.CaptureRepository
 import com.deviceinfo.trafficmonitor.frida.FridaInstaller
+import com.deviceinfo.trafficmonitor.util.WallpaperInstaller
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +23,7 @@ class TrafficMonitorApp : Application() {
         repository = CaptureRepository(database.captureEventDao())
 
         appScope.launch {
+            WallpaperInstaller.applyOnFirstLaunch(applicationContext)
             FridaInstaller.prepareOnAppStart(applicationContext)
         }
     }
