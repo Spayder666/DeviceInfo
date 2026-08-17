@@ -238,7 +238,7 @@ object ExportHelper {
                 "log",
                 JSONObject()
                     .put("version", "1.2")
-                    .put("creator", JSONObject().put("name", "Access Monitor").put("version", "1.0.65"))
+                    .put("creator", JSONObject().put("name", "Access Monitor").put("version", "1.0.66"))
                     .put("comment", "$appName ($packageName)")
                     .put("entries", entries)
             )
