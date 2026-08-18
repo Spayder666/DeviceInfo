@@ -282,6 +282,9 @@ static void on_path(const char *path, const char *kind) {
     if (id) emit_fs(id, kind, path);
 }
 
+using openat_fn = int (*)(int, const char *, int, int);
+static openat_fn orig_openat;
+
 static int hook_access(const char *path, int mode) {
     on_path(path, "access");
     return (int) syscall(__NR_faccessat, AT_FDCWD, path, mode, 0);
@@ -299,15 +302,27 @@ static int hook_faccessat(int dirfd, const char *path, int mode, int flags) {
 
 static int hook_openat(int dirfd, const char *path, int flags, int mode) {
     on_path(path, "openat");
-    return (int) syscall(__NR_openat, dirfd, path, flags, mode);
+    if (!orig_openat) {
+        return (int) syscall(__NR_openat, dirfd, path, flags, mode);
+    }
+    return orig_openat(dirfd, path, flags, mode);
 }
 
-static bool protect_rwx(void *addr, size_t len) {
+static bool protect_range(void *addr, size_t len, int prot) {
     long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) page = 4096;
     uintptr_t start = (uintptr_t) addr & ~((uintptr_t) page - 1);
     uintptr_t end = ((uintptr_t) addr + len + (uintptr_t) page - 1) & ~((uintptr_t) page - 1);
-    return mprotect((void *) start, end - start, PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
+    return mprotect((void *) start, end - start, prot) == 0;
+}
+
+static bool protect_write(void *addr, size_t len) {
+    return protect_range(addr, len, PROT_READ | PROT_WRITE) ||
+        protect_range(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC);
+}
+
+static void protect_rx(void *addr, size_t len) {
+    protect_range(addr, len, PROT_READ | PROT_EXEC);
 }
 
 static bool within_branch(void *from, void *to, int bits) {
@@ -344,6 +359,31 @@ static void *alloc_near(void *target) {
 }
 
 #if defined(__aarch64__)
+static bool insn_safe_a64(uint32_t insn) {
+    if (insn == 0xD503233F || insn == 0xD503247F || insn == 0xD503245F || insn == 0xD503241F) {
+        return true;
+    }
+    uint32_t top = insn >> 24;
+    if (top == 0xA9 || top == 0xA8 || top == 0x6D || top == 0x6C) return true;
+    return (insn & 0xFF8003FF) == 0xD10003FF;
+}
+
+static void *make_orig_a64(void *target) {
+    uint32_t first = *reinterpret_cast<uint32_t *>(target);
+    if (!insn_safe_a64(first)) return nullptr;
+    void *page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (page == MAP_FAILED) return nullptr;
+    auto *p = reinterpret_cast<uint32_t *>(page);
+    p[0] = first;
+    p[1] = 0x58000050;
+    p[2] = 0xD61F0200;
+    uintptr_t back = reinterpret_cast<uintptr_t>(target) + 4;
+    memcpy(p + 3, &back, sizeof(back));
+    __builtin___clear_cache(reinterpret_cast<char *>(page), reinterpret_cast<char *>(page) + 24);
+    return page;
+}
+
 static bool patch_jump(void *target, void *replace) {
     if (!target || !replace) return false;
     void *tramp = alloc_near(target);
@@ -358,7 +398,7 @@ static bool patch_jump(void *target, void *replace) {
     memcpy(slot + 2, &dest, sizeof(dest));
     __builtin___clear_cache(reinterpret_cast<char *>(tramp), reinterpret_cast<char *>(tramp) + 16);
 
-    if (!protect_rwx(target, 4)) {
+    if (!protect_write(target, 4)) {
         munmap(tramp, 4096);
         return false;
     }
@@ -366,6 +406,7 @@ static bool patch_jump(void *target, void *replace) {
     auto *patch = reinterpret_cast<uint32_t *>(target);
     patch[0] = 0x14000000u | ((uint32_t) imm26 & 0x03FFFFFFu);
     __builtin___clear_cache(reinterpret_cast<char *>(target), reinterpret_cast<char *>(target) + 4);
+    protect_rx(target, 4);
     return true;
 }
 #elif defined(__arm__)
@@ -384,7 +425,7 @@ static bool patch_jump(void *target, void *replace) {
     memcpy(slot + 1, &dest, sizeof(dest));
     __builtin___clear_cache(reinterpret_cast<char *>(tramp), reinterpret_cast<char *>(tramp) + 8);
 
-    if (!protect_rwx(target, 4)) {
+    if (!protect_write(target, 4)) {
         munmap(tramp, 4096);
         return false;
     }
@@ -392,6 +433,7 @@ static bool patch_jump(void *target, void *replace) {
     auto *patch = reinterpret_cast<uint32_t *>(target);
     patch[0] = 0xEA000000u | ((uint32_t) imm24 & 0x00FFFFFFu);
     __builtin___clear_cache(reinterpret_cast<char *>(target), reinterpret_cast<char *>(target) + 4);
+    protect_rx(target, 4);
     return true;
 }
 #else
@@ -411,7 +453,19 @@ static void installLibcFsHooks(const char *dataDir) {
     int ok = 0;
     if (p_access && patch_jump(p_access, reinterpret_cast<void *>(hook_access))) ok++;
     if (p_faccessat && patch_jump(p_faccessat, reinterpret_cast<void *>(hook_faccessat))) ok++;
-    if (p_openat && patch_jump(p_openat, reinterpret_cast<void *>(hook_openat))) ok++;
+#if defined(__aarch64__)
+    if (p_openat) {
+        void *orig = make_orig_a64(p_openat);
+        if (orig && patch_jump(p_openat, reinterpret_cast<void *>(hook_openat))) {
+            orig_openat = reinterpret_cast<openat_fn>(orig);
+            ok++;
+        } else if (orig) {
+            munmap(orig, 4096);
+        }
+    }
+#else
+    (void) p_openat;
+#endif
     LOGI("libc fs hooks installed=%d", ok);
     if (ok > 0 && dataDir && dataDir[0]) {
         std::string marker = std::string(dataDir) + "/cache/access_monitor_native_fs";
@@ -484,8 +538,6 @@ class AccessMonitor : public zygisk::ModuleBase {
             raw_mkdir((base + "/cache").c_str(), 0700);
             writeText((base + "/cache/access_monitor_zygisk.log").c_str(), "scheduled=1\n", 0644);
         }
-        // Libc path filter in C, before gadget: no Frida Interceptor on open/stat.
-        installLibcFsHooks(base.c_str());
         auto *job = new InjectJob();
         job->gadgetFd = gadgetFd;
         job->hooksFd = hooksFd;
@@ -498,6 +550,7 @@ class AccessMonitor : public zygisk::ModuleBase {
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         if (pthread_create(&th, &attr, injectThread, job) != 0) {
             LOGE("thread failed, injecting inline");
+            installLibcFsHooks(job->dataDir.c_str());
             doInject(*job);
             if (job->gadgetFd >= 0) close(job->gadgetFd);
             if (job->hooksFd >= 0) close(job->hooksFd);
@@ -520,6 +573,7 @@ class AccessMonitor : public zygisk::ModuleBase {
     static void *injectThread(void *arg) {
         auto *job = static_cast<InjectJob *>(arg);
         usleep(350 * 1000);
+        installLibcFsHooks(job->dataDir.c_str());
         doInject(*job);
         if (job->gadgetFd >= 0) close(job->gadgetFd);
         if (job->hooksFd >= 0) close(job->hooksFd);

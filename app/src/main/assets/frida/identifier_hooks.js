@@ -579,7 +579,6 @@ function hookBuild() {
       };
     }
   } catch (e) {}
-  hookBuildGetstatic();
 }
 
 var buildWatchIds = [];
@@ -741,15 +740,12 @@ function hookBuildGetstatic() {
     });
   } catch (e) {}
 
-  // One compiled-code getter each. No libart enumerateSymbols / ArtField::Get*.
+  // Only the compiled-code object getter. get_32_static is every static int
+  // and crashes some apps; SDK_INT still comes from SystemProperties.
   attachNamedExport('libart.so', [
     'art_quick_get_obj_static',
     'artGetObjStaticFromCompiledCode'
   ], { onLeave: cm.on_get_obj_leave });
-  attachNamedExport('libart.so', [
-    'art_quick_get_32_static',
-    'artGet32StaticFromCompiledCode'
-  ], { onEnter: cm.on_get_field_enter });
 }
 
 function hookWifiAndBluetooth() {
@@ -2343,57 +2339,7 @@ function hookNativeRootAccess() {
     return;
   }
   hookAccessJsFallback();
-  hookOpenatCFilter();
   hookNativeDlsymAndConnect();
-}
-
-function hookOpenatCFilter() {
-  var reportPath = new NativeCallback(function (pathPtr) {
-    inNativeHook++;
-    try {
-      var path = pathPtr.isNull() ? '' : pathPtr.readUtf8String();
-      var id = classifyFsPath(path);
-      if (id) writeRoot(id, 'native.openat', path, '');
-    } catch (e) {
-    } finally {
-      inNativeHook--;
-    }
-  }, 'void', ['pointer']);
-
-  try {
-    var cm = new CModule([
-      '#include <gum/guminterceptor.h>',
-      'extern void report_path(const char *p);',
-      'static int starts(const char *p, const char *pre) {',
-      '  if (!p || !pre) return 0;',
-      '  while (*pre) { if (*p++ != *pre++) return 0; }',
-      '  return 1;',
-      '}',
-      'static int interesting(const char *p) {',
-      '  int n;',
-      '  const char *s;',
-      '  if (!p || p[0] == 0) return 0;',
-      '  if (p[0] == \'/\' && (',
-      '      starts(p, "/proc/") || starts(p, "/sys/") ||',
-      '      starts(p, "/dev/__properties") || starts(p, "/dev/qemu") ||',
-      '      starts(p, "/dev/goldfish") || starts(p, "/dev/gnss") ||',
-      '      starts(p, "/dev/gps") || starts(p, "/system/bin/su") ||',
-      '      starts(p, "/system/xbin/su") || starts(p, "/sbin/su") ||',
-      '      starts(p, "/su/bin/su") || starts(p, "/data/adb") ||',
-      '      starts(p, "/sbin/.magisk") || starts(p, "/debug_ramdisk"))) return 1;',
-      '  if (p[0] == \'s\' && p[1] == \'u\' && p[2] == 0) return 1;',
-      '  n = 0; s = p; while (*s) { n++; s++; }',
-      '  if (n >= 3 && p[n-3] == \'/\' && p[n-2] == \'s\' && p[n-1] == \'u\') return 1;',
-      '  return 0;',
-      '}',
-      'void on_openat(GumInvocationContext *ic) {',
-      '  const char *p = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
-      '  if (interesting(p)) report_path(p);',
-      '}'
-    ].join('\n'), { report_path: reportPath });
-    var addr = Module.findExportByName('libc.so', 'openat');
-    if (addr) Interceptor.attach(addr, { onEnter: cm.on_openat });
-  } catch (e) {}
 }
 
 function hookAccessJsFallback() {
@@ -3605,6 +3551,7 @@ function installJavaHooks() {
   hookCatalogCompleteness();
   hookRootDetection();
   hookNativeRootAccess();
+  hookBuildGetstatic();
 }
 
 try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}
