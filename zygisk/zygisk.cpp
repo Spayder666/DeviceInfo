@@ -24,34 +24,6 @@ static constexpr const char *kModuleDir = "/data/adb/modules/access_monitor";
 
 static char g_pkg[160];
 
-static int raw_open(const char *path, int flags, mode_t mode) {
-    return (int) syscall(__NR_openat, AT_FDCWD, path, flags, mode);
-}
-
-static int raw_mkdir(const char *path, mode_t mode) {
-    return (int) syscall(__NR_mkdirat, AT_FDCWD, path, mode);
-}
-
-static int raw_chmod(const char *path, mode_t mode) {
-    return (int) syscall(__NR_fchmodat, AT_FDCWD, path, mode, 0);
-}
-
-static int raw_stat(const char *path, struct stat *st) {
-#ifdef __NR_newfstatat
-    return (int) syscall(__NR_newfstatat, AT_FDCWD, path, st, 0);
-#else
-    return (int) syscall(__NR_fstatat64, AT_FDCWD, path, st, 0);
-#endif
-}
-
-static int raw_fstat(int fd, struct stat *st) {
-#ifdef __NR_fstat
-    return (int) syscall(__NR_fstat, fd, st);
-#else
-    return fstat(fd, st);
-#endif
-}
-
 static std::string jstringToStd(JNIEnv *env, jstring value) {
     if (!env || !value) return {};
     const char *raw = env->GetStringUTFChars(value, nullptr);
@@ -115,7 +87,7 @@ static bool copyFdToPath(int fd, const char *path, mode_t mode) {
     if (lseek(fd, 0, SEEK_SET) < 0 && errno != ESPIPE) {
         // memfd / pipe: ignore
     }
-    int out = raw_open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
+    int out = open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
     if (out < 0) return false;
     char buf[8192];
     ssize_t n;
@@ -133,12 +105,12 @@ static bool copyFdToPath(int fd, const char *path, mode_t mode) {
         if (!ok) break;
     }
     close(out);
-    raw_chmod(path, mode);
+    chmod(path, mode);
     return ok && n >= 0;
 }
 
 static void writeText(const char *path, const std::string &text, mode_t mode) {
-    int fd = raw_open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
+    int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
     if (fd < 0) return;
     auto *p = text.data();
     size_t left = text.size();
@@ -149,7 +121,15 @@ static void writeText(const char *path, const std::string &text, mode_t mode) {
         left -= static_cast<size_t>(w);
     }
     close(fd);
-    raw_chmod(path, mode);
+    chmod(path, mode);
+}
+
+static bool isTargetProcess(const std::string &nice, const std::string &target) {
+    if (target.empty() || nice.empty()) return false;
+    if (nice == target) return true;
+    // Main process is usually the package name. Isolated/UI helpers are pkg:name —
+    // still the monitored app, but do not inject gadget into them (they crash).
+    return false;
 }
 
 static int starts_with(const char *p, const char *pre) {
@@ -177,45 +157,18 @@ static int contains(const char *p, const char *needle) {
 static const char *classify_fs_path(const char *p) {
     if (!p || !p[0]) return nullptr;
     if (contains(p, "/sys/class/net/") && contains(p, "/address")) return "wifi.sysfs_mac";
-    if (contains(p, "/sys/class/bluetooth")) return "bt.sysfs_mac";
-    if (contains(p, "/sys/class/android_usb") && contains(p, "iserial")) return "sys.usb_serial";
-    if (contains(p, "/sys/class/thermal")) return "sys.thermal";
-    if (contains(p, "/sys/class/power_supply")) return "hw.battery_capacity";
-    if (contains(p, "/sys/devices/system/cpu") && contains(p, "cpufreq")) return "sys.cpu_freq";
-    if (contains(p, "/sys/devices/system/cpu")) return "sys.cpu";
-    if (contains(p, "/sys/block")) return "sys.block_cid";
     if (contains(p, "/proc/cpuinfo")) return "proc.cpuinfo";
     if (contains(p, "/proc/meminfo")) return "proc.meminfo";
     if (contains(p, "/proc/version")) return "proc.version";
-    if (contains(p, "boot_id")) return "proc.boot_id";
-    if (contains(p, "/proc/self/auxv")) return "proc.auxv";
-    if (contains(p, "/proc/uptime")) return "proc.uptime";
-    if (contains(p, "/proc/stat")) return "proc.stat";
-    if (contains(p, "/proc/self/mountinfo")) return "proc.mountinfo";
-    if (contains(p, "/proc/mounts") || contains(p, "/proc/self/mounts")) return "root.mounts";
-    if (contains(p, "/proc/net/arp")) return "proc.net_arp";
-    if (contains(p, "/proc/net/route")) return "net.route";
-    if (contains(p, "/dev/__properties")) return "proc.properties";
-    if (contains(p, "/dev/gnss") || contains(p, "/dev/gps")) return "location.hal";
     if (starts_with(p, "/system/bin/su") || starts_with(p, "/system/xbin/su") ||
         starts_with(p, "/sbin/su") || starts_with(p, "/su/bin/su") ||
         starts_with(p, "/data/adb") || starts_with(p, "/sbin/.magisk") ||
-        starts_with(p, "/debug_ramdisk") ||
         (p[0] == 's' && p[1] == 'u' && p[2] == 0)) {
         return "root.su";
     }
     size_t n = 0;
     for (const char *s = p; *s; s++) n++;
     if (n >= 3 && p[n - 3] == '/' && p[n - 2] == 's' && p[n - 1] == 'u') return "root.su";
-    if (contains(p, "magisk") || contains(p, "zygisk")) return "root.magisk";
-    if (contains(p, "lsposed") || contains(p, "/lspd") || contains(p, "lsplant")) return "root.lsposed";
-    if (contains(p, "xposed")) return "root.xposed";
-    if (contains(p, "frida") || contains(p, "gadget")) return "root.frida_detect";
-    if (contains(p, "/proc/self/maps") || contains(p, "/proc/self/smaps") ||
-        contains(p, "/proc/self/status") || contains(p, "/proc/self/task") ||
-        contains(p, "/proc/self/mounts") || contains(p, "/proc/net/tcp")) {
-        return "root.inject";
-    }
     if (starts_with(p, "/proc/") || starts_with(p, "/sys/")) return "proc.properties";
     return nullptr;
 }
@@ -226,40 +179,17 @@ static long long now_ms() {
     return (long long) tv.tv_sec * 1000LL + tv.tv_usec / 1000LL;
 }
 
-static void sanitize_path(const char *in, char *out, size_t cap) {
-    size_t n = 0;
-    for (; in && *in && n + 1 < cap; in++) {
-        unsigned char c = (unsigned char) *in;
-        out[n++] = (c < 32 || c == '"' || c == '\\') ? '_' : (char) c;
-    }
-    out[n] = 0;
-}
-
 static void emit_fs(const char *id, const char *kind, const char *path) {
     static __thread int reenter = 0;
-    if (reenter) return;
-    if (!id || !kind || !path || !g_pkg[0]) return;
-
-    static uint32_t last_hash[24];
-    static long long last_ms[24];
-    static int slot;
-    uint32_t h = 2166136261u;
-    for (const char *s = path; *s; s++) {
-        h ^= (unsigned char) *s;
-        h *= 16777619u;
+    if (reenter || !id || !kind || !path || !g_pkg[0]) return;
+    char safe[280];
+    size_t n = 0;
+    for (; *path && n + 1 < sizeof(safe); path++) {
+        unsigned char c = (unsigned char) *path;
+        safe[n++] = (c < 32 || c == '"' || c == '\\') ? '_' : (char) c;
     }
-    h ^= (unsigned char) kind[0];
-    long long t = now_ms();
-    for (int i = 0; i < 24; i++) {
-        if (last_hash[i] == h && t - last_ms[i] < 1200) return;
-    }
-    last_hash[slot] = h;
-    last_ms[slot] = t;
-    slot = (slot + 1) % 24;
-
-    char safe[360];
-    sanitize_path(path, safe, sizeof(safe));
-    char line[720];
+    safe[n] = 0;
+    char line[640];
     snprintf(
         line,
         sizeof(line),
@@ -270,7 +200,7 @@ static void emit_fs(const char *id, const char *kind, const char *path) {
         kind,
         safe,
         g_pkg,
-        t
+        now_ms()
     );
     reenter = 1;
     __android_log_print(ANDROID_LOG_INFO, "AccessMonFrida", "%s", line);
@@ -281,9 +211,6 @@ static void on_path(const char *path, const char *kind) {
     const char *id = classify_fs_path(path);
     if (id) emit_fs(id, kind, path);
 }
-
-using openat_fn = int (*)(int, const char *, int, int);
-static openat_fn orig_openat;
 
 static int hook_access(const char *path, int mode) {
     on_path(path, "access");
@@ -300,29 +227,12 @@ static int hook_faccessat(int dirfd, const char *path, int mode, int flags) {
     return (int) syscall(__NR_faccessat, dirfd, path, mode, flags);
 }
 
-static int hook_openat(int dirfd, const char *path, int flags, int mode) {
-    on_path(path, "openat");
-    if (!orig_openat) {
-        return (int) syscall(__NR_openat, dirfd, path, flags, mode);
-    }
-    return orig_openat(dirfd, path, flags, mode);
-}
-
 static bool protect_range(void *addr, size_t len, int prot) {
     long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) page = 4096;
     uintptr_t start = (uintptr_t) addr & ~((uintptr_t) page - 1);
     uintptr_t end = ((uintptr_t) addr + len + (uintptr_t) page - 1) & ~((uintptr_t) page - 1);
     return mprotect((void *) start, end - start, prot) == 0;
-}
-
-static bool protect_write(void *addr, size_t len) {
-    return protect_range(addr, len, PROT_READ | PROT_WRITE) ||
-        protect_range(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC);
-}
-
-static void protect_rx(void *addr, size_t len) {
-    protect_range(addr, len, PROT_READ | PROT_EXEC);
 }
 
 static bool within_branch(void *from, void *to, int bits) {
@@ -359,31 +269,6 @@ static void *alloc_near(void *target) {
 }
 
 #if defined(__aarch64__)
-static bool insn_safe_a64(uint32_t insn) {
-    if (insn == 0xD503233F || insn == 0xD503247F || insn == 0xD503245F || insn == 0xD503241F) {
-        return true;
-    }
-    uint32_t top = insn >> 24;
-    if (top == 0xA9 || top == 0xA8 || top == 0x6D || top == 0x6C) return true;
-    return (insn & 0xFF8003FF) == 0xD10003FF;
-}
-
-static void *make_orig_a64(void *target) {
-    uint32_t first = *reinterpret_cast<uint32_t *>(target);
-    if (!insn_safe_a64(first)) return nullptr;
-    void *page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (page == MAP_FAILED) return nullptr;
-    auto *p = reinterpret_cast<uint32_t *>(page);
-    p[0] = first;
-    p[1] = 0x58000050;
-    p[2] = 0xD61F0200;
-    uintptr_t back = reinterpret_cast<uintptr_t>(target) + 4;
-    memcpy(p + 3, &back, sizeof(back));
-    __builtin___clear_cache(reinterpret_cast<char *>(page), reinterpret_cast<char *>(page) + 24);
-    return page;
-}
-
 static bool patch_jump(void *target, void *replace) {
     if (!target || !replace) return false;
     void *tramp = alloc_near(target);
@@ -392,13 +277,14 @@ static bool patch_jump(void *target, void *replace) {
         return false;
     }
     auto *slot = reinterpret_cast<uint32_t *>(tramp);
-    slot[0] = 0x58000050; // LDR X16, #8
-    slot[1] = 0xD61F0200; // BR X16
+    slot[0] = 0x58000050;
+    slot[1] = 0xD61F0200;
     uintptr_t dest = reinterpret_cast<uintptr_t>(replace);
     memcpy(slot + 2, &dest, sizeof(dest));
     __builtin___clear_cache(reinterpret_cast<char *>(tramp), reinterpret_cast<char *>(tramp) + 16);
 
-    if (!protect_write(target, 4)) {
+    if (!protect_range(target, 4, PROT_READ | PROT_WRITE) &&
+        !protect_range(target, 4, PROT_READ | PROT_WRITE | PROT_EXEC)) {
         munmap(tramp, 4096);
         return false;
     }
@@ -406,71 +292,22 @@ static bool patch_jump(void *target, void *replace) {
     auto *patch = reinterpret_cast<uint32_t *>(target);
     patch[0] = 0x14000000u | ((uint32_t) imm26 & 0x03FFFFFFu);
     __builtin___clear_cache(reinterpret_cast<char *>(target), reinterpret_cast<char *>(target) + 4);
-    protect_rx(target, 4);
-    return true;
-}
-#elif defined(__arm__)
-static bool patch_jump(void *target, void *replace) {
-    if (!target || !replace) return false;
-    uintptr_t raw = reinterpret_cast<uintptr_t>(target);
-    if (raw & 1) return false;
-    void *tramp = alloc_near(target);
-    if (!tramp || !within_branch(target, tramp, 26)) {
-        if (tramp) munmap(tramp, 4096);
-        return false;
-    }
-    auto *slot = reinterpret_cast<uint32_t *>(tramp);
-    slot[0] = 0xE51FF004; // LDR PC, [PC, #-4]
-    uintptr_t dest = reinterpret_cast<uintptr_t>(replace);
-    memcpy(slot + 1, &dest, sizeof(dest));
-    __builtin___clear_cache(reinterpret_cast<char *>(tramp), reinterpret_cast<char *>(tramp) + 8);
-
-    if (!protect_write(target, 4)) {
-        munmap(tramp, 4096);
-        return false;
-    }
-    intptr_t imm24 = (reinterpret_cast<uint8_t *>(tramp) - reinterpret_cast<uint8_t *>(target) - 8) / 4;
-    auto *patch = reinterpret_cast<uint32_t *>(target);
-    patch[0] = 0xEA000000u | ((uint32_t) imm24 & 0x00FFFFFFu);
-    __builtin___clear_cache(reinterpret_cast<char *>(target), reinterpret_cast<char *>(target) + 4);
-    protect_rx(target, 4);
+    protect_range(target, 4, PROT_READ | PROT_EXEC);
     return true;
 }
 #else
 static bool patch_jump(void *, void *) { return false; }
 #endif
 
-static void installLibcFsHooks(const char *dataDir) {
+static void installAccessHooks() {
     void *libc = dlopen("libc.so", RTLD_NOW);
-    if (!libc) {
-        LOGE("dlopen libc failed");
-        return;
-    }
+    if (!libc) return;
     void *p_access = dlsym(libc, "access");
     void *p_faccessat = dlsym(libc, "faccessat");
-    void *p_openat = dlsym(libc, "openat");
-
     int ok = 0;
     if (p_access && patch_jump(p_access, reinterpret_cast<void *>(hook_access))) ok++;
     if (p_faccessat && patch_jump(p_faccessat, reinterpret_cast<void *>(hook_faccessat))) ok++;
-#if defined(__aarch64__)
-    if (p_openat) {
-        void *orig = make_orig_a64(p_openat);
-        if (orig && patch_jump(p_openat, reinterpret_cast<void *>(hook_openat))) {
-            orig_openat = reinterpret_cast<openat_fn>(orig);
-            ok++;
-        } else if (orig) {
-            munmap(orig, 4096);
-        }
-    }
-#else
-    (void) p_openat;
-#endif
-    LOGI("libc fs hooks installed=%d", ok);
-    if (ok > 0 && dataDir && dataDir[0]) {
-        std::string marker = std::string(dataDir) + "/cache/access_monitor_native_fs";
-        writeText(marker.c_str(), "1\n", 0644);
-    }
+    LOGI("access hooks installed=%d", ok);
 }
 
 class AccessMonitor : public zygisk::ModuleBase {
@@ -497,7 +334,7 @@ class AccessMonitor : public zygisk::ModuleBase {
         if (tfd >= 0) close(tfd);
         if (dirfd >= 0) close(dirfd);
 
-        if (target.empty() || package.empty() || package != target) {
+        if (!isTargetProcess(package, target)) {
             api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
             return;
         }
@@ -523,19 +360,17 @@ class AccessMonitor : public zygisk::ModuleBase {
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *) override {
         if (!inject) return;
-        // Do not dlopen gadget on the specialize thread: Frida parses the
-        // whole script in its constructor and freezes many apps at startup.
-        // Keep this .so mapped (no DLCLOSE) so the delayed thread stays valid.
         std::string base = dataDir;
         if (base.empty() && !package.empty()) {
-            base = "/data/user/0/" + package;
+            base = "/data/user/0/" + package.substr(0, package.find(':'));
         }
         if (!package.empty()) {
-            strncpy(g_pkg, package.c_str(), sizeof(g_pkg) - 1);
+            std::string pkg = package.substr(0, package.find(':'));
+            strncpy(g_pkg, pkg.c_str(), sizeof(g_pkg) - 1);
             g_pkg[sizeof(g_pkg) - 1] = 0;
         }
         if (!base.empty()) {
-            raw_mkdir((base + "/cache").c_str(), 0700);
+            mkdir((base + "/cache").c_str(), 0700);
             writeText((base + "/cache/access_monitor_zygisk.log").c_str(), "scheduled=1\n", 0644);
         }
         auto *job = new InjectJob();
@@ -550,7 +385,6 @@ class AccessMonitor : public zygisk::ModuleBase {
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         if (pthread_create(&th, &attr, injectThread, job) != 0) {
             LOGE("thread failed, injecting inline");
-            installLibcFsHooks(job->dataDir.c_str());
             doInject(*job);
             if (job->gadgetFd >= 0) close(job->gadgetFd);
             if (job->hooksFd >= 0) close(job->hooksFd);
@@ -573,7 +407,6 @@ class AccessMonitor : public zygisk::ModuleBase {
     static void *injectThread(void *arg) {
         auto *job = static_cast<InjectJob *>(arg);
         usleep(350 * 1000);
-        installLibcFsHooks(job->dataDir.c_str());
         doInject(*job);
         if (job->gadgetFd >= 0) close(job->gadgetFd);
         if (job->hooksFd >= 0) close(job->hooksFd);
@@ -587,7 +420,7 @@ class AccessMonitor : public zygisk::ModuleBase {
             return;
         }
         std::string cache = job.dataDir + "/cache";
-        raw_mkdir(cache.c_str(), 0700);
+        mkdir(cache.c_str(), 0700);
 
         std::string hooksPath = cache + "/access_monitor_hooks.js";
         std::string gadgetPath = cache + "/libfrida-gadget.so";
@@ -604,17 +437,17 @@ class AccessMonitor : public zygisk::ModuleBase {
         off_t expected = 0;
         if (job.gadgetFd >= 0) {
             struct stat src{};
-            if (raw_fstat(job.gadgetFd, &src) == 0) expected = src.st_size;
+            if (fstat(job.gadgetFd, &src) == 0) expected = src.st_size;
         }
         struct stat have{};
-        bool needCopy = raw_stat(gadgetPath.c_str(), &have) != 0 || have.st_size != expected || expected < 4096;
+        bool needCopy = stat(gadgetPath.c_str(), &have) != 0 || have.st_size != expected || expected < 4096;
         if (needCopy && !copyFdToPath(job.gadgetFd, gadgetPath.c_str(), 0700)) {
             writeText(logPath.c_str(), "copy_gadget=fail\n", 0644);
             LOGE("copy gadget failed");
             return;
         }
         struct stat gst{};
-        if (raw_stat(gadgetPath.c_str(), &gst) != 0 || gst.st_size < 4096) {
+        if (stat(gadgetPath.c_str(), &gst) != 0 || gst.st_size < 4096) {
             writeText(logPath.c_str(), "copy_gadget=empty\n", 0644);
             LOGE("gadget too small");
             return;
@@ -626,6 +459,7 @@ class AccessMonitor : public zygisk::ModuleBase {
         writeText(logPath.c_str(), line, 0644);
         if (handle) {
             LOGI("gadget loaded in %s", job.package.c_str());
+            installAccessHooks();
         } else {
             LOGE("dlopen failed: %s", err ? err : "?");
         }
@@ -635,6 +469,9 @@ class AccessMonitor : public zygisk::ModuleBase {
 static void companion(int client) {
     int gadget = open((std::string(kModuleDir) + "/libfrida-gadget.so").c_str(), O_RDONLY);
     int hooks = open((std::string(kModuleDir) + "/hooks.js").c_str(), O_RDONLY);
+    char status[160];
+    snprintf(status, sizeof(status), "companion gadget=%d hooks=%d\n", gadget >= 0, hooks >= 0);
+    writeText((std::string(kModuleDir) + "/last_status").c_str(), status, 0644);
     if (gadget >= 0) {
         sendFd(client, gadget);
         close(gadget);

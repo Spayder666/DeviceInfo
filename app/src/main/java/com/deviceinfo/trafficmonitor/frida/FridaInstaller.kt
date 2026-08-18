@@ -322,6 +322,9 @@ object FridaInstaller {
             }
 
             val zlog = ZygiskModule.readLog(packageName)
+            val moduleStatus = RootShell.execAndRead(
+                "cat /data/adb/modules/access_monitor/last_status 2>/dev/null"
+            ).trim()
             val gadgetLog = stripAnsi(
                 RootShell.execAndRead(
                     "logcat -d -v brief -t 200 -s AccessMonZygisk:I AccessMonFrida:I Gadget:I frida:I frida-gadget:I 2>/dev/null"
@@ -333,10 +336,12 @@ object FridaInstaller {
                     "Gadget в процессе есть, но скрипт не ответил. $zlog ${gadgetLog.take(160)}"
                 "scheduled=1" in zlog ->
                     "Zygisk отложил загрузку, но скрипт не ответил. Перезапустите цель ещё раз. ${gadgetLog.take(160)}"
+                zlog.isBlank() && moduleStatus.contains("gadget=0") ->
+                    "В модуле нет frida-gadget. Нажмите + Frida ещё раз, затем перезагрузите телефон. $moduleStatus"
                 zlog.isBlank() ->
-                    "Zygisk не загрузился в цель. Zygisk включён? Приложение не в DenyList? После установки модуля была перезагрузка? ${gadgetLog.take(160)}"
+                    "Zygisk не загрузился в цель. Zygisk включён? Приложение не в DenyList? После установки модуля была перезагрузка? $moduleStatus ${gadgetLog.take(160)}"
                 else ->
-                    "Zygisk: $zlog ${gadgetLog.take(160)}"
+                    "Zygisk: $zlog $moduleStatus ${gadgetLog.take(160)}"
             }
             false
         }
