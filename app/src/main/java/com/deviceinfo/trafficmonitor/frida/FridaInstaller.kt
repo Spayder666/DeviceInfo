@@ -134,12 +134,11 @@ object FridaInstaller {
     private fun writeGadgetConfig(packageName: String) {
         val uid = RootShell.getUid(packageName)
         val hookInApp = "/data/user/0/$packageName/cache/access_monitor_hooks.js"
-        val bootInApp = "/data/user/0/$packageName/cache/access_monitor_boot.js"
         val mkdir = "mkdir -p /data/user/0/$packageName/cache"
-        val copy = "cp $HOOKS_PATH $hookInApp && cp $BOOT_PATH $bootInApp && chmod 644 $hookInApp $bootInApp"
-        val chown = if (uid != null) "chown $uid:$uid $hookInApp $bootInApp" else "true"
+        val copy = "cp $HOOKS_PATH $hookInApp && chmod 644 $hookInApp"
+        val chown = if (uid != null) "chown $uid:$uid $hookInApp" else "true"
         RootShell.execAndRead("$mkdir && $copy && $chown")
-        val json = """{"interaction":{"type":"script","path":"$bootInApp"}}"""
+        val json = """{"interaction":{"type":"script","path":"$hookInApp"}}"""
         val local = File.createTempFile("am_gadget", ".json")
         local.writeText(json)
         RootShell.execAndRead(
@@ -151,34 +150,12 @@ object FridaInstaller {
         local.delete()
     }
 
-    /** Короткий boot: только console.log. Полный скрипт хуков eval после старта цели. */
+    /** Только console.log — без Module/Java. Если и это Aborted, виноват attach, не хуки. */
     private fun writeBootScript(packageName: String) {
-        val hooksInApp = "/data/user/0/$packageName/cache/access_monitor_hooks.js"
         val js = """
             'use strict';
-            var line = '{"identifierId":"frida.boot","action":"Frida: скрипт загружен","request":"$packageName","response":"boot","package":"$packageName","timestamp":' + Date.now() + ',"source":"frida","nonce":"$lastNonce"}';
-            try { console.log('AMF ' + line); } catch (e) {}
-            setTimeout(function () {
-              try {
-                var fopen = new NativeFunction(Module.findExportByName('libc.so', 'fopen'), 'pointer', ['pointer', 'pointer']);
-                var fread = new NativeFunction(Module.findExportByName('libc.so', 'fread'), 'int', ['pointer', 'int', 'int', 'pointer']);
-                var fclose = new NativeFunction(Module.findExportByName('libc.so', 'fclose'), 'int', ['pointer']);
-                var fseek = new NativeFunction(Module.findExportByName('libc.so', 'fseek'), 'int', ['pointer', 'int64', 'int']);
-                var ftell = new NativeFunction(Module.findExportByName('libc.so', 'ftell'), 'int64', ['pointer']);
-                var path = Memory.allocUtf8String('$hooksInApp');
-                var mode = Memory.allocUtf8String('rb');
-                var fp = fopen(path, mode);
-                if (fp.isNull()) return;
-                fseek(fp, 0, 2);
-                var sz = parseInt(ftell(fp), 10);
-                fseek(fp, 0, 0);
-                if (!(sz > 0) || sz > 2500000) { fclose(fp); return; }
-                var buf = Memory.alloc(sz + 1);
-                fread(buf, 1, sz, fp);
-                fclose(fp);
-                eval(buf.readUtf8String(sz));
-              } catch (e) {}
-            }, 2000);
+            var line = '{"identifierId":"frida.boot","action":"Frida: скрипт загружен","request":"$packageName","response":"canary","package":"$packageName","timestamp":' + Date.now() + ',"source":"frida","nonce":"$lastNonce"}';
+            console.log('AMF ' + line);
         """.trimIndent()
         val local = File.createTempFile("am_boot", ".js")
         local.writeText(js)
@@ -345,9 +322,6 @@ object FridaInstaller {
             }
 
             val zlog = ZygiskModule.readLog(packageName)
-            val moduleStatus = RootShell.execAndRead(
-                "cat /data/adb/modules/access_monitor/last_status 2>/dev/null"
-            ).trim()
             val gadgetLog = stripAnsi(
                 RootShell.execAndRead(
                     "logcat -d -v brief -t 200 -s AccessMonZygisk:I AccessMonFrida:I Gadget:I frida:I frida-gadget:I 2>/dev/null"
@@ -359,12 +333,10 @@ object FridaInstaller {
                     "Gadget в процессе есть, но скрипт не ответил. $zlog ${gadgetLog.take(160)}"
                 "scheduled=1" in zlog ->
                     "Zygisk отложил загрузку, но скрипт не ответил. Перезапустите цель ещё раз. ${gadgetLog.take(160)}"
-                zlog.isBlank() && moduleStatus.contains("gadget=0") ->
-                    "В модуле нет frida-gadget. Нажмите + Frida ещё раз, затем перезагрузите телефон. $moduleStatus"
                 zlog.isBlank() ->
-                    "Zygisk не загрузился в цель. Zygisk включён? Приложение не в DenyList? После установки модуля была перезагрузка? $moduleStatus ${gadgetLog.take(160)}"
+                    "Zygisk не загрузился в цель. Zygisk включён? Приложение не в DenyList? После установки модуля была перезагрузка? ${gadgetLog.take(160)}"
                 else ->
-                    "Zygisk: $zlog $moduleStatus ${gadgetLog.take(160)}"
+                    "Zygisk: $zlog ${gadgetLog.take(160)}"
             }
             false
         }
