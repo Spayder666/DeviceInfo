@@ -1,0 +1,28 @@
+# Android
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+**/build/
+/release/
+/app/src/main/assets/frida/*/libfrida-gadget.so
+/app/src/main/assets/frida/*/frida-inject
+/app/src/main/assets/frida/*/AndKittyInjector
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.ap_
+*.aab
+
+# Gradle
+gradle-app.setting
+!gradle-wrapper.jar
+
+# Keystore
+*.jks
+*.keystore
+
+# Log
+*.log
