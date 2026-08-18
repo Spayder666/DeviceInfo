@@ -1203,35 +1203,53 @@ function hookLocation() {
 function hookNativeProperties() {
   var addr = Module.findExportByName('libc.so', '__system_property_get');
   if (!addr) return;
-  try {
-    Interceptor.attach(addr, {
-      onEnter: function (args) {
-        inNativeHook++;
-        try {
-          this.key = Memory.readUtf8String(args[0]);
-          this.valueBuf = args[1];
-        } catch (e) {
-          this.key = '';
-        }
-      },
-      onLeave: function (retval) {
-        try {
-          if (!isInterestingProperty(this.key)) return;
-          var response;
-          var len = retval.toInt32();
-          if (len > 0 && this.valueBuf) {
-            response = Memory.readUtf8String(this.valueBuf);
-          } else if (len === 0) {
-            response = '(пусто — не найдено или access denied)';
-          } else {
-            response = '(ошибка, код=' + len + ')';
-          }
-          writeEvent(mapPropertyToId(this.key), '__system_property_get', this.key, response, null, { async: true });
-        } finally {
-          inNativeHook--;
-        }
+  var reportProp = new NativeCallback(function (keyPtr, valPtr, len) {
+    inNativeHook++;
+    try {
+      var key = keyPtr.isNull() ? '' : keyPtr.readUtf8String();
+      if (!isInterestingProperty(key)) return;
+      var response = '';
+      if (len > 0 && valPtr && !valPtr.isNull()) {
+        try { response = valPtr.readUtf8String(); } catch (e) { response = ''; }
+      } else if (len === 0) {
+        response = '(пусто — не найдено или access denied)';
       }
-    });
+      writeEvent(mapPropertyToId(key), '__system_property_get', key, response, null, { async: true });
+    } catch (e) {
+    } finally {
+      inNativeHook--;
+    }
+  }, 'void', ['pointer', 'pointer', 'int']);
+  try {
+    var cm = new CModule([
+      '#include <gum/guminterceptor.h>',
+      '#include <stdint.h>',
+      '#include <string.h>',
+      'extern void report_prop(const char *k, const char *v, int len);',
+      'static int starts(const char *p, const char *pre) {',
+      '  if (!p || !pre) return 0;',
+      '  while (*pre) { if (*p++ != *pre++) return 0; }',
+      '  return 1;',
+      '}',
+      'static int interesting(const char *k) {',
+      '  if (!k || !k[0]) return 0;',
+      '  if (starts(k, "ro.product.") || starts(k, "ro.build.") || starts(k, "ro.boot.") ||',
+      '      starts(k, "ro.serial") || starts(k, "ro.soc.") || starts(k, "ro.hardware") ||',
+      '      starts(k, "persist.radio") || starts(k, "gsm.") || starts(k, "persist.sys.timezone") ||',
+      '      starts(k, "persist.sys.locale") || starts(k, "init.svc.magisk") ||',
+      '      starts(k, "ro.magisk") || starts(k, "persist.zygisk") || starts(k, "ro.lsposed")) return 1;',
+      '  return 0;',
+      '}',
+      'void on_prop_leave(GumInvocationContext *ic) {',
+      '  const char *k = (const char *) gum_invocation_context_get_nth_argument(ic, 0);',
+      '  const char *v = (const char *) gum_invocation_context_get_nth_argument(ic, 1);',
+      '  int len;',
+      '  if (!interesting(k)) return;',
+      '  len = (int) (intptr_t) gum_invocation_context_get_return_value(ic);',
+      '  report_prop(k, v, len);',
+      '}'
+    ].join('\n'), { report_prop: reportProp });
+    Interceptor.attach(addr, { onLeave: cm.on_prop_leave });
   } catch (e) {}
 }
 
@@ -1707,26 +1725,7 @@ function hookSniAndIntent() {
 
 function hookNativeNetMeta() {
   try {
-    var getaddr = Module.findExportByName('libc.so', 'getaddrinfo');
-    if (getaddr) {
-      Interceptor.attach(getaddr, {
-        onEnter: function (args) {
-          inNativeHook++;
-          try { this.host = Memory.readUtf8String(args[0]); } catch (e) { this.host = ''; }
-        },
-        onLeave: function () {
-          try {
-            if (this.host && looksSensitive(this.host)) {
-              writeEvent('net.dns', 'getaddrinfo', this.host, '', null, { async: true });
-            }
-          } finally { inNativeHook--; }
-        }
-      });
-    }
-  } catch (e) {}
-  try {
-    var sni = Module.findExportByName('libssl.so', 'SSL_get_servername') ||
-      Module.findExportByName('libssl.so', 'SSL_get_servername');
+    var sni = Module.findExportByName('libssl.so', 'SSL_get_servername');
     if (sni) {
       Interceptor.attach(sni, {
         onLeave: function (retval) {
@@ -1736,28 +1735,6 @@ function hookNativeNetMeta() {
             if (name) writeEvent('net.sni', 'SSL_get_servername', name, '', null, { async: true });
           } catch (e) {}
           inNativeHook--;
-        }
-      });
-    }
-  } catch (e) {}
-  try {
-    var dlopen = Module.findExportByName(null, 'android_dlopen_ext') ||
-      Module.findExportByName('libdl.so', 'dlopen');
-    if (dlopen) {
-      Interceptor.attach(dlopen, {
-        onEnter: function (args) {
-          inNativeHook++;
-          try { this.path = Memory.readUtf8String(args[0]); } catch (e) { this.path = ''; }
-        },
-        onLeave: function () {
-          try {
-            if (this.path && /loc|gps|gnss|map|cronet|okhttp|mqtt/i.test(this.path)) {
-              writeEvent('location.hal', 'dlopen', this.path, 'loaded', null, { async: true });
-            }
-            if (this.path && /magisk|zygisk|xposed|lsposed|frida|gadget|riru|substrate/i.test(this.path)) {
-              writeRoot('root.maps', 'dlopen', this.path, 'loaded');
-            }
-          } finally { inNativeHook--; }
         }
       });
     }
@@ -3550,8 +3527,6 @@ function installJavaHooks() {
   hookMissedSurface();
   hookCatalogCompleteness();
   hookRootDetection();
-  hookNativeRootAccess();
-  hookBuildGetstatic();
 }
 
 try { writeEvent('frida.boot', 'Frida: скрипт загружен', TARGET_PKG, EVENT_FILES[0], null); } catch (e) {}

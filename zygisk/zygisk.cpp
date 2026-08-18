@@ -310,6 +310,12 @@ static void installAccessHooks() {
     LOGI("access hooks installed=%d", ok);
 }
 
+static void *accessLaterThread(void *) {
+    usleep(4000 * 1000);
+    installAccessHooks();
+    return nullptr;
+}
+
 class AccessMonitor : public zygisk::ModuleBase {
     zygisk::Api *api = nullptr;
     JNIEnv *env = nullptr;
@@ -464,6 +470,12 @@ class AccessMonitor : public zygisk::ModuleBase {
         writeText(logPath.c_str(), line, 0644);
         if (handle) {
             LOGI("gadget loaded in %s", job.package.c_str());
+            pthread_t ath{};
+            pthread_attr_t aattr{};
+            pthread_attr_init(&aattr);
+            pthread_attr_setdetachstate(&aattr, PTHREAD_CREATE_DETACHED);
+            pthread_create(&ath, &aattr, accessLaterThread, nullptr);
+            pthread_attr_destroy(&aattr);
         } else {
             LOGE("dlopen failed: %s", err ? err : "?");
         }
