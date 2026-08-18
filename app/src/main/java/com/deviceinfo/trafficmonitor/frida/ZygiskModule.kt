@@ -105,8 +105,8 @@ object ZygiskModule {
             val prop = """
                 id=access_monitor
                 name=Access Monitor
-                version=v1.0.69
-                versionCode=69
+                version=v1.0.70
+                versionCode=70
                 author=AccessMonitor
                 description=Loads Frida gadget into the monitored app
             """.trimIndent()
@@ -132,12 +132,13 @@ object ZygiskModule {
     fun writePayload(packageName: String) {
         val uid = RootShell.getUid(packageName)
         val hookInApp = "/data/user/0/$packageName/cache/access_monitor_hooks.js"
+        val bootInApp = "/data/user/0/$packageName/cache/access_monitor_boot.js"
         val cfgInApp = "/data/user/0/$packageName/cache/libfrida-gadget.config.so"
-        val cfg = """{"interaction":{"type":"script","path":"$hookInApp"}}"""
+        val cfg = """{"interaction":{"type":"script","path":"$bootInApp"}}"""
         val localCfg = File.createTempFile("am_zg", ".json")
         localCfg.writeText(cfg)
         val chown = if (uid != null) {
-            "chown $uid:$uid $hookInApp $cfgInApp ${zygiskLogPath(packageName)} 2>/dev/null"
+            "chown $uid:$uid $hookInApp $bootInApp $cfgInApp ${zygiskLogPath(packageName)} 2>/dev/null"
         } else {
             "true"
         }
@@ -146,8 +147,9 @@ object ZygiskModule {
                 "printf '%s\\n' ${RootShell.shellQuote(packageName)} > $TARGET_PATH && " +
                 "cp ${FridaInstaller.HOOKS_PATH} $MODULE_HOOKS && " +
                 "cp ${FridaInstaller.HOOKS_PATH} $hookInApp && " +
+                "cp ${FridaInstaller.BOOT_PATH} $bootInApp && " +
                 "cp ${localCfg.absolutePath} $cfgInApp && " +
-                "chmod 644 $TARGET_PATH $MODULE_HOOKS $hookInApp $cfgInApp && " +
+                "chmod 644 $TARGET_PATH $MODULE_HOOKS $hookInApp $bootInApp $cfgInApp && " +
                 "rm -f ${zygiskLogPath(packageName)} && " +
                 chown
         )

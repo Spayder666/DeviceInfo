@@ -406,7 +406,7 @@ class AccessMonitor : public zygisk::ModuleBase {
 
     static void *injectThread(void *arg) {
         auto *job = static_cast<InjectJob *>(arg);
-        usleep(350 * 1000);
+        usleep(1200 * 1000);
         doInject(*job);
         if (job->gadgetFd >= 0) close(job->gadgetFd);
         if (job->hooksFd >= 0) close(job->hooksFd);
@@ -423,6 +423,7 @@ class AccessMonitor : public zygisk::ModuleBase {
         mkdir(cache.c_str(), 0700);
 
         std::string hooksPath = cache + "/access_monitor_hooks.js";
+        std::string bootPath = cache + "/access_monitor_boot.js";
         std::string gadgetPath = cache + "/libfrida-gadget.so";
         std::string configPath = cache + "/libfrida-gadget.config.so";
         std::string logPath = cache + "/access_monitor_zygisk.log";
@@ -430,8 +431,12 @@ class AccessMonitor : public zygisk::ModuleBase {
         if (job.hooksFd >= 0) {
             copyFdToPath(job.hooksFd, hooksPath.c_str(), 0644);
         }
+        struct stat bootSt{};
+        const char *scriptPath = (stat(bootPath.c_str(), &bootSt) == 0 && bootSt.st_size > 20)
+            ? bootPath.c_str()
+            : hooksPath.c_str();
         std::string cfg = std::string("{\"interaction\":{\"type\":\"script\",\"path\":\"") +
-            hooksPath + "\"}}";
+            scriptPath + "\"}}";
         writeText(configPath.c_str(), cfg, 0644);
 
         off_t expected = 0;
@@ -459,7 +464,6 @@ class AccessMonitor : public zygisk::ModuleBase {
         writeText(logPath.c_str(), line, 0644);
         if (handle) {
             LOGI("gadget loaded in %s", job.package.c_str());
-            installAccessHooks();
         } else {
             LOGE("dlopen failed: %s", err ? err : "?");
         }

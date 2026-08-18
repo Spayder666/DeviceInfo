@@ -3579,16 +3579,17 @@ function installNativeEarly() {
   }
 }
 
-installNativeEarly();
-try { tryInstallIdentifierHooks(); } catch (e) {}
-
-installTimer = setInterval(function () {
-  installTries++;
+setTimeout(function () {
+  try { installNativeEarly(); } catch (e) {}
   try { tryInstallIdentifierHooks(); } catch (e) {}
-  if (identifierHooksInstalled || installTries > 40) {
-    if (installTimer) clearInterval(installTimer);
-  }
-}, 80);
+  installTimer = setInterval(function () {
+    installTries++;
+    try { tryInstallIdentifierHooks(); } catch (e) {}
+    if (identifierHooksInstalled || installTries > 40) {
+      if (installTimer) clearInterval(installTimer);
+    }
+  }, 120);
+}, 400);
 
 setTimeout(function () {
   if (Java.available) {
@@ -3596,11 +3597,11 @@ setTimeout(function () {
       try { installJavaHooks(); } catch (e) {}
     });
   }
-  installNativeEarly();
+  try { installNativeEarly(); } catch (e) {}
   if (MITM_ENABLED) {
     try { installMitmHooks(); } catch (e) {}
   }
-}, 400);
+}, 1200);
 
 function truncateHttp(buf, maxLen) {
   maxLen = maxLen || 1800;
