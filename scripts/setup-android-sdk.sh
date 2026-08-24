@@ -30,6 +30,11 @@ install_apt_if_missing() {
 
 install_apt_if_missing curl unzip xz-utils
 
+if ! need_cmd java; then
+  echo "JDK 17+ is required (java not found on PATH)" >&2
+  exit 1
+fi
+
 mkdir -p "$ANDROID_SDK_ROOT"
 
 if [[ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then

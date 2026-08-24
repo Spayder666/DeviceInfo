@@ -53,21 +53,28 @@ Android-приложение, которое смотрит **что целев�
 - **Magisk с Zygisk** (или KernelSU + ZygiskNext) — хуки в процессе цели. Первый раз: + Frida, перезагрузка, снова + Frida
 - `strace` в системе (обычно `/system/bin/strace`)
 
-## Локальная загрузка
+## Локальный репозиторий
 
-На чистой машине (или в Cloud Agent) проект поднимается так:
+На `main` сейчас только заглушка README. Полные исходники Access Monitor — в этой ветке.
+
+Клонирование на свой компьютер:
 
 ```bash
+git clone https://github.com/Spayder666/DeviceInfo.git
+cd DeviceInfo
+git checkout cursor/load-project-locally-23fb
 bash scripts/setup-android-sdk.sh
 ./gradlew assembleDebug
 ```
+
+После слияния в `main` достаточно `git clone` без `checkout`.
 
 Скрипт ставит Android SDK (platform 35, build-tools 35.0.0) в `$HOME/android-sdk` и пишет `local.properties`.
 Нужны JDK 17+ (подойдёт 21), `curl`, `unzip`, `xz`.
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`
 
-Cloud Agent использует тот же bootstrap через `.cursor/environment.json`.
+Тот же bootstrap использует Cloud Agent через `.cursor/environment.json`.
 
 ## Использование
 
