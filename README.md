@@ -53,13 +53,21 @@ Android-приложение, которое смотрит **что целев�
 - **Magisk с Zygisk** (или KernelSU + ZygiskNext) — хуки в процессе цели. Первый раз: + Frida, перезагрузка, снова + Frida
 - `strace` в системе (обычно `/system/bin/strace`)
 
-## Сборка
+## Локальная загрузка
+
+На чистой машине (или в Cloud Agent) проект поднимается так:
 
 ```bash
+bash scripts/setup-android-sdk.sh
 ./gradlew assembleDebug
 ```
 
+Скрипт ставит Android SDK (platform 35, build-tools 35.0.0) в `$HOME/android-sdk` и пишет `local.properties`.
+Нужны JDK 17+ (подойдёт 21), `curl`, `unzip`, `xz`.
+
 APK: `app/build/outputs/apk/debug/app-debug.apk`
+
+Cloud Agent использует тот же bootstrap через `.cursor/environment.json`.
 
 ## Использование
 

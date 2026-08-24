@@ -1,0 +1,5 @@
+{
+  "install": "bash scripts/setup-android-sdk.sh",
+  "start": "",
+  "terminals": []
+}
